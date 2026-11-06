@@ -20,9 +20,10 @@ struct Params {
 @group(0) @binding(2) var present: texture_2d<f32>;
 
 fn sphere_uv(n: vec3f) -> vec2f {
-  let y = clamp(n.y, -1.0, 1.0);
-  if (length(vec2f(n.x, n.z)) <= 0.0) { return vec2f(0.0, acos(y) / PI); }
-  return vec2f(fract(atan2(n.z, n.x) / (2.0 * PI) + 0.5), acos(y) / PI);
+  let horizontal = length(n.xz);
+  let v = atan2(horizontal, n.y) / PI;
+  if (horizontal <= 0.0) { return vec2f(0.0, v); }
+  return vec2f(fract(atan2(n.z, n.x) / (2.0 * PI) + 0.5), v);
 }
 
 fn sphere(o: vec3f, d: vec3f, c: vec3f, r: f32) -> Query {

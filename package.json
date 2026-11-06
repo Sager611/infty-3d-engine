@@ -4,7 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"build:wasm": "wasm-pack build --target web --dev",
-		"build:web": "bun build web/app.ts --outdir dist --target browser --external '*' --minify",
+		"build:web": "bun build web/app.ts --outdir dist --target browser --external ./pkg/infty.js --minify",
 		"dev": "bun serve.ts",
 		"check": "tsc --noEmit && biome check --error-on-warnings web serve.ts index.html package.json tsconfig.json biome.json"
 	},

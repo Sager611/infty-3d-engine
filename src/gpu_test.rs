@@ -3,7 +3,7 @@ use std::{borrow::Cow, error::Error, sync::mpsc, time::Duration};
 use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
-use crate::math::{Ray, plane, sphere};
+use crate::math::{Ray, plane, pureweight, sphere};
 
 const SHADER: &str = include_str!("scene.wgsl");
 const TOLERANCE: f64 = 2.0e-4;
@@ -53,18 +53,22 @@ fn assert_results(actual: &[f32], expected: &[[f64; 16]]) {
                 actual[field].is_finite(),
                 "ray {index} field {field} is not finite"
             );
-            let actual = f64::from(actual[field]);
+            let actual_field = f64::from(actual[field]);
+            let expected_field = if field == 11 {
+                pureweight([f64::from(actual[3]), f64::from(actual[4])])
+            } else {
+                expected[field]
+            };
             let difference = if field == 3 {
-                let direct = (actual - expected[field]).abs();
+                let direct = (actual_field - expected_field).abs();
                 direct.min((1.0 - direct).abs())
             } else {
-                (actual - expected[field]).abs()
+                (actual_field - expected_field).abs()
             };
-            let limit = TOLERANCE * expected[field].abs().max(1.0);
+            let limit = TOLERANCE * expected_field.abs().max(1.0);
             assert!(
                 difference <= limit,
-                "ray {index} field {field}: {actual} != {} (limit {limit})",
-                expected[field]
+                "ray {index} field {field}: {actual_field} != {expected_field} (limit {limit})"
             );
         }
     }
@@ -73,6 +77,13 @@ fn assert_results(actual: &[f32], expected: &[[f64; 16]]) {
 async fn run_gpu() -> Result<(), Box<dyn Error>> {
     let rays = rays();
     let expected: Vec<[f64; 16]> = rays.iter().flat_map(|ray| cpu_results(*ray)).collect();
+    for packed in &expected {
+        // Keep the CPU packing check on the same UV inputs as pureweight.
+        assert_eq!(
+            packed[11].to_bits(),
+            pureweight([packed[3], packed[4]]).to_bits()
+        );
+    }
     let instance = wgpu::Instance::default();
     #[cfg(target_os = "linux")]
     let force_fallback_adapter = true;

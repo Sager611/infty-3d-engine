@@ -204,14 +204,15 @@ fn safe_normal(a: V, fallback: V) -> V {
 
 fn sphere_uv(n: V) -> [f64; 2] {
     let horizontal = n[0].hypot(n[2]);
+    let v = horizontal.atan2(n[1]) / std::f64::consts::PI;
     if horizontal <= 0.0 {
-        return [0.0, (n[1].clamp(-1.0, 1.0)).acos() / std::f64::consts::PI];
+        return [0.0, v];
     }
     let mut u = n[2].atan2(n[0]) / (2.0 * std::f64::consts::PI) + 0.5;
     if u >= 1.0 {
         u -= 1.0;
     }
-    [u, (n[1].clamp(-1.0, 1.0)).acos() / std::f64::consts::PI]
+    [u, v]
 }
 
 fn plane_uv(p: V, a: V, n: V) -> [f64; 2] {
@@ -250,6 +251,14 @@ mod tests {
         assert!(!s.hit);
         close(s.t, t);
         close(s.gap, gap);
+    }
+
+    #[test]
+    fn sphere_uv_preserves_tiny_polar_angle() {
+        let n = [1.0e-10, 1.0, 0.0];
+        let uv = sphere_uv(n);
+        assert!(uv[1] > 0.0);
+        close(uv[1], n[0].hypot(n[2]).atan2(n[1]) / std::f64::consts::PI);
     }
 
     #[test]

@@ -1,8 +1,20 @@
 // biome-ignore-all lint/nursery/useExplicitType: Strict TypeScript inference avoids contradictory redundant annotations.
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: This is vanilla DOM, not Qwik.
 import init, { Renderer } from "../pkg/infty.js";
+import {
+	ANGLE_LIMIT,
+	DEFAULT_VIEW,
+	MAX_DISTANCE,
+	MAX_RADIUS,
+	MIN_DISTANCE_GAP,
+	MIN_RADIUS,
+	parseView,
+	serializeView,
+	type View,
+	type ViewMode,
+	YAW_LIMIT,
+} from "./view.ts";
 
-type Mode = 0 | 1 | 2;
 interface Sample {
 	hit: boolean;
 	t: number;
@@ -17,9 +29,6 @@ interface Pointer {
 const browserPerformance: Performance & {
 	readonly memory?: Readonly<Record<"usedJSHeapSize", number>>;
 } = performance;
-const INITIAL_YAW = 0.45;
-const INITIAL_PITCH = 0.25;
-const INITIAL_DISTANCE = 5;
 const MIN_CANVAS_SIZE = 1;
 const MAX_CANVAS_WIDTH = 1440;
 const MAX_CANVAS_HEIGHT = 1000;
@@ -28,14 +37,9 @@ const SAMPLE_STRIDE = 16;
 const UV_U_OFFSET = 3;
 const UV_V_OFFSET = 4;
 const MIN_PROBE_VALUES = SAMPLE_STRIDE * 2;
-const ANGLE_LIMIT = 1.5;
-const YAW_LIMIT = 100;
 const MS_PER_SECOND = 1000;
-const MAX_DISTANCE = 20;
-const MIN_DISTANCE_GAP = 1e-4;
 const FOCUS_DISTANCE_FACTOR = 3;
-const MIN_RADIUS = 0.25;
-const MAX_RADIUS = 1.5;
+const HASH_SAVE_DELAY_MS = 150;
 const POINTER_SCALE = 0.008;
 const KEY_STEP = 0.08;
 const WHEEL_SCALE = 0.001;
@@ -78,6 +82,8 @@ const metrics = metricsNode;
 const inspector = inspectorNode;
 const status = statusNode;
 
+const initialView = parseView(location.hash);
+
 let renderer: Renderer | undefined;
 let wasmMemory: WebAssembly.Memory | undefined;
 let wasmStatus: "loading" | "available" | "unavailable" = "loading";
@@ -86,16 +92,17 @@ let pointerId: number | undefined;
 let previousX = 0;
 let previousY = 0;
 let lastPointer: Pointer | undefined;
-let yaw = 0.45;
-let pitch = 0.25;
-let distance = 5;
-let radius = 1;
-let mode: Mode = 0;
+let yaw = initialView.yaw;
+let pitch = initialView.pitch;
+let distance = initialView.distance;
+let radius = initialView.radius;
+let mode: ViewMode = initialView.mode;
 let renderedFrames = 0;
 let metricsFrames = 0;
 let metricsAt = performance.now();
 let cpuElapsedMs: number | undefined;
 let metricsTimer: number | undefined;
+let saveTimer: number | undefined;
 
 const clamp = (value: number, low: number, high: number): number => {
 	if (Number.isFinite(value)) {
@@ -111,7 +118,7 @@ const format = (value: number, digits = 3): string => {
 	return "—";
 };
 
-const readMode = (): Mode => {
+const readMode = (): ViewMode => {
 	if (modeSelect.value === "2") {
 		return 2;
 	}
@@ -134,6 +141,16 @@ const setStatus = (message: string): void => {
 	status.textContent = message;
 };
 
+const readView = (): View => ({ yaw, pitch, distance, radius, mode });
+
+const applyView = (view: View): void => {
+	yaw = view.yaw;
+	pitch = view.pitch;
+	distance = view.distance;
+	radius = view.radius;
+	mode = view.mode;
+};
+
 const updateControls = (): void => {
 	radiusInput.value = radius.toString();
 	radiusOutput.value = radius.toFixed(2);
@@ -141,12 +158,23 @@ const updateControls = (): void => {
 	focusButton.hidden = mode !== 2;
 };
 
+const saveView = (): void => {
+	saveTimer = undefined;
+	const hash = serializeView(readView());
+	if (location.hash !== hash) {
+		history.replaceState(null, "", hash);
+	}
+};
+
+const scheduleSave = (): void => {
+	if (saveTimer !== undefined) {
+		window.clearTimeout(saveTimer);
+	}
+	saveTimer = window.setTimeout(saveView, HASH_SAVE_DELAY_MS);
+};
+
 const resetView = (): void => {
-	yaw = INITIAL_YAW;
-	pitch = INITIAL_PITCH;
-	distance = INITIAL_DISTANCE;
-	radius = 1;
-	mode = 0;
+	applyView(DEFAULT_VIEW);
 	updateControls();
 	invalidate();
 };
@@ -252,6 +280,7 @@ const renderFrame = (): void => {
 };
 
 const invalidate = (): void => {
+	scheduleSave();
 	if (framePending) {
 		return;
 	}
@@ -409,6 +438,12 @@ canvas.addEventListener("keydown", (event: KeyboardEvent) => {
 
 window.addEventListener("resize", () => {
 	resizeCanvas();
+	invalidate();
+});
+
+window.addEventListener("hashchange", () => {
+	applyView(parseView(location.hash));
+	updateControls();
 	invalidate();
 });
 
