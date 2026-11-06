@@ -2,7 +2,7 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: This is vanilla DOM, not Qwik.
 import init, { Renderer } from "../pkg/infty.js";
 
-type Mode = 0 | 1;
+type Mode = 0 | 1 | 2;
 interface Sample {
 	hit: boolean;
 	t: number;
@@ -31,8 +31,9 @@ const MIN_PROBE_VALUES = SAMPLE_STRIDE * 2;
 const ANGLE_LIMIT = 1.5;
 const YAW_LIMIT = 100;
 const MS_PER_SECOND = 1000;
-const MIN_DISTANCE = 1;
 const MAX_DISTANCE = 20;
+const MIN_DISTANCE_GAP = 1e-4;
+const FOCUS_DISTANCE_FACTOR = 3;
 const MIN_RADIUS = 0.25;
 const MAX_RADIUS = 1.5;
 const POINTER_SCALE = 0.008;
@@ -46,6 +47,7 @@ const radiusNode = document.getElementById("radius");
 const radiusValueNode = document.getElementById("radius-value");
 const modeNode = document.getElementById("mode");
 const resetNode = document.getElementById("reset");
+const focusNode = document.getElementById("focus");
 const metricsNode = document.getElementById("metrics");
 const inspectorNode = document.getElementById("inspector");
 const statusNode = document.getElementById("status");
@@ -57,6 +59,7 @@ if (
 		radiusValueNode instanceof HTMLOutputElement &&
 		modeNode instanceof HTMLSelectElement &&
 		resetNode instanceof HTMLButtonElement &&
+		focusNode instanceof HTMLButtonElement &&
 		metricsNode instanceof HTMLOutputElement &&
 		inspectorNode instanceof HTMLOutputElement &&
 		statusNode instanceof HTMLOutputElement
@@ -70,6 +73,7 @@ const radiusInput = radiusNode;
 const radiusOutput = radiusValueNode;
 const modeSelect = modeNode;
 const resetButton = resetNode;
+const focusButton = focusNode;
 const metrics = metricsNode;
 const inspector = inspectorNode;
 const status = statusNode;
@@ -108,6 +112,9 @@ const format = (value: number, digits = 3): string => {
 };
 
 const readMode = (): Mode => {
+	if (modeSelect.value === "2") {
+		return 2;
+	}
 	if (modeSelect.value === "1") {
 		return 1;
 	}
@@ -131,13 +138,14 @@ const updateControls = (): void => {
 	radiusInput.value = radius.toString();
 	radiusOutput.value = radius.toFixed(2);
 	modeSelect.value = mode.toString();
+	focusButton.hidden = mode !== 2;
 };
 
 const resetView = (): void => {
 	yaw = INITIAL_YAW;
 	pitch = INITIAL_PITCH;
 	distance = INITIAL_DISTANCE;
-	radius = MIN_DISTANCE;
+	radius = 1;
 	mode = 0;
 	updateControls();
 	invalidate();
@@ -228,7 +236,7 @@ const renderFrame = (): void => {
 		renderer.render(
 			clamp(yaw, -YAW_LIMIT, YAW_LIMIT),
 			clamp(pitch, -ANGLE_LIMIT, ANGLE_LIMIT),
-			clamp(distance, MIN_DISTANCE, MAX_DISTANCE),
+			clamp(distance, radius + MIN_DISTANCE_GAP, MAX_DISTANCE),
 			clamp(radius, MIN_RADIUS, MAX_RADIUS),
 			mode,
 		);
@@ -277,7 +285,7 @@ const updateMetrics = (): void => {
 	if (browserMemory !== undefined) {
 		heap = `${toMiB(browserMemory.usedJSHeapSize)} MiB`;
 	}
-	metrics.textContent = `FPS ${fps} · CPU submission walltime ${cpu} ms · WASM ${wasm} · JS heap ${heap}`;
+	metrics.textContent = `FPS ${fps} · CPU ${cpu}ms · JS ${heap} / WASM ${wasm}`;
 };
 
 const startMetrics = (): void => {
@@ -299,18 +307,34 @@ const stopMetrics = (): void => {
 };
 
 const zoom = (amount: number): void => {
-	distance = clamp(distance * Math.exp(amount), MIN_DISTANCE, MAX_DISTANCE);
+	distance =
+		radius +
+		clamp(
+			Math.max(distance - radius, MIN_DISTANCE_GAP) * Math.exp(amount),
+			MIN_DISTANCE_GAP,
+			MAX_DISTANCE - radius,
+		);
 	invalidate();
 };
 
 radiusInput.addEventListener("input", () => {
 	radius = clamp(Number(radiusInput.value), MIN_RADIUS, MAX_RADIUS);
+	distance = clamp(distance, radius + MIN_DISTANCE_GAP, MAX_DISTANCE);
 	radiusOutput.value = radius.toFixed(2);
 	invalidate();
 });
 
 modeSelect.addEventListener("change", () => {
 	mode = readMode();
+	updateControls();
+	invalidate();
+});
+
+focusButton.addEventListener("click", () => {
+	yaw = Math.PI / 2;
+	pitch = 0;
+	distance = FOCUS_DISTANCE_FACTOR * radius;
+	updateControls();
 	invalidate();
 });
 

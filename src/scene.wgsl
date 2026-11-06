@@ -76,6 +76,13 @@ fn plane(o: vec3f, d: vec3f) -> Query {
     vec3f(0.0, 1.0, 0.0), vec2f(p.x, p.z));
 }
 
+fn pureweight(uv: vec2f) -> f32 {
+  let q = 2.0 * fract(uv) - vec2f(1.0);
+  let radius2 = dot(q, q);
+  if (radius2 == 0.0) { return 0.5; }
+  return 0.5 + 0.5 * cos(PI * log2(radius2) + 6.0 * atan2(q.y, q.x));
+}
+
 fn checker(uv: vec2f, scale: f32, a: vec3f, b: vec3f) -> vec3f {
   let q = floor(uv * scale);
   return select(a, b, fract((q.x + q.y) * 0.5) >= 0.5);
@@ -89,16 +96,22 @@ fn shadow(p: vec3f, n: vec3f, light: vec3f) -> f32 {
   return select(1.0, 0.25, q.hit && q.t < dist);
 }
 
-fn shade(q: Query, is_sphere: bool, light: vec3f) -> vec3f {
-  let sky = vec3f(0.93, 0.89, 0.82);
+fn shade(q: Query, is_sphere: bool, light: vec3f, mode: f32) -> vec3f {
+  let sky = vec3f(0.96862745, 0.9647059, 0.9490196);
   let l = normalize(light - q.p);
   let diffuse = max(dot(q.n, l), 0.0);
   if (is_sphere) {
-    let base = checker(q.uv, 12.0, vec3f(0.31, 0.40, 0.48), vec3f(0.48, 0.55, 0.59));
+    var base = checker(q.uv, 12.0, vec3f(0.31, 0.40, 0.48), vec3f(0.48, 0.55, 0.59));
+    if (mode == 2.0) {
+      base = mix(vec3f(0.31, 0.40, 0.48), vec3f(0.48, 0.55, 0.59), pureweight(q.uv));
+    }
     return base * (0.18 + 0.82 * diffuse);
   }
-  let base = checker(q.p.xz, 1.25, vec3f(0.91, 0.84, 0.72), vec3f(0.65, 0.55, 0.43));
-  return base * (0.28 + 0.72 * diffuse * shadow(q.p, q.n, light)) + sky * 0.02;
+  var base = checker(q.uv, 1.25, vec3f(0.78, 0.81, 0.82), vec3f(0.93, 0.94, 0.93));
+  if (mode == 2.0) {
+    base = mix(vec3f(0.78, 0.81, 0.82), vec3f(0.93, 0.94, 0.93), pureweight(q.uv));
+  }
+  return base * (0.6 + 0.4 * diffuse * shadow(q.p, q.n, light)) + sky * 0.02;
 }
 
 fn camera_origin(focus: vec3f, yaw: f32, pitch: f32, distance: f32) -> vec3f {
@@ -133,11 +146,11 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   }
 
   let light = vec3f(3.0, 5.0, 4.0);
-  var color = vec3f(0.93, 0.89, 0.82);
+  var color = vec3f(0.96862745, 0.9647059, 0.9490196);
   if (q.hit) {
-    color = shade(q, is_sphere, light);
+    color = shade(q, is_sphere, light, params.screen.z);
   }
-  if (params.screen.z > 0.5 && !sq.hit) {
+  if (params.screen.z == 1.0 && !sq.hit) {
     let halo = clamp(1.0 - sq.gap / 1.5, 0.0, 1.0);
     let uv_color = vec3f(sq.uv.x, sq.uv.y, 1.0 - sq.uv.x);
     color = mix(color, uv_color, halo * halo);
@@ -165,7 +178,7 @@ fn result(q: Query, o: vec3f, d: vec3f) -> ProbeResult {
   return ProbeResult(
     vec4f(h, q.t, q.gap, q.uv.x),
     vec4f(q.uv.y, q.p),
-    vec4f(q.n, 0.0),
+    vec4f(q.n, pureweight(q.uv)),
     vec4f(o + q.t * d, 0.0)
   );
 }

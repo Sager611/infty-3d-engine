@@ -19,7 +19,7 @@ pub struct Sample {
 }
 
 impl Sample {
-    pub const fn packed(self, ray: Ray) -> [f64; 16] {
+    pub fn packed(self, ray: Ray) -> [f64; 16] {
         [
             if self.hit { 1.0 } else { 0.0 },
             self.t,
@@ -32,12 +32,26 @@ impl Sample {
             self.n[0],
             self.n[1],
             self.n[2],
-            0.0,
+            pureweight(self.uv),
             self.t.mul_add(ray.d[0], ray.o[0]),
             self.t.mul_add(ray.d[1], ray.o[1]),
             self.t.mul_add(ray.d[2], ray.o[2]),
             0.0,
         ]
+    }
+}
+
+pub fn pureweight(uv: [f64; 2]) -> f64 {
+    let q = [
+        2.0f64.mul_add(uv[0] - uv[0].floor(), -1.0),
+        2.0f64.mul_add(uv[1] - uv[1].floor(), -1.0),
+    ];
+    let radius2 = q[0].mul_add(q[0], q[1] * q[1]);
+    if radius2 == 0.0 {
+        0.5
+    } else {
+        let phase = 6.0f64.mul_add(q[1].atan2(q[0]), std::f64::consts::PI * radius2.log2());
+        0.5f64.mul_add(phase.cos(), 0.5)
     }
 }
 
@@ -239,6 +253,25 @@ mod tests {
     }
 
     #[test]
+    fn pureweight_center_extrema_periodic_and_self_similar() {
+        assert!(pureweight([0.5, 0.5]).is_finite());
+        close(pureweight([0.5, 0.5]), 0.5);
+        close(pureweight([0.0, 0.5]), 1.0);
+        close(pureweight([0.5, 0.0]), 0.0);
+
+        let cases: [[f64; 2]; 3] = [[0.73, 0.42], [0.21, 0.87], [0.91, 0.18]];
+        for uv in cases {
+            close(pureweight(uv), pureweight([uv[0] + 2.0, uv[1] - 3.0]));
+            let q = [
+                2.0f64.mul_add(uv[0] - uv[0].floor(), -1.0),
+                2.0f64.mul_add(uv[1] - uv[1].floor(), -1.0),
+            ];
+            let half = [q[0].mul_add(0.25, 0.5), q[1].mul_add(0.25, 0.5)];
+            close(pureweight(uv), pureweight(half));
+        }
+    }
+
+    #[test]
     fn sphere_table_and_surface_invariants() {
         let cases = [
             (ray([0.0, 0.0, -3.0], [0.0, 0.0, 1.0]), true, 2.0, 0.0),
@@ -289,6 +322,7 @@ mod tests {
         close(packed[2], 2.0);
         close_v([packed[5], packed[6], packed[7]], s.p);
         close_v([packed[12], packed[13], packed[14]], r.o);
+        close(packed[11], pureweight(s.uv));
     }
 
     #[test]

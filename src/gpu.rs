@@ -193,6 +193,12 @@ impl Renderer {
         radius: f32,
         mode: u32,
     ) -> Result<(), JsValue> {
+        let mode = match mode {
+            0 => 0.0,
+            1 => 1.0,
+            2 => 2.0,
+            _ => return Err(js_error("render mode must be 0, 1, or 2")),
+        };
         if !yaw.is_finite()
             || !pitch.is_finite()
             || !distance.is_finite()
@@ -212,12 +218,7 @@ impl Renderer {
         ];
         let params = Params {
             view: [yaw, pitch, distance, radius],
-            screen: [
-                f32::from(self.width),
-                f32::from(self.height),
-                if mode > 0 { 1.0 } else { 0.0 },
-                0.0,
-            ],
+            screen: [f32::from(self.width), f32::from(self.height), mode, 0.0],
         };
         self.queue
             .write_buffer(&self.uniform, 0, bytemuck::cast_slice(&[params]));
