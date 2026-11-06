@@ -1,0 +1,31 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.3.8/schema.json",
+	"vcs": { "enabled": false },
+	"formatter": { "enabled": true, "formatWithErrors": false },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"a11y": "error",
+			"complexity": "error",
+			"correctness": "error",
+			"nursery": "error",
+			"performance": "error",
+			"security": "error",
+			"style": "error",
+			"suspicious": "error"
+		}
+	},
+	"html": {
+		"formatter": { "enabled": true },
+		"linter": { "enabled": true }
+	},
+	"css": {
+		"formatter": { "enabled": true },
+		"linter": { "enabled": true }
+	},
+	"javascript": {
+		"formatter": { "quoteStyle": "double", "semicolons": "always" },
+		"globals": ["Bun"]
+	},
+	"files": { "includes": ["**", "!dist", "!pkg"] }
+}

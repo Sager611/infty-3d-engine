@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+
+markdown_files=$(mktemp)
+trap 'rm -f -- "${markdown_files}"' EXIT
+git ls-files -z --cached --others --exclude-standard -- '*.md' > "${markdown_files}"
+while IFS= read -r -d '' file; do
+  awk '
+  function fail(message) {
+    print FILENAME ": " message > "/dev/stderr"
+    bad = 1
+  }
+  {
+    if ($0 !~ /^[[:space:]]*$/) {
+      last = NR
+      last_text = $0
+    }
+    if ($0 ~ /^##[[:space:]]+Changelog[[:space:]]*$/) {
+      changelog = NR
+      header = 0
+      separator = 0
+      rows = 0
+    } else if (changelog && NR > changelog) {
+      if ($0 ~ /^##[[:space:]]+/) {
+        fail("heading after final ## Changelog")
+      } else if ($0 ~ /^\|[[:space:]]*When[[:space:]]*\|[[:space:]]*Who[[:space:]]*\|[[:space:]]*What[[:space:]]*\|[[:space:]]*Why[[:space:]]*\|[[:space:]]*$/) {
+        header = 1
+      } else if (header && $0 ~ /^\|[[:space:]]*:?-{3,}:?[[:space:]]*\|[[:space:]]*:?-{3,}:?[[:space:]]*\|[[:space:]]*:?-{3,}:?[[:space:]]*\|[[:space:]]*:?-{3,}:?[[:space:]]*\|[[:space:]]*$/) {
+        separator = 1
+      } else if (separator && $0 ~ /^\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[[:space:]]*$/) {
+        rows++
+      }
+    }
+  }
+  END {
+    if (!changelog) fail("missing final ## Changelog")
+    if (last_text !~ /^\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[[:space:]]*$/) fail("final nonblank line is not a changelog row")
+    if (!header) fail("missing | When | Who | What | Why | header")
+    if (!separator) fail("missing four-column separator")
+    if (rows < 1) fail("missing changelog row")
+    if (bad) exit 1
+  }' "${file}"
+done < "${markdown_files}"
+
+if [[ ${CHECK_MARKDOWN_ONLY:-0} == 1 ]]; then
+  exit 0
+fi
+
+bash tests/hook.sh
+shellcheck --enable=all --severity=style check .githooks/pre-commit tests/hook.sh
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -Dwarnings
+cargo clippy --locked --lib --target wasm32-unknown-unknown -- -Dwarnings
+cargo test --locked --lib
+bun run build:wasm
+bun run check
+bun audit --audit-level low
+bun run build:web
+cargo deny check

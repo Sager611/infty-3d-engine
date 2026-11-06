@@ -1,0 +1,30 @@
+[advisories]
+ignore = []
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"
+skip = [
+    { crate = "hashbrown@0.16.1", reason = "gpu-allocator 0.28.0 requires hashbrown 0.16; indexmap 2.14.2 requires 0.17" },
+    { crate = "syn@2.0.119", reason = "windows-implement 0.60.2 requires syn 2; bytemuck and wasm-bindgen require syn 3" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

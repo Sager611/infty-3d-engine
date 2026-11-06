@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width,initial-scale=1">
+		<title>Infty 3D</title>
+		<style>
+		:root {
+			color: #28251f;
+			background: #f4efe7;
+			font:
+				14px / 1.4 ui-sans-serif,
+				system-ui,
+				sans-serif;
+		}
+		* {
+			box-sizing: border-box;
+		}
+		html,
+		body {
+			width: 100%;
+			height: 100%;
+			margin: 0;
+			overflow: hidden;
+		}
+		body {
+			background: radial-gradient(circle at 25% 10%, #fffdf7, #f4efe7 58%);
+		}
+		#viewport {
+			display: block;
+			width: 100vw;
+			height: 100vh;
+			outline: none;
+			cursor: grab;
+			touch-action: none;
+		}
+		#viewport:focus-visible {
+			box-shadow: inset 0 0 0 3px #816f57;
+		}
+		#viewport:active {
+			cursor: grabbing;
+		}
+		.glass {
+			position: fixed;
+			z-index: 1;
+			border: 1px solid rgba(65, 53, 38, 0.15);
+			border-radius: 14px;
+			background: rgba(255, 252, 245, 0.72);
+			box-shadow: 0 10px 35px rgba(93, 71, 42, 0.12);
+			backdrop-filter: blur(12px);
+		}
+		#controls {
+			top: 18px;
+			left: 18px;
+			width: min(260px, calc(100vw - 36px));
+			padding: 14px;
+		}
+		#metrics {
+			top: 18px;
+			right: 18px;
+			max-width: min(420px, calc(100vw - 36px));
+			padding: 8px 11px;
+			text-align: right;
+			color: #665e51;
+			font-size: 12px;
+		}
+		#status:empty {
+			display: none;
+		}
+		#status {
+			bottom: 18px;
+			left: 18px;
+			max-width: min(560px, calc(100vw - 36px));
+			padding: 8px 11px;
+			color: #7c3026;
+			white-space: normal;
+		}
+		#inspector {
+			right: 18px;
+			bottom: 18px;
+			width: min(370px, calc(100vw - 36px));
+			padding: 11px 13px;
+			color: #514b42;
+			font-variant-numeric: tabular-nums;
+		}
+		h1 {
+			margin: 0 0 10px;
+			font-size: 16px;
+			font-weight: 650;
+			letter-spacing: 0.01em;
+		}
+		label,
+		select,
+		button {
+			font: inherit;
+		}
+		label {
+			display: grid;
+			gap: 5px;
+			margin: 11px 0;
+		}
+		input[type="range"] {
+			width: 100%;
+			accent-color: #74614a;
+		}
+		output {
+			color: #74614a;
+		}
+		.row {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+		.row label {
+			flex: 1;
+			margin: 0;
+		}
+		select,
+		button {
+			border: 1px solid rgba(65, 53, 38, 0.2);
+			border-radius: 8px;
+			background: rgba(255, 255, 255, 0.46);
+			color: inherit;
+			padding: 7px 9px;
+		}
+		button {
+			cursor: pointer;
+		}
+		button:hover,
+		button:focus-visible,
+		select:focus-visible,
+		input:focus-visible {
+			outline: 2px solid #a58e6e;
+			outline-offset: 1px;
+		}
+		details {
+			margin-top: 12px;
+			color: #665e51;
+		}
+		summary {
+			cursor: pointer;
+		}
+		#inspector {
+			white-space: pre-line;
+		}
+		#inspector strong {
+			color: #302d27;
+			font-weight: 600;
+		}
+		#inspector p {
+			margin: 4px 0 0;
+		}
+		@media (max-width: 600px) {
+			#controls {
+				top: 0.5rem;
+				left: 0.5rem;
+				width: calc(50% - 0.75rem);
+				max-width: calc(100vw - 1rem);
+				padding: 11px;
+			}
+			#metrics {
+				top: 3.25rem;
+				right: 0.5rem;
+				width: calc(50% - 0.75rem);
+				max-width: calc(100vw - 1rem);
+				padding: 7px 9px;
+				font-size: 11px;
+				line-height: 1.3;
+				text-align: left;
+				white-space: normal;
+				overflow-wrap: anywhere;
+			}
+			#inspector {
+				right: 0.5rem;
+				bottom: 0.5rem;
+				width: calc(50% - 0.75rem);
+				max-width: calc(100vw - 1rem);
+				padding: 9px 10px;
+				font-size: 12px;
+				overflow-wrap: anywhere;
+			}
+			#status {
+				left: 0.5rem;
+				bottom: 0.5rem;
+				max-width: calc(50% - 0.75rem);
+			}
+		}
+		</style>
+	</head>
+	<body>
+		<canvas
+			id="viewport"
+			tabindex="0"
+			role="img"
+			aria-label="Interactive 3D ray intersection view"
+			title="Drag to orbit. Scroll to zoom. Arrow keys orbit; plus and minus zoom."
+		></canvas>
+
+		<section id="controls" class="glass" aria-label="Scene controls">
+			<h1>Ray study</h1>
+			<label for="radius">
+				Sphere radius <output id="radius-value">1.00</output>
+				<input
+					id="radius"
+					type="range"
+					min="0.25"
+					max="1.5"
+					step="0.01"
+					value="1"
+					title="Set sphere radius"
+					aria-describedby="radius-value"
+				>
+			</label>
+			<div class="row">
+				<label for="mode">
+					Display
+					<select id="mode" title="Choose the ray diagnostic display">
+						<option value="0">UV</option>
+						<option value="1">Gap</option>
+					</select>
+				</label>
+				<button id="reset" type="button" title="Restore the initial view">
+					Reset
+				</button>
+			</div>
+			<details>
+				<summary>Controls</summary>
+				<div>
+					Drag to orbit; scroll to zoom. Arrow keys orbit, +/− zoom, R resets.
+					Move the pointer to inspect both rays.
+				</div>
+			</details>
+		</section>
+
+		<output
+			id="metrics"
+			class="glass"
+			aria-label="Renderer metrics: FPS, CPU elapsed, WASM memory, JavaScript heap"
+		>
+			Loading
+		</output>
+		<output id="inspector" class="glass" aria-live="polite">
+			Move pointer over the canvas to probe.
+		</output>
+		<output id="status" class="glass" role="status" aria-live="polite"></output>
+		<script type="module" src="/dist/app.js"></script>
+	</body>
+</html>

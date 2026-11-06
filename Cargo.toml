@@ -1,0 +1,53 @@
+[package]
+name = "infty"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bytemuck = { version = "1", features = ["derive"] }
+wgpu = { version = "=30.0.1", default-features = false, features = ["wgsl"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "=30.0.1", default-features = false, features = ["webgpu"] }
+wasm-bindgen = "0.2.130"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3.107", features = ["HtmlCanvasElement"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { version = "=30.0.1", default-features = false, features = ["metal", "vulkan"] }
+
+[dev-dependencies]
+naga = { version = "=30.0.1", features = ["wgsl-in"] }
+pollster = "0.4"
+
+[lints.rust]
+unsafe_code = "forbid"
+warnings = "deny"
+missing_docs = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+undocumented_unsafe_blocks = "deny"
+
+[profile.dev]
+debug = 0
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false

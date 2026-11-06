@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+untracked=$(git ls-files --others --exclude-standard)
+cd -- "${repo_root}"
+if ! git diff --quiet || [[ -n "${untracked}" ]]; then
+  printf 'Stage all non-ignored changes before committing.\n' >&2
+  exit 1
+fi
+exec ./check
