@@ -3,7 +3,7 @@ use std::{borrow::Cow, error::Error, sync::mpsc, time::Duration};
 use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
-use crate::math::{Ray, plane, pureweight, sphere};
+use crate::math::{Ray, footprint, plane, pureweight, sphere};
 
 const SHADER: &str = include_str!("scene.wgsl");
 const TOLERANCE: f64 = 2.0e-4;
@@ -19,30 +19,45 @@ fn scene_shader_parses_and_validates() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const fn rays() -> [[f32; 8]; 11] {
+const fn rays() -> [[f32; 8]; 14] {
     [
-        [0.0, 1.0, -3.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-        [2.0, 1.0, -3.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-        [0.0, 1.0, 3.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-        [1.0, 1.0, -3.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-        [0.0, 3.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0],
-        [2.0, 3.0, 4.0, 0.0, 0.0, -1.0, 0.0, 0.0],
-        [2.0, 3.0, 4.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-        [2.0, 0.0, 4.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-        [2.0, -3.0, 4.0, 0.0, 0.0, -1.0, 0.0, 0.0],
-        [1e-7, 3.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0],
+        [0.0, 1.0, -3.0, 0.0, 0.0, 0.0, 1.0, 1.0],
+        [2.0, 1.0, -3.0, 0.0, 0.0, 0.0, 1.0, 2.0],
+        [0.0, 1.0, 3.0, 0.0, 0.0, 0.0, 1.0, 4.0],
+        [0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 8.0],
+        [1.0, 1.0, -3.0, 0.0, 0.0, 0.0, 1.0, 16.0],
+        [0.0, 3.0, 0.0, 0.0, 0.0, -1.0, 0.0, 32.0],
+        [2.0, 3.0, 4.0, 0.0, 0.0, -1.0, 0.0, 64.0],
+        [2.0, 3.0, 4.0, 0.0, 1.0, 0.0, 0.0, 128.0],
+        [2.0, 0.0, 4.0, 0.0, 1.0, 0.0, 0.0, 256.0],
+        [2.0, -3.0, 4.0, 0.0, 0.0, -1.0, 0.0, 512.0],
+        [1e-7, 3.0, 0.0, 0.0, 0.0, -1.0, 0.0, 768.0],
+        [0.137, 1.0, 0.243, 0.0, 0.0, -1.0, 0.0, 1_024.0],
+        [-0.2345, 0.001, 0.6789, 0.0, 0.0, -1.0, 0.0, 4_096.0],
+        [
+            -0.249_999_97,
+            0.001,
+            0.312_345,
+            0.0,
+            0.0,
+            -1.0,
+            0.0,
+            4_096.0,
+        ],
     ]
 }
 
 fn cpu_results(ray: [f32; 8]) -> [[f64; 16]; 2] {
+    let height = f64::from(ray[7]);
     let ray = Ray {
         o: [f64::from(ray[0]), f64::from(ray[1]), f64::from(ray[2])],
         d: [f64::from(ray[4]), f64::from(ray[5]), f64::from(ray[6])],
     };
+    let sphere_sample = sphere(ray, [0.0, 1.0, 0.0], 1.0);
+    let plane_sample = plane(ray, [0.0; 3], [0.0, 1.0, 0.0]);
     [
-        sphere(ray, [0.0, 1.0, 0.0], 1.0).packed(ray),
-        plane(ray, [0.0; 3], [0.0, 1.0, 0.0]).packed(ray),
+        sphere_sample.packed(ray, footprint(sphere_sample, ray, height, 1.0, true)),
+        plane_sample.packed(ray, footprint(plane_sample, ray, height, 1.0, false)),
     ]
 }
 
@@ -55,7 +70,10 @@ fn assert_results(actual: &[f32], expected: &[[f64; 16]]) {
             );
             let actual_field = f64::from(actual[field]);
             let expected_field = if field == 11 {
-                pureweight([f64::from(actual[3]), f64::from(actual[4])])
+                pureweight(
+                    [f64::from(actual[3]), f64::from(actual[4])],
+                    f64::from(actual[15]),
+                )
             } else {
                 expected[field]
             };
@@ -65,7 +83,11 @@ fn assert_results(actual: &[f32], expected: &[[f64; 16]]) {
             } else {
                 (actual_field - expected_field).abs()
             };
-            let limit = TOLERANCE * expected_field.abs().max(1.0);
+            let limit = if field == 15 {
+                TOLERANCE * expected_field.abs().max(1.0e-9)
+            } else {
+                TOLERANCE * expected_field.abs().max(1.0)
+            };
             assert!(
                 difference <= limit,
                 "ray {index} field {field}: {actual_field} != {expected_field} (limit {limit})"
@@ -81,7 +103,7 @@ async fn run_gpu() -> Result<(), Box<dyn Error>> {
         // Keep the CPU packing check on the same UV inputs as pureweight.
         assert_eq!(
             packed[11].to_bits(),
-            pureweight([packed[3], packed[4]]).to_bits()
+            pureweight([packed[3], packed[4]], packed[15]).to_bits()
         );
     }
     let instance = wgpu::Instance::default();

@@ -19,7 +19,7 @@ pub struct Sample {
 }
 
 impl Sample {
-    pub fn packed(self, ray: Ray) -> [f64; 16] {
+    pub fn packed(self, ray: Ray, rho: f64) -> [f64; 16] {
         [
             if self.hit { 1.0 } else { 0.0 },
             self.t,
@@ -32,27 +32,98 @@ impl Sample {
             self.n[0],
             self.n[1],
             self.n[2],
-            pureweight(self.uv),
+            pureweight(self.uv, rho),
             self.t.mul_add(ray.d[0], ray.o[0]),
             self.t.mul_add(ray.d[1], ray.o[1]),
             self.t.mul_add(ray.d[2], ray.o[2]),
-            0.0,
+            rho,
         ]
     }
 }
 
-pub fn pureweight(uv: [f64; 2]) -> f64 {
-    let q = [
-        2.0f64.mul_add(uv[0] - uv[0].floor(), -1.0),
-        2.0f64.mul_add(uv[1] - uv[1].floor(), -1.0),
+pub fn pureweight(uv: [f64; 2], rho: f64) -> f64 {
+    let rho = rho.clamp(0.0, 1.0);
+    let lod = (-(rho.max(1.0e-12) * 32.0).log2()).clamp(0.0, 18.0);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let level = lod.floor() as u32;
+    let t = smoothstep(0.0, 1.0, lod.fract());
+    let a = tile(uv, level, rho);
+    let b = tile(uv, level + 1, rho);
+    let c = tile(uv, level + 2, rho);
+    mix(mix(a, b, 0.4), mix(b, c, 0.4), t)
+}
+
+fn tile(uv: [f64; 2], level: u32, rho: f64) -> f64 {
+    let f = [
+        uv[0].abs() - uv[0].abs().floor(),
+        uv[1].abs() - uv[1].abs().floor(),
     ];
-    let radius2 = q[0].mul_add(q[0], q[1] * q[1]);
-    if radius2 == 0.0 {
-        0.5
-    } else {
-        let phase = 6.0f64.mul_add(q[1].atan2(q[0]), std::f64::consts::PI * radius2.log2());
-        0.5f64.mul_add(phase.cos(), 0.5)
+    let scale_u = 1u32 << level;
+    let scale = f64::from(scale_u);
+    let s = [f[0] * scale, f[1] * scale];
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let mut cell = [s[0].floor() as u32, s[1].floor() as u32];
+    let p = [s[0] - s[0].floor(), s[1] - s[1].floor()];
+    if uv[0] < 0.0 {
+        cell[0] = (0u32
+            .wrapping_sub(cell[0])
+            .wrapping_sub(u32::from(p[0] > 0.0)))
+            & (scale_u - 1);
     }
+    if uv[1] < 0.0 {
+        cell[1] = (0u32
+            .wrapping_sub(cell[1])
+            .wrapping_sub(u32::from(p[1] > 0.0)))
+            & (scale_u - 1);
+    }
+    let edge = p[0].min(1.0 - p[0]).min(p[1].min(1.0 - p[1]));
+    let mut hash = cell[0] ^ cell[1].wrapping_mul(0x9e37_79b9) ^ level.wrapping_mul(0x85eb_ca6b);
+    hash ^= hash >> 16;
+    hash = hash.wrapping_mul(0x7feb_352d);
+    hash ^= hash >> 15;
+    hash = hash.wrapping_mul(0x846c_a68b);
+    hash ^= hash >> 16;
+    let fill = 0.6f64.mul_add(f64::from(hash >> 24) / 255.0, 0.2);
+    let inside = smoothstep(0.0, rho.mul_add(scale, 0.04), edge);
+    let signal = mix(0.15, fill, inside);
+    mix(signal, 0.5, smoothstep(0.25, 1.0, rho * scale))
+}
+
+fn mix(a: f64, b: f64, t: f64) -> f64 {
+    b.mul_add(t, a * (1.0 - t))
+}
+
+fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * 2.0f64.mul_add(-t, 3.0)
+}
+
+pub fn footprint(sample: Sample, ray: Ray, height: f64, radius: f64, sphere: bool) -> f64 {
+    if !sample.hit
+        || !sample.t.is_finite()
+        || sample.t <= 0.0
+        || !height.is_finite()
+        || height <= 0.0
+    {
+        return 1.0;
+    }
+    let nd = ray.d[2].mul_add(
+        sample.n[2],
+        ray.d[1].mul_add(sample.n[1], ray.d[0] * sample.n[0]),
+    );
+    if !nd.is_finite() || nd.abs() == 0.0 {
+        return 1.0;
+    }
+    let density = if sphere {
+        let radial = sample.n[0].hypot(sample.n[2]);
+        if radial == 0.0 || !radius.is_finite() || radius <= 0.0 {
+            return 1.0;
+        }
+        (1.0 / std::f64::consts::PI).max(1.0 / (std::f64::consts::TAU * radial)) / radius
+    } else {
+        1.0
+    };
+    (2.0 * sample.t * density / (1.8 * height * nd.abs())).min(1.0)
 }
 
 pub fn sphere(ray: Ray, c: V, r: f64) -> Sample {
@@ -262,22 +333,93 @@ mod tests {
     }
 
     #[test]
-    fn pureweight_center_extrema_periodic_and_self_similar() {
-        assert!(pureweight([0.5, 0.5]).is_finite());
-        close(pureweight([0.5, 0.5]), 0.5);
-        close(pureweight([0.0, 0.5]), 1.0);
-        close(pureweight([0.5, 0.0]), 0.0);
-
-        let cases: [[f64; 2]; 3] = [[0.73, 0.42], [0.21, 0.87], [0.91, 0.18]];
+    fn pureweight_is_periodic_bounded_and_varies_at_deep_zoom() {
+        let cases = [[0.13, 0.27], [0.41, 0.83], [0.76, 0.19]];
         for uv in cases {
-            close(pureweight(uv), pureweight([uv[0] + 2.0, uv[1] - 3.0]));
-            let q = [
-                2.0f64.mul_add(uv[0] - uv[0].floor(), -1.0),
-                2.0f64.mul_add(uv[1] - uv[1].floor(), -1.0),
-            ];
-            let half = [q[0].mul_add(0.25, 0.5), q[1].mul_add(0.25, 0.5)];
-            close(pureweight(uv), pureweight(half));
+            let a = pureweight(uv, 0.0);
+            let b = pureweight([uv[0] + 2.0, uv[1] - 3.0], 0.0);
+            assert!(a.is_finite() && (0.0..=1.0).contains(&a));
+            close(a, b);
         }
+        for uv in cases {
+            let values = [
+                pureweight([uv[0], uv[1]], 1.0e-6),
+                pureweight([uv[0] + 0.003, uv[1] - 0.002], 1.0e-6),
+                pureweight([uv[0] - 0.004, uv[1] + 0.001], 1.0e-6),
+            ];
+            assert!(
+                values
+                    .iter()
+                    .all(|x| x.is_finite() && (0.0..=1.0).contains(x))
+            );
+            assert!((values[0] - values[1]).abs() > EPS || (values[1] - values[2]).abs() > EPS);
+        }
+    }
+
+    #[test]
+    fn pureweight_is_continuous_at_lod_and_cell_boundaries() {
+        let uv = [0.271, 0.619];
+        let threshold = 1.0 / 32.0;
+        assert!(
+            (pureweight(uv, threshold - 1.0e-9) - pureweight(uv, threshold + 1.0e-9)).abs()
+                < 1.0e-5
+        );
+        let seam = [0.25, 0.619];
+        assert!(
+            (pureweight(seam, 1.0e-6) - pureweight([seam[0] + 1.0e-9, seam[1]], 1.0e-6)).abs()
+                < 1.0e-5
+        );
+    }
+
+    #[test]
+    fn footprint_is_conservative_and_finite() {
+        let r = ray([0.0, 4.0, 0.0], [0.0, -1.0, 0.0]);
+        let s = plane(r, [0.0; 3], [0.0, 1.0, 0.0]);
+        let coarse = footprint(s, r, 2.0, 1.0, false);
+        let fine = footprint(s, r, 8.0, 1.0, false);
+        assert_eq!(coarse.to_bits(), 1.0f64.to_bits());
+        assert!(fine < coarse && fine > 0.0);
+        let hit = sphere(ray([0.0, 0.0, -3.0], [0.0, 0.0, 1.0]), [0.0; 3], 1.0);
+        let base = footprint(hit, ray([0.0, 0.0, -3.0], [0.0, 0.0, 1.0]), 2.0, 1.0, true);
+        let double_height = footprint(hit, ray([0.0, 0.0, -3.0], [0.0, 0.0, 1.0]), 4.0, 1.0, true);
+        let farther = footprint(
+            Sample {
+                t: hit.t * 2.0,
+                ..hit
+            },
+            ray([0.0, 0.0, -3.0], [0.0, 0.0, 1.0]),
+            2.0,
+            1.0,
+            true,
+        );
+        assert!(base > 0.0 && double_height > 0.0 && farther > base);
+        close(double_height * 2.0, base);
+        assert_eq!(
+            footprint(Sample { hit: false, ..s }, r, 2.0, 1.0, false).to_bits(),
+            1.0f64.to_bits()
+        );
+        close(
+            footprint(s, r, 2.0, 1.0, false),
+            footprint(s, r, 2.0, 1.0, false),
+        );
+        let pole = Sample {
+            hit: true,
+            t: 1.0,
+            n: [0.0, 1.0, 0.0],
+            ..s
+        };
+        assert_eq!(
+            footprint(pole, r, 2.0, 1.0, true).to_bits(),
+            1.0f64.to_bits()
+        );
+        let grazing = Sample {
+            n: [1.0, 0.0, 0.0],
+            ..s
+        };
+        assert_eq!(
+            footprint(grazing, r, 2.0, 1.0, false).to_bits(),
+            1.0f64.to_bits()
+        );
     }
 
     #[test]
@@ -325,13 +467,14 @@ mod tests {
         close_v(s.n, [0.0, 0.0, -1.0]);
         close(s.uv[0], 0.25);
         close(s.uv[1], 0.5);
-        let packed = s.packed(r);
+        let packed = s.packed(r, 0.25);
         close(packed[0], 0.0);
         close(packed[1], 0.0);
         close(packed[2], 2.0);
         close_v([packed[5], packed[6], packed[7]], s.p);
         close_v([packed[12], packed[13], packed[14]], r.o);
-        close(packed[11], pureweight(s.uv));
+        close(packed[11], pureweight(s.uv, 0.25));
+        close(packed[15], 0.25);
     }
 
     #[test]

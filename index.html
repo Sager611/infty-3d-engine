@@ -362,13 +362,16 @@
 				memory readings, not GPU memory.
 			</p>
 			<p>
-				<strong>Detail</strong>Focus, then zoom. Direct UV values repeat at
-				half-scale; hardware precision is finite.
+				<strong>Detail</strong>Nested coordinate-hashed UV tiles use three
+				adjacent powers-of-two grids, smoothly blended from estimated pixel
+				footprint ρ. No loops or bitmap; finite float and pixel precision
+				remain.
 				<br>
 				<code>
-					q = 2 fract(uv) − 1;
-					<br>f = (1 + cos(π log₂(q·q) + 6 atan2(q.y, q.x))) / 2;
-					<br>q = 0: f = ½; RGB = mix(A, B, f).
+					L = clamp(−log₂(32ρ), 0, 18), l = floor(L);
+					<br>F = mix(.6T_l + .4T_(l+1), .6T_(l+1) + .4T_(l+2),
+					<br>
+					smoothstep(fract(L)));
 				</code>
 			</p>
 		</div>

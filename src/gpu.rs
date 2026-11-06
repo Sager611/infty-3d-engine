@@ -286,8 +286,24 @@ impl Renderer {
             [f64::from(self.width), f64::from(self.height)],
             [x, y],
         );
-        let sphere = math::sphere(ray, [0.0, self.view[3], 0.0], self.view[3]).packed(ray);
-        let plane = math::plane(ray, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]).packed(ray);
+        let sphere_sample = math::sphere(ray, [0.0, self.view[3], 0.0], self.view[3]);
+        let plane_sample = math::plane(ray, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let sphere_rho = math::footprint(
+            sphere_sample,
+            ray,
+            f64::from(self.height),
+            self.view[3],
+            true,
+        );
+        let plane_rho = math::footprint(
+            plane_sample,
+            ray,
+            f64::from(self.height),
+            self.view[3],
+            false,
+        );
+        let sphere = sphere_sample.packed(ray, sphere_rho);
+        let plane = plane_sample.packed(ray, plane_rho);
         let mut samples = Vec::with_capacity(32);
         samples.extend_from_slice(&sphere);
         samples.extend_from_slice(&plane);

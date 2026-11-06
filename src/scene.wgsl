@@ -1,4 +1,5 @@
 const PI: f32 = 3.14159265359;
+const TAU: f32 = 6.28318530718;
 const EPS: f32 = 0.000001;
 
 struct Query {
@@ -77,11 +78,54 @@ fn plane(o: vec3f, d: vec3f) -> Query {
     vec3f(0.0, 1.0, 0.0), vec2f(p.x, p.z));
 }
 
-fn pureweight(uv: vec2f) -> f32 {
-  let q = 2.0 * fract(uv) - vec2f(1.0);
-  let radius2 = dot(q, q);
-  if (radius2 == 0.0) { return 0.5; }
-  return 0.5 + 0.5 * cos(PI * log2(radius2) + 6.0 * atan2(q.y, q.x));
+fn tile(uv: vec2f, level: u32, rho: f32) -> f32 {
+  let f = abs(uv) - floor(abs(uv));
+  let scale_u = 1u << level;
+  let scale = f32(scale_u);
+  let s = f * scale;
+  var cell = vec2u(floor(s));
+  let p = s - floor(s);
+  if (uv.x < 0.0) {
+    cell.x = (0u - cell.x - select(0u, 1u, p.x > 0.0)) & (scale_u - 1u);
+  }
+  if (uv.y < 0.0) {
+    cell.y = (0u - cell.y - select(0u, 1u, p.y > 0.0)) & (scale_u - 1u);
+  }
+  let edge = min(min(p.x, 1.0 - p.x), min(p.y, 1.0 - p.y));
+  var hash = cell.x ^ (cell.y * 0x9e3779b9u) ^ (level * 0x85ebca6bu);
+  hash ^= hash >> 16u;
+  hash *= 0x7feb352du;
+  hash ^= hash >> 15u;
+  hash *= 0x846ca68bu;
+  hash ^= hash >> 16u;
+  let fill = 0.2 + 0.6 * f32(hash >> 24u) / 255.0;
+  let inside = smoothstep(0.0, 0.04 + rho * scale, edge);
+  let signal = mix(0.15, fill, inside);
+  return mix(signal, 0.5, smoothstep(0.25, 1.0, rho * scale));
+}
+
+fn pureweight(uv: vec2f, rho: f32) -> f32 {
+  let filtered_rho = clamp(rho, 0.0, 1.0);
+  let lod = clamp(-log2(max(filtered_rho, 1e-12) * 32.0), 0.0, 18.0);
+  let level = u32(floor(lod));
+  let t = smoothstep(0.0, 1.0, fract(lod));
+  let a = tile(uv, level, filtered_rho);
+  let b = tile(uv, level + 1u, filtered_rho);
+  let c = tile(uv, level + 2u, filtered_rho);
+  return mix(0.6 * a + 0.4 * b, 0.6 * b + 0.4 * c, t);
+}
+
+fn footprint(q: Query, ray: vec3f, height: f32, radius: f32, is_sphere: bool) -> f32 {
+  if (!q.hit || q.t <= 0.0 || height <= 0.0) { return 1.0; }
+  let nd = abs(dot(q.n, ray));
+  if (nd == 0.0) { return 1.0; }
+  var density = 1.0;
+  if (is_sphere) {
+    let radial = length(q.n.xz);
+    if (radial == 0.0) { return 1.0; }
+    density = max(1.0 / PI, 1.0 / (TAU * radial)) / radius;
+  }
+  return min(1.0, 2.0 * q.t * density / (1.8 * height * nd));
 }
 
 fn checker(uv: vec2f, scale: f32, a: vec3f, b: vec3f) -> vec3f {
@@ -97,20 +141,30 @@ fn shadow(p: vec3f, n: vec3f, light: vec3f) -> f32 {
   return select(1.0, 0.25, q.hit && q.t < dist);
 }
 
-fn shade(q: Query, is_sphere: bool, light: vec3f, mode: f32) -> vec3f {
+fn shade(
+  q: Query,
+  is_sphere: bool,
+  light: vec3f,
+  mode: f32,
+  primary_ray: vec3f,
+  height: f32,
+  radius: f32
+) -> vec3f {
   let sky = vec3f(0.96862745, 0.9647059, 0.9490196);
   let l = normalize(light - q.p);
   let diffuse = max(dot(q.n, l), 0.0);
   if (is_sphere) {
     var base = checker(q.uv, 12.0, vec3f(0.31, 0.40, 0.48), vec3f(0.48, 0.55, 0.59));
     if (mode == 2.0) {
-      base = mix(vec3f(0.31, 0.40, 0.48), vec3f(0.48, 0.55, 0.59), pureweight(q.uv));
+      let rho = footprint(q, primary_ray, height, radius, true);
+      base = mix(vec3f(0.31, 0.40, 0.48), vec3f(0.48, 0.55, 0.59), pureweight(q.uv, rho));
     }
     return base * (0.18 + 0.82 * diffuse);
   }
   var base = checker(q.uv, 1.25, vec3f(0.78, 0.81, 0.82), vec3f(0.93, 0.94, 0.93));
   if (mode == 2.0) {
-    base = mix(vec3f(0.78, 0.81, 0.82), vec3f(0.93, 0.94, 0.93), pureweight(q.uv));
+    let rho = footprint(q, primary_ray, height, radius, false);
+    base = mix(vec3f(0.78, 0.81, 0.82), vec3f(0.93, 0.94, 0.93), pureweight(q.uv, rho));
   }
   return base * (0.6 + 0.4 * diffuse * shadow(q.p, q.n, light)) + sky * 0.02;
 }
@@ -149,7 +203,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   let light = vec3f(3.0, 5.0, 4.0);
   var color = vec3f(0.96862745, 0.9647059, 0.9490196);
   if (q.hit) {
-    color = shade(q, is_sphere, light, params.screen.z);
+    color = shade(q, is_sphere, light, params.screen.z, d, params.screen.y, params.view.w);
   }
   if (params.screen.z == 1.0 && !sq.hit) {
     let halo = clamp(1.0 - sq.gap / 1.5, 0.0, 1.0);
@@ -174,14 +228,20 @@ struct ProbeResult {
 @group(0) @binding(3) var<storage, read> rays: array<ProbeRay>;
 @group(0) @binding(4) var<storage, read_write> results: array<ProbeResult>;
 
-fn result(q: Query, o: vec3f, d: vec3f) -> ProbeResult {
+fn pack(q: Query, rho: f32) -> ProbeResult {
   let h = select(0.0, 1.0, q.hit);
   return ProbeResult(
     vec4f(h, q.t, q.gap, q.uv.x),
     vec4f(q.uv.y, q.p),
-    vec4f(q.n, pureweight(q.uv)),
-    vec4f(o + q.t * d, 0.0)
+    vec4f(q.n, pureweight(q.uv, rho)),
+    vec4f(q.p, rho)
   );
+}
+
+fn result(q: Query, o: vec3f, d: vec3f, rho: f32) -> ProbeResult {
+  var packed = pack(q, rho);
+  packed.d = vec4f(o + q.t * d, rho);
+  return packed;
 }
 
 @compute @workgroup_size(1)
@@ -190,8 +250,11 @@ fn verify(@builtin(global_invocation_id) id: vec3u) {
   let ray = rays[id.x];
   let o = ray.o.xyz;
   let d = ray.d.xyz;
-  results[2u * id.x] = result(sphere(o, d, vec3f(0.0, 1.0, 0.0), 1.0), o, d);
-  results[2u * id.x + 1u] = result(plane(o, d), o, d);
+  let height = ray.d.w;
+  let sphere_q = sphere(o, d, vec3f(0.0, 1.0, 0.0), 1.0);
+  let plane_q = plane(o, d);
+  results[2u * id.x] = result(sphere_q, o, d, footprint(sphere_q, d, height, 1.0, true));
+  results[2u * id.x + 1u] = result(plane_q, o, d, footprint(plane_q, d, height, 1.0, false));
 }
 
 @vertex
