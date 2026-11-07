@@ -73,8 +73,8 @@ impl Renderer {
 
         let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("scene"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("scene.wgsl").into()),
+            label: Some("scene shader"),
+            source: wgpu::ShaderSource::Wgsl(crate::shader::SOURCE.into()),
         });
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("draw"),

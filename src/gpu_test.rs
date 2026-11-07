@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 
 use crate::math::{Ray, footprint, plane, pureweight, sphere};
 
-const SHADER: &str = include_str!("scene.wgsl");
+const SHADER: &str = crate::shader::SOURCE;
 const TOLERANCE: f64 = 2.0e-4;
 
 #[test]

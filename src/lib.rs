@@ -2,6 +2,8 @@
 
 #[cfg(any(test, target_arch = "wasm32"))]
 mod math;
+#[cfg(any(test, target_arch = "wasm32"))]
+mod shader;
 
 #[cfg(target_arch = "wasm32")]
 mod gpu;

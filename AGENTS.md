@@ -1,6 +1,7 @@
 > AGENTS.md must be <100 lines, excluding this terminal Changelog.
 
 - Every change: maximum deletion, minimum addition; minimize final words/characters/code across all files, including AGENTS.md; preserve required behavior/tests.
+- Architecture MUST be modular and functional-first at every level: dynamic, readable, maintainable, changeable, debuggable; specify module behavior, interfaces, state, and errors for every edge case; no hidden state; idempotent updates; pure cores isolated from effects.
 - After every completed change, commit and push.
 - Write tests first; preserve behavior; run strict format, compile, lint, and relevant tests; fully stage all non-ignored files before committing.
 - No Docker or local Vitest; keep idle CPU and memory low.
@@ -17,3 +18,4 @@
 | 2026-11-06 18:41 UTC | Assistant | Required fully staged commits | Prevent unstaged fixes masking invalid staged code |
 | 2026-11-06 19:20 UTC | Assistant | Restored deletion-first minimal-change policy | Restore explicit user intent |
 | 2026-11-06 19:34 UTC | Assistant | Added commit-and-push completion rule | Keep completed changes published |
+| 2026-11-07 | Assistant | Added modular functional-first architecture rule | Keep behavior explicit, dynamic, and easy to change/debug |
