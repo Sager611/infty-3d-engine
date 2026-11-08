@@ -15,7 +15,7 @@ Pure values describe the scene; thin adapters own browser and GPU effects.
 
 ## Data boundaries
 
-Object stride8: `[id,kind,px,py,pz,size,parameter,0]`. Kinds1/2/3 are sphere/Goursat/plane. Empty scenes are valid; maximum16 objects, unique IDs1..u32::MAX, position components[-20,20], size[0.01,4], Goursat beta[1.05,1.95]. Other parameters/padding are zero. Reject invalid packets; do not silently clamp them.
+Object stride8: `[id,kind,px,py,pz,size,parameter,0]`. Kinds1/2/3 are sphere/Goursat/plane. Empty scenes are valid; maximum65,536 objects, unique IDs1..u32::MAX, position components[-20,20], size[0.01,4], Goursat beta[1.05,1.95]. Other parameters/padding are zero. Reject invalid packets; do not silently clamp them.
 
 Camera6: `[yaw,pitch,distance,targetX,targetY,targetZ]`. Normalize finite yaw; constrain pitch[-1.45,1.45], distance[0.0001,100], target[-20,20]. Query screen4 is `[width,height,x,y]`; browser picks floor/clamp CSS coordinates before pixel-center ray construction.
 
@@ -23,9 +23,14 @@ Camera6: `[yaw,pitch,distance,targetX,targetY,targetZ]`. Normalize finite yaw; c
 
 Query24: `[id,kind,hit,t,gapLower,gapUpper,px,py,pz,nx,ny,nz,u,v,rayX,rayY,rayZ,localX,localY,localZ,error,gapKind,status,0]`. Gap kind0 is analytic,1 bounded; public status0 is okay,1 uncertain. Hit gaps are zero. Missing witnesses are errors, not fabricated finite results.
 
-`Renderer.render(camera6,objects8N,displayMode,selectedIds)` receives the entire model explicitly. GPU frame/object layouts are96/48 bytes; scene storage is binding5. Initialization validates the pipeline; surface acquisition failures are explicit. Device recreation requires reloading rather than a background retry loop.
+`Renderer.render(camera6,objects8N,displayMode,selectedIds)` receives the entire model explicitly. GPU frame/record layouts are96/48 bytes; scene storage is binding5. The buffer grows geometrically, only when needed. A deterministic median-split, stackless threaded hierarchy encloses finite objects; planes remain unbounded leaves. Each instance stores its own ID/transform/selection flag and references an interned (kind, parameter) geometry record. No selection bitmask or fixed shader object loop remains. CPU hit queries use the same hierarchy; inspection intentionally visits every instance. Parsing and selection use ordered sets rather than quadratic scans. Initialization validates the pipeline; surface acquisition failures are explicit. Device recreation requires reloading rather than a background retry loop.
 
 ## Geometry and display
+
+Extension boundary: `scene/geometry.rs` supplies a canonical analytic query and optional enclosing radius. Add a kind/tag, validated parameters, its CPU kernel and matching WGSL dispatch, then web metadata/material mapping. Transforms, hierarchy, shared-geometry interning and selection stay unchanged. This is a compiled analytic-kernel interface, not runtime shader loading; the existing sphere, quartic and unbounded plane exercise it without a new shape catalog.
+
+Primary GPU traversal expands branch bounds for the maximum possible pixel outline cone and the visible gap halo; ray-only rejection is reserved for shadows and CPU hit queries. Thus misses just outside an object's ray bounds remain candidates. Slab tests explicitly handle parallel rays and inflate for rounding. Overlapping geometry or many infinite planes can degrade to exhaustive traversal; no acceleration changes exact first/all ordering or inspection cardinality.
+
 
 Sphere/two-sided-plane queries are analytic. The Goursat surface is `sum((p*p-1)^2)-beta=0`, enclosed by radius `sqrt(3+sqrt(3*beta))`. Cubic stationary roots isolate quartic intervals; finite refinement is not spatial ray marching.
 
@@ -49,3 +54,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | When | Who | What | Why |
 |---|---|---|---|
 | 2026-11-08 | Assistant | Documented modules, packets, geometry, state and limits | Make behavior and effect ownership explicit |
+| 2026-11-08 | Assistant | Added shared geometry, scalable selection and threaded finite bounds | Support thousands without dropping gap/outline candidates |

@@ -150,3 +150,17 @@ describe("scene model", () => {
 		);
 	});
 });
+
+test("thousands of mixed instances survive packets and absolute updates", () => {
+	const objects: Scene = Array.from({ length: 4096 }, (_, index) => {
+		let kind: "sphere" | "goursat" = "sphere";
+		let parameter = 0;
+		if (index % 2 !== 0) {
+			kind = "goursat";
+			parameter = 1.5;
+		}
+		return { id: index + 1, kind, position: [0, 0, 0], size: 0.1, parameter };
+	});
+	sideBySide(objects, unpackScene(packScene(objects)));
+	expect(updateObject(objects, 4096, { size: 0.2 })[4095]?.size).toBe(0.2);
+});

@@ -1,6 +1,6 @@
 use std::fmt;
 
-pub const MAX_OBJECTS: usize = 16;
+pub const MAX_OBJECTS: usize = 65_536;
 pub const OBJECT_STRIDE: usize = 8;
 
 #[repr(u32)]
@@ -58,6 +58,13 @@ impl Object {
             size: normalize_zero(size),
             parameter: normalize_zero(parameter),
         })
+    }
+
+    pub const fn geometry(self) -> super::geometry::Geometry {
+        super::geometry::Geometry {
+            kind: self.kind,
+            parameter: self.parameter,
+        }
     }
 
     #[must_use]
@@ -142,6 +149,7 @@ pub fn parse_objects(packet: &[f64]) -> Result<Vec<Object>, SceneError> {
     }
 
     let mut objects = Vec::with_capacity(count);
+    let mut ids = std::collections::BTreeSet::new();
     for values in packet.chunks_exact(OBJECT_STRIDE) {
         let id = values[0];
         let kind_tag = values[1];
@@ -171,7 +179,7 @@ pub fn parse_objects(packet: &[f64]) -> Result<Vec<Object>, SceneError> {
             reason = "Finite, integral u32 range validated above."
         )]
         let id = id as u32;
-        if objects.iter().any(|object: &Object| object.id == id) {
+        if !ids.insert(id) {
             return Err(SceneError::DuplicateId);
         }
         if kind_tag.fract() != 0.0 || !(1.0..=3.0).contains(&kind_tag) {
@@ -260,6 +268,27 @@ mod tests {
 
     fn valid_packet(kind: f64, parameter: f64) -> Vec<f64> {
         vec![7.0, kind, -0.0, 2.0, -3.0, 1.0, parameter, 0.0]
+    }
+
+    #[test]
+    fn thousands_of_mixed_instances_round_trip() -> Result<(), SceneError> {
+        let packet: Vec<_> = (1..=4096)
+            .flat_map(|id| {
+                let kind = if id % 2 == 0 { 2.0 } else { 1.0 };
+                [
+                    f64::from(id),
+                    kind,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.1,
+                    if id % 2 == 0 { 1.5 } else { 0.0 },
+                    0.0,
+                ]
+            })
+            .collect();
+        assert_eq!(pack_objects(&parse_objects(&packet)?), packet);
+        Ok(())
     }
 
     #[test]
@@ -379,7 +408,7 @@ mod tests {
             Object::new(1, Kind::Sphere, [0.0; 3], 4.1, 0.0),
             Err(SceneError::InvalidSize)
         ));
-        let packet = (1..=17)
+        let packet = (1..=65_537)
             .flat_map(|id| [f64::from(id), 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0])
             .collect::<Vec<_>>();
         assert!(matches!(

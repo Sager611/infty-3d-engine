@@ -10,13 +10,22 @@ pub(super) fn run(
     rays: &[[f32; 8]],
     output_floats: usize,
 ) -> Result<Vec<f32>, Box<dyn Error>> {
-    pollster::block_on(run_async(entry, rays, output_floats))
+    pollster::block_on(run_async(entry, rays, output_floats, None))
+}
+
+pub(super) fn run_scene(
+    entry: &str,
+    rays: &[[f32; 8]],
+    records: &[crate::scene::packed::Record],
+) -> Result<Vec<f32>, Box<dyn Error>> {
+    pollster::block_on(run_async(entry, rays, rays.len() * 16, Some(records)))
 }
 
 async fn run_async(
     entry: &str,
     rays: &[[f32; 8]],
     output_floats: usize,
+    records: Option<&[crate::scene::packed::Record]>,
 ) -> Result<Vec<f32>, Box<dyn Error>> {
     let instance = wgpu::Instance::default();
     #[cfg(target_os = "linux")]
@@ -64,19 +73,33 @@ async fn run_async(
         compilation_options: wgpu::PipelineCompilationOptions::default(),
         cache: None,
     });
+    let scene_buffer = records.map(|records| {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("test hierarchy"),
+            contents: cast_slice(records),
+            usage: wgpu::BufferUsages::STORAGE,
+        })
+    });
+    let mut entries = vec![
+        wgpu::BindGroupEntry {
+            binding: 3,
+            resource: ray_buffer.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 4,
+            resource: result_buffer.as_entire_binding(),
+        },
+    ];
+    if let Some(buffer) = &scene_buffer {
+        entries.push(wgpu::BindGroupEntry {
+            binding: 5,
+            resource: buffer.as_entire_binding(),
+        });
+    }
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &pipeline.get_bind_group_layout(0),
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: ray_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: result_buffer.as_entire_binding(),
-            },
-        ],
+        entries: &entries,
     });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     {

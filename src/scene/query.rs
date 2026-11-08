@@ -1,4 +1,4 @@
-use crate::math::{Ray, Sample, goursat, plane, sphere_at};
+use crate::math::{Ray, Sample};
 use crate::scene::model::{Kind, MAX_OBJECTS, Object};
 
 /// Which subset of the scene query results to return.
@@ -115,26 +115,14 @@ pub fn query_object(object: &Object, ray: Ray, need_gap: bool) -> Result<SceneSa
         d: ray.d,
     };
 
-    let (local_sample, gap_lower, error, uncertain) = match object.kind() {
-        Kind::Sphere => {
-            let sample = sphere_at(local_ray, [0.0; 3], 1.0);
-            (sample, sample.gap, 0.0, false)
-        }
-        Kind::Plane => {
-            let sample = plane(local_ray, [0.0; 3], [0.0, 1.0, 0.0]);
-            (sample, sample.gap, 0.0, false)
-        }
-        Kind::Goursat => {
-            let result = goursat(local_ray, object.parameter(), need_gap)
-                .map_err(|_| QueryError::Goursat)?;
-            (
-                result.sample,
-                result.gap_lower,
-                result.error,
-                result.uncertain,
-            )
-        }
-    };
+    let result = object
+        .geometry()
+        .query(local_ray, need_gap)
+        .map_err(|_| QueryError::Goursat)?;
+    let local_sample = result.sample;
+    let gap_lower = result.gap_lower;
+    let error = result.error;
+    let uncertain = result.uncertain;
 
     let world_t = local_sample.t * size;
     let world_gap = local_sample.gap * size;
@@ -174,9 +162,14 @@ pub fn query_objects(
     validate_ray(ray)?;
     validate_objects(objects)?;
     let need_gap = mode == QueryMode::Inspect;
-    let mut samples = objects
-        .iter()
-        .map(|object| query_object(object, ray, need_gap))
+    let candidates = if need_gap {
+        (0..objects.len()).collect()
+    } else {
+        super::spatial::Spatial::new(objects).candidates(ray.o, ray.d)
+    };
+    let mut samples = candidates
+        .into_iter()
+        .map(|index| query_object(&objects[index], ray, need_gap))
         .collect::<Result<Vec<_>, _>>()?;
 
     match mode {
@@ -220,12 +213,10 @@ fn validate_objects(objects: &[Object]) -> Result<(), QueryError> {
     if objects.len() > MAX_OBJECTS {
         return Err(QueryError::TooManyObjects);
     }
-    for (index, object) in objects.iter().enumerate() {
+    let mut ids = std::collections::BTreeSet::new();
+    for object in objects {
         validate_object(object)?;
-        if objects[..index]
-            .iter()
-            .any(|previous| previous.id() == object.id())
-        {
+        if !ids.insert(object.id()) {
             return Err(QueryError::DuplicateId);
         }
     }

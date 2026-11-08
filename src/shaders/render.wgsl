@@ -8,8 +8,35 @@ fn empty_sample() -> SceneSample {
   );
 }
 
-fn selected_slot(slot: u32) -> bool {
-  return (frame_params.selection.x & (1u << slot)) != 0u;
+// Nodes are threaded: a rejected branch jumps to its escape index.
+fn branch_intersects(node: SceneObject, o: vec3f, d: vec3f, padding: f32) -> bool {
+  let rounding = 8.0 * EPS * max(1.0, max(length(node.position_size.xyz), length(node.params.xyz)));
+  let lo = node.position_size.xyz - vec3f(padding + rounding);
+  let hi = node.params.xyz + vec3f(padding + rounding);
+  var near = 0.0;
+  var far = 1e30;
+  for (var axis = 0u; axis < 3u; axis++) {
+    if (d[axis] == 0.0) {
+      if (o[axis] < lo[axis] || o[axis] > hi[axis]) { return false; }
+    } else {
+      let a = (lo[axis] - o[axis]) / d[axis];
+      let b = (hi[axis] - o[axis]) / d[axis];
+      near = max(near, min(a, b));
+      far = min(far, max(a, b));
+    }
+  }
+  return near <= far;
+}
+
+fn branch_padding(node: SceneObject, origin: vec3f, height: f32, display_gap: bool) -> f32 {
+  let extent = max(abs(node.position_size.xyz - origin), abs(node.params.xyz - origin));
+  return max(6.0 * length(extent) / (1.8 * height), select(0.0, 1.5, display_gap));
+}
+
+fn resolved_object(index: u32) -> SceneObject {
+  var object = scene_objects[index];
+  object.params = scene_objects[object.identity.w].params;
+  return object;
 }
 
 fn outline_eligible(sample: SceneSample, selected: bool, thickness: f32) -> bool {
@@ -26,15 +53,21 @@ fn shadow_factor(p: vec3f, n: vec3f, size: f32, light: vec3f, count: u32) -> f32
   let origin = p + n * bias;
   let direction = to_light / distance;
   var factor = 1.0;
-  for (var i = 0u; i < 16u; i++) {
-    if (i < count) {
-      let blocker = scene_object(origin, direction, scene_objects[i], false);
-      if (blocker.query.hit
-          && blocker.query.t >= 2.0 * bias
-          && blocker.query.t < distance) {
-        factor = 0.25;
+  var i = 0u;
+  while (i < count) {
+    let record = scene_objects[i];
+    if (record.identity.x == 0u) {
+      if (!branch_intersects(record, origin, direction, 0.0)) {
+        i = record.identity.y;
+        continue;
+      }
+    } else {
+      let blocker = scene_object(origin, direction, resolved_object(i), false);
+      if (blocker.query.hit && blocker.query.t >= 2.0 * bias && blocker.query.t < distance) {
+        return 0.25;
       }
     }
+    i++;
   }
   return factor;
 }
@@ -54,7 +87,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     + sx * normalize(frame_params.right.xyz)
     + sy * normalize(frame_params.up.xyz));
   let origin = frame_params.origin.xyz;
-  let count = min(frame_params.screen.w, 16u);
+  let count = frame_params.screen.w;
   let display_gap = frame_params.screen.z == 1u;
   let light = vec3f(3.0, 5.0, 4.0);
 
@@ -69,14 +102,24 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   var outline_t = 1e30;
   var outline_thickness = 0.0;
 
-  for (var i = 0u; i < 16u; i++) {
-    if (i < count) {
-      let object = scene_objects[i];
-      let selected = selected_slot(i);
+  var i = 0u;
+  while (i < count) {
+    let record = scene_objects[i];
+    if (record.identity.x == 0u) {
+      // A surface witness lies inside the node. Its forward t cannot exceed
+      // the farthest corner distance; expand for the full pixel outline cone.
+      let padding = branch_padding(record, origin, height, display_gap);
+      if (!branch_intersects(record, origin, direction, padding)) {
+        i = record.identity.y;
+        continue;
+      }
+    } else {
+      let object = resolved_object(i);
+      let selected = object.identity.z != 0u;
       let need_gap = object.identity.y == 2u && (display_gap || selected);
 
       let sample = scene_object(origin, direction, object, need_gap);
-      if (sample.query.hit && sample.query.t < nearest_t) {
+      if (sample.query.hit && (sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
         nearest = sample;
         nearest_t = sample.query.t;
         nearest_size = object.position_size.w;
@@ -97,6 +140,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
         outline_found = true;
       }
     }
+    i++;
   }
 
   var color = vec3f(0.96862745, 0.9647059, 0.9490196);

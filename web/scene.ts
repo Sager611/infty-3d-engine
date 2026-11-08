@@ -31,7 +31,7 @@ type ShapeDescriptorMap = Readonly<{
 	[K in SceneKind]: ShapeDescriptor<K>;
 }>;
 
-const MAX_OBJECTS = 16;
+const MAX_OBJECTS = 65_536;
 const MIN_POSITION = -20;
 const MAX_POSITION = 20;
 const MIN_SIZE = 0.01;
@@ -231,7 +231,11 @@ const packetValue = (packet: ArrayLike<number>, index: number): number => {
 };
 
 const unpackScene = (packet: ArrayLike<number>): Scene => {
-	if (!Number.isInteger(packet.length) || packet.length % PACKET_STRIDE !== 0) {
+	if (
+		!Number.isInteger(packet.length) ||
+		packet.length % PACKET_STRIDE !== 0 ||
+		packet.length / PACKET_STRIDE > MAX_OBJECTS
+	) {
 		invalid("invalid length");
 	}
 	for (let index = 0; index < packet.length; index += 1) {

@@ -112,3 +112,5 @@ fn scene_verify_matches_cpu_math() -> Result<(), Box<dyn Error>> {
     assert_results(&actual, &expected);
     Ok(())
 }
+
+mod scale;
