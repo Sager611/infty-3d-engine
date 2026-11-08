@@ -6,10 +6,10 @@ const MIN_PITCH: f64 = -1.45;
 const MAX_PITCH: f64 = 1.45;
 const MIN_DISTANCE: f64 = 0.0001;
 const MAX_DISTANCE: f64 = 100.0;
-const TARGET_LIMIT: f64 = 20.0;
+const TARGET_LIMIT: f64 = 1024.0;
 const CAMERA_PACKET_LEN: usize = 6;
 
-/// A validated orbit camera.
+/// A validated yaw/pitch camera with a stored focus distance.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
     pub yaw: f64,
@@ -142,6 +142,16 @@ mod tests {
     }
 
     #[test]
+    fn free_camera_can_travel_beyond_scene_editing_bounds() -> Result<(), CameraError> {
+        let camera = parse_camera(&[0.0, 0.0, 5.0, 40.0, -40.0, 0.0])?;
+        assert_eq!(
+            camera.basis().origin.map(f64::to_bits),
+            [40.0_f64, -40.0, 5.0].map(f64::to_bits)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn packet_reports_each_error_class() {
         assert!(matches!(
             parse_camera(&[0.0; 5]),
@@ -160,7 +170,7 @@ mod tests {
             Err(CameraError::InvalidDistance)
         ));
         assert!(matches!(
-            parse_camera(&[0.0, 0.2, 5.0, 20.1, 2.0, -3.0]),
+            parse_camera(&[0.0, 0.2, 5.0, 1024.1, 2.0, -3.0]),
             Err(CameraError::InvalidTarget)
         ));
     }

@@ -4,6 +4,21 @@
 import type { SceneObject } from "./scene.ts";
 import { normalizeCamera, type PureCamera } from "./state.ts";
 
+type Vector = readonly [number, number, number];
+type CameraBasis = Readonly<{ origin: Vector; forward: Vector; right: Vector }>;
+type Movement = Readonly<{
+	forward: number;
+	side: number;
+	onlyForward: boolean;
+}>;
+const STOPPED: Movement = Object.freeze({
+	forward: 0,
+	side: 0,
+	onlyForward: false,
+});
+const MIN_SPEED = 0.01;
+const MAX_SPEED = 100;
+const MAX_STEP = 0.05;
 const POINTER_SCALE = 0.008;
 const MIN_DISTANCE = 0.0001;
 const MAX_DISTANCE = 100;
@@ -171,4 +186,112 @@ const frameCamera = (
 	});
 };
 
-export { FOCAL_LENGTH, objectRadius, frameCamera, orbitCamera, zoomCamera };
+function cameraBasis(camera: PureCamera): CameraBasis {
+	const c = normalizeCamera(camera);
+	const forward: Vector = [
+		-Math.cos(c.pitch) * Math.sin(c.yaw),
+		-Math.sin(c.pitch),
+		-Math.cos(c.pitch) * Math.cos(c.yaw),
+	];
+	return {
+		origin: [
+			c.target[0] - c.distance * forward[0],
+			c.target[1] - c.distance * forward[1],
+			c.target[2] - c.distance * forward[2],
+		],
+		forward,
+		right: [Math.cos(c.yaw), 0, -Math.sin(c.yaw)],
+	};
+}
+function lookCamera(
+	camera: PureCamera,
+	totalDx: number,
+	totalDy: number,
+): PureCamera {
+	const turned = orbitCamera(camera, totalDx, totalDy);
+	const { origin } = cameraBasis(camera);
+	const { forward } = cameraBasis(turned);
+	return normalizeCamera({
+		...turned,
+		target: [
+			origin[0] + turned.distance * forward[0],
+			origin[1] + turned.distance * forward[1],
+			origin[2] + turned.distance * forward[2],
+		],
+	});
+}
+function moveCamera(
+	camera: PureCamera,
+	movement: Movement,
+	speed: number,
+	seconds: number,
+): PureCamera {
+	finite(speed, "travel speed");
+	finite(seconds, "elapsed time");
+	finite(movement.forward, "forward movement");
+	finite(movement.side, "side movement");
+	if (
+		speed <= 0 ||
+		seconds < 0 ||
+		Math.abs(movement.forward) > 1 ||
+		Math.abs(movement.side) > 1
+	) {
+		invalid("travel step");
+	}
+	const basis = cameraBasis(camera);
+	const length = Math.hypot(movement.forward, movement.side);
+	if (length === 0 || seconds === 0) {
+		return camera;
+	}
+	const distance = (speed * Math.min(seconds, MAX_STEP)) / length;
+	return normalizeCamera({
+		...camera,
+		target: [
+			camera.target[0] +
+				distance *
+					(movement.forward * basis.forward[0] +
+						movement.side * basis.right[0]),
+			camera.target[1] +
+				distance *
+					(movement.forward * basis.forward[1] +
+						movement.side * basis.right[1]),
+			camera.target[2] +
+				distance *
+					(movement.forward * basis.forward[2] +
+						movement.side * basis.right[2]),
+		],
+	});
+}
+function travelSpeed(speed: number, amount: number): number {
+	finite(speed, "travel speed");
+	finite(amount, "speed adjustment");
+	if (speed < MIN_SPEED || speed > MAX_SPEED) {
+		invalid("travel speed");
+	}
+	if (amount === 0) {
+		return speed;
+	}
+	const exponent = Math.log(speed) - amount;
+	if (exponent <= Math.log(MIN_SPEED)) {
+		return MIN_SPEED;
+	}
+	if (exponent >= Math.log(MAX_SPEED)) {
+		return MAX_SPEED;
+	}
+	return Math.exp(exponent);
+}
+export {
+	FOCAL_LENGTH,
+	objectRadius,
+	frameCamera,
+	orbitCamera,
+	zoomCamera,
+	cameraBasis,
+	lookCamera,
+	moveCamera,
+	travelSpeed,
+	STOPPED,
+	MIN_SPEED,
+	MAX_SPEED,
+	type Movement,
+};

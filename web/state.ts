@@ -29,8 +29,8 @@ const MIN_PITCH = -1.45;
 const MAX_PITCH = 1.45;
 const MIN_DISTANCE = 0.0001;
 const MAX_DISTANCE = 100;
-const MIN_TARGET = -20;
-const MAX_TARGET = 20;
+const MIN_TARGET = -1024;
+const MAX_TARGET = 1024;
 const PI = Math.PI;
 
 const cameraError = (message: string): never => {

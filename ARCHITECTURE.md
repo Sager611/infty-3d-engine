@@ -21,7 +21,7 @@ Pure values describe the scene; thin adapters own browser and GPU effects.
 
 Object stride8: `[id,kind,px,py,pz,size,parameter,0]`. Kinds1/2/3 are sphere/Goursat/plane. Empty scenes are valid; maximum65,536 objects, unique IDs1..u32::MAX, position components[-20,20], size[0.01,4], Goursat beta[1.05,1.95]. Other parameters/padding are zero. Reject invalid packets; do not silently clamp them.
 
-Camera6: `[yaw,pitch,distance,targetX,targetY,targetZ]`. Normalize finite yaw; constrain pitch[-1.45,1.45], distance[0.0001,100], target[-20,20]. Query screen4 is `[width,height,x,y]`; browser picks floor/clamp CSS coordinates before pixel-center ray construction.
+Camera6: `[yaw,pitch,distance,targetX,targetY,targetZ]`. Normalize finite yaw; constrain pitch[-1.45,1.45], distance[0.0001,100], target[-1024,1024]. Camera travel is independent of the scene's[-20,20] editing bounds; the finite camera limit remains explicit. Query screen4 is `[width,height,x,y]`; browser picks floor/clamp CSS coordinates before pixel-center ray construction.
 
 `query_scene(objects8N,camera6,screen4,mode)` and `query_ray(objects8N,ray6,mode)` use mode0 first hit,1 all hits,2 inspection including misses. One nearest forward hit per object; hit order is(world t,id). Normalize ray direction. Uniform transforms use `world=position+size*local`, scaling distances/errors once.
 
@@ -56,6 +56,8 @@ Add chooses bounded candidates in the current camera plane, preferring separatio
 
 Saved scene URLs use `#s=1;camera6;mode;objects8N`. Legacy `#v=yaw,pitch,distance,radius,mode` keeps the original centered sphere/plane scene. URL replacement is single-shot debounced150ms. Updates are absolute/idempotent and copy caller-owned coordinates.
 
+Fixed-eye look, camera-relative translation, normalized diagonal speed,50ms maximum steps and bounded wheel-speed math are tested. Browser keyboard/animation wiring and W-only approach easing remain pending; the current UI still uses orbit/zoom.
+
 Render only after invalidation. Visible-only1Hz metrics report CPU submission walltime and optional JS heap/WASM bytes—not CPU utilization, GPU time or total browser/GPU memory. Input/timer resources have explicit disposal.
 
 Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests, TypeScript/Biome, Bun tests, shell/Markdown and dependency checks. Browser screenshots/interaction checks remain separate acceptance evidence.
@@ -69,3 +71,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-08 | Assistant | Split canonical query contracts from scene effects | Centralize validation, accuracy and unresolved outcomes |
 | 2026-11-08 | Assistant | Shared immutable definitions/instances across CPU and GPU adapters | Prepare once, preserve peers and centralize uniform transforms |
 | 2026-11-08 | Assistant | Reused prepared scenes through browser/GPU ownership | Avoid camera-frame rebuilds/uploads and late initialization leaks |
+| 2026-11-08 | Assistant | Added tested camera navigation math and expanded camera-only bounds | Prepare free movement without changing scene editing limits |
