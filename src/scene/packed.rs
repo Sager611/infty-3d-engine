@@ -1,5 +1,7 @@
 //! GPU ABI: threaded nodes, instances and interned geometry in one storage buffer.
-use super::{model::Object, prepared::Prepared, spatial::Node};
+#[cfg(test)]
+use super::model::Object;
+use super::{prepared::Prepared, spatial::Node};
 use bytemuck::{Pod, Zeroable};
 use std::collections::BTreeSet;
 
@@ -18,6 +20,7 @@ pub struct Packet {
     pub count: u32,
 }
 
+#[cfg(test)]
 pub fn pack(objects: &[Object], selected: &[u32]) -> Result<Packet, String> {
     let scene = Prepared::new(objects).map_err(|error| error.to_string())?;
     pack_prepared(&scene, selected).map_err(str::to_owned)

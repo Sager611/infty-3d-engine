@@ -8,12 +8,13 @@ Pure values describe the scene; thin adapters own browser and GPU effects.
 | `src/geometry.rs`, `src/geometry/` | Validated canonical definitions, kernel dispatch and bounded closest-query contracts |
 | `src/scene/` | Immutable shared definitions/instances, uniform transforms, reusable hierarchy and deterministic queries |
 | `src/api.rs` | WASM packet adapters; invalid inputs become JavaScript errors |
-| `src/gpu.rs` | Explicit render inputs, buffers, resize and frame acquisition; no cached scene/camera model |
+| `src/{gpu,upload}.rs` | Explicit render inputs, derived uploads, buffers, resize and acquisition; no cached scene/camera model |
 | `src/shaders/` | f32 mirror of geometry/material contracts; shared compile-time shader manifest |
 | `web/{scene,state,query,camera}.ts` | Immutable records, absolute updates, URL codec, query decoding and framing |
 | `web/editing.ts` | Pure add/delete, stable IDs, selection repair and one-deletion undo |
 | `web/scene-actions.ts` | Delegated scene buttons and guarded delete keys; explicit cleanup |
 | `web/{controls,input,metrics}.ts` | Small DOM/input/timer adapters with cleanup |
+| `web/prepared.ts` | Prepared scene ownership and safe deferred GPU acquisition |
 | `web/app.ts` | Snapshot, selection, queries, invalidation and resource lifecycle |
 
 ## Data boundaries
@@ -26,9 +27,9 @@ Camera6: `[yaw,pitch,distance,targetX,targetY,targetZ]`. Normalize finite yaw; c
 
 Query24: `[id,kind,hit,t,gapLower,gapUpper,px,py,pz,nx,ny,nz,u,v,rayX,rayY,rayZ,localX,localY,localZ,error,gapKind,status,0]`. Gap kind0 is analytic,1 bounded; public status0 is okay,1 uncertain. Hit gaps are zero. Missing witnesses are errors, not fabricated finite results.
 
-`Renderer.render(camera6,objects8N,displayMode,selectedIds)` receives the entire model explicitly. GPU frame/record layouts are96/48 bytes; scene storage is binding5. The buffer grows geometrically, only when needed. A deterministic median-split, stackless threaded hierarchy encloses finite objects; planes remain unbounded leaves. Each instance stores its own ID/transform/selection flag and references an interned (kind, parameter) geometry record. No selection bitmask or fixed shader object loop remains. CPU hit queries use the same hierarchy; inspection intentionally visits every instance. Parsing and selection use ordered sets rather than quadratic scans. Initialization validates the pipeline; surface acquisition failures are explicit. Device recreation requires reloading rather than a background retry loop.
+`Renderer.render_scene(camera6,preparedScene,displayMode,selectedIds)` receives the immutable model explicitly; legacy `render(camera6,objects8N,displayMode,selectedIds)` prepares a temporary equivalent. GPU frame/record layouts are96/48 bytes; scene storage is binding5. The buffer grows geometrically, only when needed. A deterministic median-split, stackless threaded hierarchy encloses finite objects; planes remain unbounded leaves. Each instance stores its own ID/transform/selection flag and references an interned (kind, parameter) geometry record. No selection bitmask or fixed shader object loop remains. CPU hit queries use the same hierarchy; inspection intentionally visits every instance. Parsing and selection use ordered sets rather than quadratic scans. Initialization validates the pipeline; surface acquisition failures are explicit. Device recreation requires reloading rather than a background retry loop.
 
-`PreparedScene(objects8N)` owns immutable definition/instance arrays, stable-ID lookup and hierarchy. Its camera/ray queries reuse them; legacy packet functions prepare a temporary equivalent. Instances contain a definition index, positive uniform transform and material reference (default0 only). Editing creates a replacement scene and never mutates shared peers. CPU queries and GPU packing consume this model; the legacy renderer still prepares per render until its prepared adapter is integrated. Bounds, rays and samples use the same uniform-transform module.
+`PreparedScene(objects8N)` owns immutable definition/instance arrays, stable-ID lookup and hierarchy. Its camera/ray queries reuse them; legacy packet functions prepare a temporary equivalent. Instances contain a definition index, positive uniform transform and material reference (default0 only). Editing creates a replacement scene and never mutates shared peers. Browser rendering, picks and inspection reuse this model. Camera/display frames and equivalent selection sets do not repack or upload geometry. Renderer keeps only a weak scene identity and normalized selection for derived uploads, committed after validation and queuing the write. Scene replacement prepares successfully before releasing the previous WASM resource; disposal releases owned resources, including GPU initialization completing after cleanup. Bounds, rays and samples use the same uniform-transform module.
 
 ## Geometry and display
 
@@ -67,3 +68,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-08 | Assistant | Documented instance editing and bounded deletion undo | Make invalidation, allocation and keyboard behavior explicit |
 | 2026-11-08 | Assistant | Split canonical query contracts from scene effects | Centralize validation, accuracy and unresolved outcomes |
 | 2026-11-08 | Assistant | Shared immutable definitions/instances across CPU and GPU adapters | Prepare once, preserve peers and centralize uniform transforms |
+| 2026-11-08 | Assistant | Reused prepared scenes through browser/GPU ownership | Avoid camera-frame rebuilds/uploads and late initialization leaks |

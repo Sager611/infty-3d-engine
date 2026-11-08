@@ -6,8 +6,10 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 use wgpu::util::DeviceExt;
 
-use crate::scene::packed::{Record, pack};
-use crate::scene::{parse_camera, parse_objects};
+use crate::api::PreparedScene;
+use crate::scene::packed::pack_prepared;
+use crate::scene::parse_camera;
+use crate::upload::Upload;
 
 const MAX_WIDTH: u16 = 1_440;
 const MAX_HEIGHT: u16 = 1_000;
@@ -36,6 +38,7 @@ pub struct Renderer {
     present_pipeline: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     objects: wgpu::Buffer,
+    upload: Upload,
     output: wgpu::Texture,
     compute_bind_group: wgpu::BindGroup,
     present_bind_group: wgpu::BindGroup,
@@ -78,6 +81,7 @@ impl Renderer {
             present_pipeline,
             uniform,
             objects,
+            upload: Upload::default(),
             output,
             compute_bind_group,
             present_bind_group,
@@ -131,24 +135,25 @@ impl Renderer {
         mode: u32,
         selected: &[u32],
     ) -> Result<(), JsValue> {
-        let (params, gpu_objects) =
-            frame_params(camera, scene, mode, selected, self.width, self.height)?;
-        let bytes = bytemuck::cast_slice(&gpu_objects);
-        if bytes.len() as u64 > self.objects.size() {
-            self.objects =
-                create_objects_buffer(&self.device, (bytes.len() as u64).next_power_of_two());
-            (self.compute_bind_group, self.present_bind_group) = create_bind_groups(
-                &self.device,
-                &self.compute_pipeline,
-                &self.present_pipeline,
-                &self.output,
-                &self.uniform,
-                &self.objects,
-            );
-        }
+        let scene = PreparedScene::new(scene)?;
+        self.render_scene(camera, &scene, mode, selected)
+    }
+
+    /// Render an explicit prepared scene; camera frames reuse derived uploads.
+    ///
+    /// # Errors
+    /// Rejects invalid cameras, modes, selections, resources and surface frames.
+    pub fn render_scene(
+        &mut self,
+        camera: &[f64],
+        scene: &PreparedScene,
+        mode: u32,
+        selected: &[u32],
+    ) -> Result<(), JsValue> {
+        let mut params = frame_params(camera, mode, self.width, self.height)?;
+        params.screen[3] = upload_scene(self, scene, selected)?;
         self.queue
             .write_buffer(&self.uniform, 0, bytemuck::bytes_of(&params));
-        self.queue.write_buffer(&self.objects, 0, bytes);
 
         let frame = acquire_frame(&self.surface, &self.device, &self.config)?;
         let frame_view = frame
@@ -200,22 +205,46 @@ impl Renderer {
     }
 }
 
+fn upload_scene(
+    renderer: &mut Renderer,
+    scene: &PreparedScene,
+    selected: &[u32],
+) -> Result<u32, JsValue> {
+    let Some(ids) = renderer.upload.plan(&scene.identity, selected) else {
+        return u32::try_from(scene.core.spatial().nodes.len())
+            .map_err(|_| js_error("too many scene nodes"));
+    };
+    let packet = pack_prepared(&scene.core, &ids).map_err(js_error)?;
+    let bytes = bytemuck::cast_slice(&packet.records);
+    if bytes.len() as u64 > renderer.objects.size() {
+        renderer.objects =
+            create_objects_buffer(&renderer.device, (bytes.len() as u64).next_power_of_two());
+        (renderer.compute_bind_group, renderer.present_bind_group) = create_bind_groups(
+            &renderer.device,
+            &renderer.compute_pipeline,
+            &renderer.present_pipeline,
+            &renderer.output,
+            &renderer.uniform,
+            &renderer.objects,
+        );
+    }
+    renderer.queue.write_buffer(&renderer.objects, 0, bytes);
+    renderer.upload.commit(&scene.identity, selected, ids);
+    Ok(packet.count)
+}
+
 fn frame_params(
     camera_packet: &[f64],
-    scene_packet: &[f64],
     mode: u32,
-    selected: &[u32],
     width: u16,
     height: u16,
-) -> Result<(Params, Vec<Record>), JsValue> {
+) -> Result<Params, JsValue> {
     if mode > 2 {
         return Err(js_error("render mode must be 0, 1, or 2"));
     }
     let camera = parse_camera(camera_packet).map_err(|error| js_error(error.to_string()))?;
-    let objects = parse_objects(scene_packet).map_err(|error| js_error(error.to_string()))?;
-    let packet = pack(&objects, selected).map_err(js_error)?;
     let basis = camera.basis();
-    let params = Params {
+    Ok(Params {
         origin: [
             f32_value(basis.origin[0]),
             f32_value(basis.origin[1]),
@@ -240,10 +269,9 @@ fn frame_params(
             f32_value(basis.forward[2]),
             1.8,
         ],
-        screen: [u32::from(width), u32::from(height), mode, packet.count],
+        screen: [u32::from(width), u32::from(height), mode, 0],
         selection: [0; 4],
-    };
-    Ok((params, packet.records))
+    })
 }
 
 fn canvas_dimensions(canvas: &HtmlCanvasElement) -> Result<(u16, u16), JsValue> {

@@ -12,7 +12,8 @@ const PACKED_STRIDE: usize = 24;
 /// Immutable validated instances, shared definitions and reusable hierarchy.
 #[wasm_bindgen]
 pub struct PreparedScene {
-    core: crate::scene::prepared::Prepared,
+    pub(super) core: crate::scene::prepared::Prepared,
+    pub(super) identity: std::rc::Rc<()>,
 }
 
 #[wasm_bindgen]
@@ -25,7 +26,10 @@ impl PreparedScene {
     pub fn new(objects: &[f64]) -> Result<Self, JsValue> {
         let objects = parse_objects(objects).map_err(scene_error)?;
         let core = crate::scene::prepared::Prepared::new(&objects).map_err(scene_error)?;
-        Ok(Self { core })
+        Ok(Self {
+            core,
+            identity: std::rc::Rc::new(()),
+        })
     }
 
     /// Number of immutable scene instances.

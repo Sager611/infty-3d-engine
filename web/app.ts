@@ -1,5 +1,5 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: Vanilla DOM coordination.
-import init, { query_scene, Renderer } from "../pkg/infty.js";
+import init, { PreparedScene, Renderer } from "../pkg/infty.js";
 import { frameCamera, zoomCamera } from "./camera.ts";
 import {
 	type ControlsEvent,
@@ -21,6 +21,13 @@ import {
 import { bindInput, type InputBindings } from "./input.ts";
 import { type Meter, startMetrics } from "./metrics.ts";
 import {
+	acquireResource,
+	emptySceneCache,
+	prepareScene,
+	releaseScene,
+	type SceneCache,
+} from "./prepared.ts";
+import {
 	activateSelection,
 	canvasPixel,
 	decodeQueries,
@@ -30,7 +37,7 @@ import {
 	type Selection,
 	selectionFromHits,
 } from "./query.ts";
-import { packScene, updateObject } from "./scene.ts";
+import { updateObject } from "./scene.ts";
 import { listenSceneActions, type SceneAction } from "./scene-actions.ts";
 import {
 	cameraPacket,
@@ -103,6 +110,7 @@ let selection: Selection = EMPTY_SELECTION;
 let editor: Editor = createEditor(snapshot.objects);
 let pickAll = false;
 let renderer: Renderer | undefined;
+let prepared: SceneCache<PreparedScene> = emptySceneCache<PreparedScene>();
 let wasmMemory: WebAssembly.Memory | undefined;
 let meter: Meter | undefined;
 let framePending = false;
@@ -224,7 +232,19 @@ const resizeCanvas = (): void => {
 const cameraValues = (): Float64Array =>
 	new Float64Array(cameraPacket(snapshot.camera));
 
-const sceneValues = (): Float64Array => packScene(snapshot.objects);
+const createScene = (packet: Float64Array): PreparedScene =>
+	new PreparedScene(packet);
+
+const preparedScene = (): PreparedScene => {
+	if (disposed || wasmMemory === undefined) {
+		throw new Error("scene unavailable");
+	}
+	prepared = prepareScene(prepared, snapshot.objects, createScene);
+	if (prepared.value === null) {
+		throw new Error("scene unavailable");
+	}
+	return prepared.value;
+};
 
 const screenPoint = (clientX: number, clientY: number): Float64Array => {
 	const [x, y] = canvasPixel(
@@ -244,8 +264,7 @@ const queryAt = (
 		throw new Error("renderer unavailable");
 	}
 	return decodeQueries(
-		query_scene(
-			sceneValues(),
+		preparedScene().query_camera(
 			cameraValues(),
 			screenPoint(clientX, clientY),
 			mode,
@@ -366,9 +385,9 @@ const renderFrame = (): void => {
 	try {
 		resizeCanvas();
 		const started = performance.now();
-		renderer.render(
+		renderer.render_scene(
 			cameraValues(),
-			sceneValues(),
+			preparedScene(),
 			snapshot.mode,
 			new Uint32Array(selection.ids),
 		);
@@ -429,6 +448,7 @@ const cleanup = (): void => {
 	}
 	meter?.dispose();
 	renderer?.free();
+	prepared = releaseScene(prepared);
 	removeControls?.();
 	removeSceneActions?.();
 	addMenu.removeEventListener("toggle", focusShape);
@@ -476,11 +496,25 @@ let removeSceneActions: (() => void) | undefined;
 let removeControls: (() => void) | undefined;
 let removeInput: (() => void) | undefined;
 
+const acceptRenderer = (value: Renderer): boolean => {
+	if (disposed) {
+		return false;
+	}
+	renderer = value;
+	return true;
+};
+
 const start = async (): Promise<void> => {
 	try {
 		const wasm = await init();
+		if (disposed) {
+			return;
+		}
 		wasmMemory = wasm.memory;
-		renderer = await Renderer.create(canvas);
+		await acquireResource(() => Renderer.create(canvas), acceptRenderer);
+		if (disposed) {
+			return;
+		}
 		resizeCanvas();
 		meter = startMetrics(metrics, wasmMemory);
 		invalidate();
