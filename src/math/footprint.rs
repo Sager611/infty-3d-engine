@@ -1,5 +1,6 @@
 use super::types::{Ray, Sample};
 
+#[must_use]
 pub fn footprint(sample: Sample, ray: Ray, height: f64, radius: f64, sphere: bool) -> f64 {
     if !sample.hit
         || !sample.t.is_finite()

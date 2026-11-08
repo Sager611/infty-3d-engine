@@ -1,3 +1,4 @@
+#[cfg(test)]
 use super::pureweight;
 
 pub type V = [f64; 3];
@@ -19,6 +20,8 @@ pub struct Sample {
 }
 
 impl Sample {
+    #[cfg(test)]
+    #[must_use]
     pub fn packed(self, ray: Ray, rho: f64) -> [f64; 16] {
         [
             if self.hit { 1.0 } else { 0.0 },

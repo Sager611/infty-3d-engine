@@ -1,27 +1,42 @@
 #![allow(clippy::many_single_char_names, reason = "Matches analytic equations.")]
 
 #[path = "math/camera.rs"]
-mod camera_impl;
-#[path = "math/detail.rs"]
-mod detail;
-#[path = "math/footprint.rs"]
-mod footprint_impl;
-#[path = "math/plane.rs"]
-mod plane_impl;
-#[path = "math/sphere.rs"]
-mod sphere_impl;
-#[path = "math/types.rs"]
-mod types;
-#[path = "math/vector.rs"]
-mod vector;
-
-pub use camera_impl::camera;
-pub use detail::pureweight;
-pub use footprint_impl::footprint;
-pub use plane_impl::plane;
-pub use sphere_impl::sphere;
-pub use types::V;
+pub mod camera_impl;
 #[cfg(test)]
+#[path = "math/detail.rs"]
+pub mod detail;
+#[cfg(test)]
+#[path = "math/footprint.rs"]
+pub mod footprint_impl;
+#[path = "math/goursat.rs"]
+pub mod goursat_impl;
+#[path = "math/plane.rs"]
+pub mod plane_impl;
+#[path = "math/polynomial.rs"]
+pub mod polynomial;
+#[path = "math/sphere.rs"]
+pub mod sphere_impl;
+#[path = "math/types.rs"]
+pub mod types;
+#[path = "math/vector.rs"]
+pub mod vector;
+
+#[cfg(test)]
+pub use camera_impl::camera;
+pub use camera_impl::{CameraBasis, basis, camera_at};
+#[cfg(test)]
+pub use detail::pureweight;
+#[cfg(test)]
+pub use footprint_impl::footprint;
+#[cfg(test)]
+pub use goursat_impl::GoursatError;
+pub use goursat_impl::goursat;
+pub use plane_impl::plane;
+#[cfg(test)]
+pub use sphere_impl::sphere;
+pub use sphere_impl::sphere_at;
+#[cfg(test)]
+pub use types::V;
 pub use types::{Ray, Sample};
 
 #[cfg(test)]

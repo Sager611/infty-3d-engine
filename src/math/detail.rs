@@ -1,3 +1,4 @@
+#[must_use]
 pub fn pureweight(uv: [f64; 2], rho: f64) -> f64 {
     let rho = rho.clamp(0.0, 1.0);
     let lod = (-(rho.max(1.0e-12) * 32.0).log2()).clamp(0.0, 18.0);

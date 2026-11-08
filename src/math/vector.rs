@@ -1,4 +1,4 @@
-use super::V;
+use super::types::V;
 
 pub(super) fn dot(a: V, b: V) -> f64 {
     a[2].mul_add(b[2], a[1].mul_add(b[1], a[0] * b[0]))

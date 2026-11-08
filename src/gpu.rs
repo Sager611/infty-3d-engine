@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 use wgpu::util::DeviceExt;
 
-use crate::math;
+use crate::scene::{MAX_OBJECTS, Object, parse_camera, parse_objects};
 
 const MAX_WIDTH: u16 = 1_440;
 const MAX_HEIGHT: u16 = 1_000;
@@ -14,9 +14,24 @@ const MAX_HEIGHT: u16 = 1_000;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Params {
-    view: [f32; 4],
-    screen: [f32; 4],
+    origin: [f32; 4],
+    right: [f32; 4],
+    up: [f32; 4],
+    forward: [f32; 4],
+    screen: [u32; 4],
+    selection: [u32; 4],
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuObject {
+    meta: [u32; 4],
+    position_size: [f32; 4],
+    params: [f32; 4],
+}
+
+const _: () = assert!(std::mem::size_of::<Params>() == 96);
+const _: () = assert!(std::mem::size_of::<GpuObject>() == 48);
 
 /// WebGPU renderer for the analytic scene.
 #[wasm_bindgen]
@@ -28,12 +43,12 @@ pub struct Renderer {
     compute_pipeline: wgpu::ComputePipeline,
     present_pipeline: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
+    objects: wgpu::Buffer,
     output: wgpu::Texture,
     compute_bind_group: wgpu::BindGroup,
     present_bind_group: wgpu::BindGroup,
     width: u16,
     height: u16,
-    view: [f64; 4],
 }
 
 #[wasm_bindgen]
@@ -47,81 +62,11 @@ impl Renderer {
     /// Browser WebGPU futures are local to the browser event loop.
     #[allow(clippy::future_not_send, reason = "browser WebGPU futures are local")]
     pub async fn create(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
-        let width = u16::try_from(canvas.width().clamp(1, u32::from(MAX_WIDTH)))
-            .map_err(|_| js_error("canvas width is out of range"))?;
-        let height = u16::try_from(canvas.height().clamp(1, u32::from(MAX_HEIGHT)))
-            .map_err(|_| js_error("canvas height is out of range"))?;
-        let instance = wgpu::Instance::default();
-        let surface = instance
-            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
-            .map_err(|error| js_error(format!("surface creation failed: {error}")))?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                compatible_surface: Some(&surface),
-                ..Default::default()
-            })
-            .await
-            .map_err(|error| js_error(format!("adapter request failed: {error}")))?;
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
-            .await
-            .map_err(|error| js_error(format!("device request failed: {error}")))?;
-        let config = surface
-            .get_default_config(&adapter, u32::from(width), u32::from(height))
-            .ok_or_else(|| js_error("surface has no supported configuration"))?;
-        surface.configure(&device, &config);
-
-        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("scene shader"),
-            source: wgpu::ShaderSource::Wgsl(crate::shader::SOURCE.into()),
-        });
-        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("draw"),
-            layout: None,
-            module: &shader,
-            entry_point: Some("draw"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
-        });
-        let targets = [Some(wgpu::ColorTargetState {
-            format: config.format,
-            blend: None,
-            write_mask: wgpu::ColorWrites::ALL,
-        })];
-        let present_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("present"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &targets,
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-        if let Some(error) = validation.pop().await {
-            return Err(js_error(error.to_string()));
-        }
-        let params = Params {
-            view: [0.0, 0.0, 5.0, 1.0],
-            screen: [f32::from(width), f32::from(height), 0.0, 0.0],
-        };
-        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("params"),
-            contents: bytemuck::cast_slice(&[params]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let (width, height) = canvas_dimensions(&canvas)?;
+        let (surface, device, queue, config) = create_surface(canvas, width, height).await?;
+        let (compute_pipeline, present_pipeline) = create_pipelines(&device, config.format).await?;
+        let uniform = create_uniform(&device, width, height);
+        let objects = create_objects_buffer(&device)?;
         let output = create_output(&device, width, height);
         let (compute_bind_group, present_bind_group) = create_bind_groups(
             &device,
@@ -129,6 +74,7 @@ impl Renderer {
             &present_pipeline,
             &output,
             &uniform,
+            &objects,
         );
 
         Ok(Self {
@@ -139,20 +85,19 @@ impl Renderer {
             compute_pipeline,
             present_pipeline,
             uniform,
+            objects,
             output,
             compute_bind_group,
             present_bind_group,
             width,
             height,
-            view: [0.0, 0.0, 5.0, 1.0],
         })
     }
-
     /// Resizes the canvas and recreates the compute output texture.
     ///
     /// # Errors
     ///
-    /// Returns a JavaScript error if either dimension is zero.
+    /// Returns a JavaScript error if either dimension is zero or exceeds its limit.
     pub fn resize(&mut self, width: u16, height: u16) -> Result<(), JsValue> {
         if width == 0 || height == 0 {
             return Err(js_error("renderer dimensions must be positive"));
@@ -175,53 +120,31 @@ impl Renderer {
             &self.present_pipeline,
             &self.output,
             &self.uniform,
+            &self.objects,
         );
         Ok(())
     }
 
-    /// Renders one frame with the supplied orbit camera and scene settings.
+    /// Renders one frame from a six-value camera packet and an eight-value
+    /// packet per scene object.
     ///
     /// # Errors
     ///
-    /// Returns a JavaScript error for non-finite camera values, non-positive
-    /// distance or radius, or a lost, unavailable, or invalid surface frame.
+    /// Returns a JavaScript error if the camera, scene, mode, or selected IDs
+    /// are invalid, or if the surface frame is lost, unavailable, or invalid.
     pub fn render(
         &mut self,
-        yaw: f32,
-        pitch: f32,
-        distance: f32,
-        radius: f32,
+        camera: &[f64],
+        scene: &[f64],
         mode: u32,
+        selected: &[u32],
     ) -> Result<(), JsValue> {
-        let mode = match mode {
-            0 => 0.0,
-            1 => 1.0,
-            2 => 2.0,
-            _ => return Err(js_error("render mode must be 0, 1, or 2")),
-        };
-        if !yaw.is_finite()
-            || !pitch.is_finite()
-            || !distance.is_finite()
-            || !radius.is_finite()
-            || distance <= 0.0
-            || radius <= 0.0
-        {
-            return Err(js_error(
-                "camera values must be finite and positive where required",
-            ));
-        }
-        self.view = [
-            f64::from(yaw),
-            f64::from(pitch),
-            f64::from(distance),
-            f64::from(radius),
-        ];
-        let params = Params {
-            view: [yaw, pitch, distance, radius],
-            screen: [f32::from(self.width), f32::from(self.height), mode, 0.0],
-        };
+        let (params, gpu_objects) =
+            frame_params(camera, scene, mode, selected, self.width, self.height)?;
         self.queue
-            .write_buffer(&self.uniform, 0, bytemuck::cast_slice(&[params]));
+            .write_buffer(&self.uniform, 0, bytemuck::bytes_of(&params));
+        self.queue
+            .write_buffer(&self.objects, 0, bytemuck::cast_slice(&gpu_objects));
 
         let frame = acquire_frame(&self.surface, &self.device, &self.config)?;
         let frame_view = frame
@@ -271,44 +194,219 @@ impl Renderer {
         self.queue.present(frame);
         Ok(())
     }
+}
 
-    /// Returns packed sphere and plane samples for a normalized canvas point.
-    ///
-    /// # Errors
-    ///
-    /// Returns a JavaScript error if either coordinate is non-finite.
-    pub fn probe(&self, x: f64, y: f64) -> Result<Vec<f64>, JsValue> {
-        if !x.is_finite() || !y.is_finite() {
-            return Err(js_error("probe coordinates must be finite"));
-        }
-        let ray = math::camera(
-            self.view,
-            [f64::from(self.width), f64::from(self.height)],
-            [x, y],
-        );
-        let sphere_sample = math::sphere(ray, [0.0, self.view[3], 0.0], self.view[3]);
-        let plane_sample = math::plane(ray, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
-        let sphere_rho = math::footprint(
-            sphere_sample,
-            ray,
-            f64::from(self.height),
-            self.view[3],
-            true,
-        );
-        let plane_rho = math::footprint(
-            plane_sample,
-            ray,
-            f64::from(self.height),
-            self.view[3],
-            false,
-        );
-        let sphere = sphere_sample.packed(ray, sphere_rho);
-        let plane = plane_sample.packed(ray, plane_rho);
-        let mut samples = Vec::with_capacity(32);
-        samples.extend_from_slice(&sphere);
-        samples.extend_from_slice(&plane);
-        Ok(samples)
+fn frame_params(
+    camera_packet: &[f64],
+    scene_packet: &[f64],
+    mode: u32,
+    selected: &[u32],
+    width: u16,
+    height: u16,
+) -> Result<(Params, [GpuObject; MAX_OBJECTS]), JsValue> {
+    if mode > 2 {
+        return Err(js_error("render mode must be 0, 1, or 2"));
     }
+    let camera = parse_camera(camera_packet).map_err(|error| js_error(error.to_string()))?;
+    let objects = parse_objects(scene_packet).map_err(|error| js_error(error.to_string()))?;
+    let mut slot_mask = 0_u32;
+    for &id in selected {
+        let slot = objects
+            .iter()
+            .position(|object| object.id() == id)
+            .ok_or_else(|| js_error("selected object id is unknown"))?;
+        slot_mask |= 1_u32 << slot;
+    }
+
+    let basis = camera.basis();
+    let mut gpu_objects = [EMPTY_GPU_OBJECT; MAX_OBJECTS];
+    for (slot, object) in objects.iter().enumerate() {
+        gpu_objects[slot] = gpu_object(object);
+    }
+    let params = Params {
+        origin: [
+            f32_value(basis.origin[0]),
+            f32_value(basis.origin[1]),
+            f32_value(basis.origin[2]),
+            0.0,
+        ],
+        right: [
+            f32_value(basis.right[0]),
+            f32_value(basis.right[1]),
+            f32_value(basis.right[2]),
+            0.0,
+        ],
+        up: [
+            f32_value(basis.up[0]),
+            f32_value(basis.up[1]),
+            f32_value(basis.up[2]),
+            0.0,
+        ],
+        forward: [
+            f32_value(basis.forward[0]),
+            f32_value(basis.forward[1]),
+            f32_value(basis.forward[2]),
+            1.8,
+        ],
+        screen: [
+            u32::from(width),
+            u32::from(height),
+            mode,
+            u32::try_from(objects.len()).map_err(|_| js_error("too many scene objects"))?,
+        ],
+        selection: [slot_mask, 0, 0, 0],
+    };
+    Ok((params, gpu_objects))
+}
+
+fn canvas_dimensions(canvas: &HtmlCanvasElement) -> Result<(u16, u16), JsValue> {
+    let width = u16::try_from(canvas.width().clamp(1, u32::from(MAX_WIDTH)))
+        .map_err(|_| js_error("canvas width is out of range"))?;
+    let height = u16::try_from(canvas.height().clamp(1, u32::from(MAX_HEIGHT)))
+        .map_err(|_| js_error("canvas height is out of range"))?;
+    Ok((width, height))
+}
+
+#[allow(clippy::future_not_send, reason = "browser WebGPU futures are local")]
+async fn create_surface(
+    canvas: HtmlCanvasElement,
+    width: u16,
+    height: u16,
+) -> Result<
+    (
+        wgpu::Surface<'static>,
+        wgpu::Device,
+        wgpu::Queue,
+        wgpu::SurfaceConfiguration,
+    ),
+    JsValue,
+> {
+    let instance = wgpu::Instance::default();
+    let surface = instance
+        .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+        .map_err(|error| js_error(format!("surface creation failed: {error}")))?;
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        })
+        .await
+        .map_err(|error| js_error(format!("adapter request failed: {error}")))?;
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor::default())
+        .await
+        .map_err(|error| js_error(format!("device request failed: {error}")))?;
+    let config = surface
+        .get_default_config(&adapter, u32::from(width), u32::from(height))
+        .ok_or_else(|| js_error("surface has no supported configuration"))?;
+    surface.configure(&device, &config);
+    Ok((surface, device, queue, config))
+}
+
+#[allow(clippy::future_not_send, reason = "browser WebGPU futures are local")]
+async fn create_pipelines(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+) -> Result<(wgpu::ComputePipeline, wgpu::RenderPipeline), JsValue> {
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("scene shader"),
+        source: wgpu::ShaderSource::Wgsl(crate::shader::SOURCE.into()),
+    });
+    let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("draw"),
+        layout: None,
+        module: &shader,
+        entry_point: Some("draw"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        cache: None,
+    });
+    let targets = [Some(wgpu::ColorTargetState {
+        format,
+        blend: None,
+        write_mask: wgpu::ColorWrites::ALL,
+    })];
+    let present_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("present"),
+        layout: None,
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &targets,
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    if let Some(error) = validation.pop().await {
+        return Err(js_error(error.to_string()));
+    }
+    Ok((compute_pipeline, present_pipeline))
+}
+
+fn create_uniform(device: &wgpu::Device, width: u16, height: u16) -> wgpu::Buffer {
+    let params = Params {
+        origin: [0.0, 0.0, 1.0, 0.0],
+        right: [1.0, 0.0, 0.0, 0.0],
+        up: [0.0, 1.0, 0.0, 0.0],
+        forward: [0.0, 0.0, -1.0, 1.8],
+        screen: [u32::from(width), u32::from(height), 0, 0],
+        selection: [0; 4],
+    };
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("params"),
+        contents: bytemuck::cast_slice(&[params]),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    })
+}
+
+const EMPTY_GPU_OBJECT: GpuObject = GpuObject {
+    meta: [0; 4],
+    position_size: [0.0; 4],
+    params: [0.0; 4],
+};
+
+const fn gpu_object(object: &Object) -> GpuObject {
+    let position = object.position();
+    GpuObject {
+        meta: [object.id(), object.kind().tag(), 0, 0],
+        position_size: [
+            f32_value(position[0]),
+            f32_value(position[1]),
+            f32_value(position[2]),
+            f32_value(object.size()),
+        ],
+        params: [f32_value(object.parameter()), 0.0, 0.0, 0.0],
+    }
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "scene and camera validation bounds values well within f32"
+)]
+const fn f32_value(value: f64) -> f32 {
+    value as f32
+}
+
+fn create_objects_buffer(device: &wgpu::Device) -> Result<wgpu::Buffer, JsValue> {
+    let size = u64::try_from(std::mem::size_of::<GpuObject>() * MAX_OBJECTS)
+        .map_err(|_| js_error("object buffer size is out of range"))?;
+    Ok(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("objects"),
+        size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    }))
 }
 
 fn create_output(device: &wgpu::Device, width: u16, height: u16) -> wgpu::Texture {
@@ -334,6 +432,7 @@ fn create_bind_groups(
     present_pipeline: &wgpu::RenderPipeline,
     output: &wgpu::Texture,
     uniform: &wgpu::Buffer,
+    objects: &wgpu::Buffer,
 ) -> (wgpu::BindGroup, wgpu::BindGroup) {
     let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
     let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -347,6 +446,10 @@ fn create_bind_groups(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: objects.as_entire_binding(),
             },
         ],
     });

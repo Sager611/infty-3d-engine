@@ -6,7 +6,7 @@ fn sphere_uv(n: vec3f) -> vec2f {
   return vec2f(fract(atan2(n.z, n.x) / (2.0 * PI) + 0.5), v);
 }
 
-fn sphere(o: vec3f, d: vec3f, c: vec3f, r: f32) -> Query {
+fn sphere_at(o: vec3f, d: vec3f, c: vec3f, r: f32) -> Query {
   let oc = o - c;
   let b = dot(oc, d);
   let cc = dot(oc, oc) - r * r;
@@ -38,4 +38,8 @@ fn sphere(o: vec3f, d: vec3f, c: vec3f, r: f32) -> Query {
   if (l > 0.0) { n = v / l; }
   let p = c + r * n;
   return Query(false, closest_t, max(l - r, 0.0), p, n, sphere_uv(n));
+}
+
+fn sphere(o: vec3f, d: vec3f, c: vec3f, r: f32) -> Query {
+  return sphere_at(o, d, c, r);
 }

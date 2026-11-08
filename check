@@ -56,7 +56,7 @@ cargo clippy --locked --lib --target wasm32-unknown-unknown -- -Dwarnings
 cargo test --locked --lib
 bun run build:wasm
 bun run check
-bun test web/view.test.ts
+bun run test
 bun audit --audit-level low
 bun run build:web
 cargo deny check

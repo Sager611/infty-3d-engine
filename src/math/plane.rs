@@ -3,6 +3,7 @@ use super::{
     vector::{dot, madd, plane_uv, safe_normal, scale, sub},
 };
 
+#[must_use]
 pub fn plane(ray: Ray, a: V, n: V) -> Sample {
     let normal = safe_normal(n, [0.0, 1.0, 0.0]);
     let h = dot(normal, sub(ray.o, a));

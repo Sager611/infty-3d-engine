@@ -3,7 +3,12 @@
 #[cfg(any(test, target_arch = "wasm32"))]
 mod math;
 #[cfg(any(test, target_arch = "wasm32"))]
+mod scene;
+#[cfg(any(test, target_arch = "wasm32"))]
 mod shader;
+
+#[cfg(target_arch = "wasm32")]
+mod api;
 
 #[cfg(target_arch = "wasm32")]
 mod gpu;
@@ -11,5 +16,7 @@ mod gpu;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod gpu_test;
 
+#[cfg(target_arch = "wasm32")]
+pub use api::{query_ray, query_scene};
 #[cfg(target_arch = "wasm32")]
 pub use gpu::Renderer;

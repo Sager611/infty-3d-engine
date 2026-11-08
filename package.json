@@ -6,6 +6,7 @@
 		"build:wasm": "wasm-pack build --target web --dev",
 		"build:web": "bun build web/app.ts --outdir dist --target browser --external ./pkg/infty.js --minify",
 		"dev": "bun serve.ts",
+		"test": "bun test web/",
 		"check": "tsc --noEmit && biome check --error-on-warnings web serve.ts index.html package.json tsconfig.json biome.json"
 	},
 	"devDependencies": {

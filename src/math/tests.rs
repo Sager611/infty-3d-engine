@@ -1,5 +1,5 @@
 use super::vector::{add, scale};
-use super::{Ray, Sample, V, camera, footprint, plane, pureweight, sphere};
+use super::{GoursatError, Ray, Sample, V, camera, footprint, goursat, plane, pureweight, sphere};
 
 const EPS: f64 = 1.0e-10;
 
@@ -226,6 +226,27 @@ fn plane_precision_gap_normal_projection_and_basis() {
     close_v(tilted.n, n);
     close(tilted.uv[0], 2.0);
     close(tilted.uv[1], 3.0);
+}
+
+#[test]
+fn goursat_hit_miss_and_validation() -> Result<(), GoursatError> {
+    let hit = goursat(ray([0.5, 0.5, -3.0], [0.0, 0.0, 1.0]), 1.125, true)?;
+    assert!(hit.sample.hit);
+    close(hit.sample.t, 2.0);
+    assert_eq!(hit.gap_lower.to_bits(), 0.0f64.to_bits());
+    assert!(hit.error.is_finite());
+    let miss = goursat(ray([0.4999, 0.4999, -3.0], [0.0, 0.0, 1.0]), 1.125, true)?;
+    assert!(!miss.sample.hit);
+    assert!(miss.uncertain || miss.error.is_finite());
+    assert!(matches!(
+        goursat(ray([0.0; 3], [0.0; 3]), 1.125, false),
+        Err(GoursatError::InvalidRay)
+    ));
+    assert!(matches!(
+        goursat(ray([0.0; 3], [0.0, 0.0, 1.0]), 2.0, false),
+        Err(GoursatError::InvalidBeta)
+    ));
+    Ok(())
 }
 
 #[test]

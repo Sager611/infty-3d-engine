@@ -1,132 +1,84 @@
-// biome-ignore-all lint/nursery/useExplicitType: Strict TypeScript inference avoids contradictory redundant annotations.
-// biome-ignore-all lint/nursery/useQwikValidLexicalScope: This is vanilla DOM, not Qwik.
-import init, { Renderer } from "../pkg/infty.js";
+// biome-ignore-all lint/nursery/useQwikValidLexicalScope: Vanilla DOM coordination.
+import init, { query_scene, Renderer } from "../pkg/infty.js";
+import { frameCamera, zoomCamera } from "./camera.ts";
 import {
-	ANGLE_LIMIT,
-	DEFAULT_VIEW,
-	MAX_DISTANCE,
-	MAX_RADIUS,
-	MIN_DISTANCE_GAP,
-	MIN_RADIUS,
-	parseView,
-	serializeView,
-	type View,
-	type ViewMode,
-	YAW_LIMIT,
-} from "./view.ts";
+	type ControlsEvent,
+	type ControlsNodes,
+	type ControlsState,
+	controlsNodes,
+	listenControls,
+	propertyPatch,
+	renderControls,
+} from "./controls.ts";
+import { bindInput, type InputBindings } from "./input.ts";
+import { type Meter, startMetrics } from "./metrics.ts";
+import {
+	activateSelection,
+	canvasPixel,
+	decodeQueries,
+	EMPTY_SELECTION,
+	inspectResult,
+	type QueryResult,
+	type Selection,
+	selectionFromHits,
+} from "./query.ts";
+import { packScene, updateObject } from "./scene.ts";
+import {
+	cameraPacket,
+	DEFAULT_SNAPSHOT,
+	normalizeCamera,
+	parseSnapshot,
+	type Snapshot,
+	serializeSnapshot,
+} from "./state.ts";
 
-interface Sample {
-	hit: boolean;
-	t: number;
-	gap: number;
-	u: number;
-	v: number;
-}
-interface Pointer {
-	x: number;
-	y: number;
-}
-const browserPerformance: Performance & {
-	readonly memory?: Readonly<Record<"usedJSHeapSize", number>>;
-} = performance;
-const MIN_CANVAS_SIZE = 1;
-const MAX_CANVAS_WIDTH = 1440;
-const MAX_CANVAS_HEIGHT = 1000;
-const HIT_THRESHOLD = 0.5;
-const SAMPLE_STRIDE = 16;
-const UV_U_OFFSET = 3;
-const UV_V_OFFSET = 4;
-const MIN_PROBE_VALUES = SAMPLE_STRIDE * 2;
-const MS_PER_SECOND = 1000;
-const FOCUS_DISTANCE_FACTOR = 3;
-const HASH_SAVE_DELAY_MS = 150;
-const POINTER_SCALE = 0.008;
-const KEY_STEP = 0.08;
-const WHEEL_SCALE = 0.001;
-const BYTES_PER_MIB = Number("1048576");
-const METRICS_INTERVAL_MS = Number("1000");
-
-const canvasNode = document.getElementById("viewport");
-const radiusNode = document.getElementById("radius");
-const radiusValueNode = document.getElementById("radius-value");
-const modeNode = document.getElementById("mode");
-const resetNode = document.getElementById("reset");
-const focusNode = document.getElementById("focus");
-const metricsNode = document.getElementById("metrics");
-const inspectorNode = document.getElementById("inspector");
-const statusNode = document.getElementById("status");
-
+const MIN_SIZE = 1;
+const MAX_WIDTH = 1440;
+const MAX_HEIGHT = 1000;
+const MAX_PIXELS = 1_000_000;
+const HASH_DELAY = 150;
+const canvas: HTMLElement | null = document.getElementById("viewport");
+const modeNode: HTMLElement | null = document.getElementById("mode");
+const resetNode: HTMLElement | null = document.getElementById("reset");
+const focusNode: HTMLElement | null = document.getElementById("focus");
+const metricsNode: HTMLElement | null = document.getElementById("metrics");
+const inspectorNode: HTMLElement | null = document.getElementById("inspector");
+const statusNode: HTMLElement | null = document.getElementById("status");
 if (
 	!(
-		canvasNode instanceof HTMLCanvasElement &&
-		radiusNode instanceof HTMLInputElement &&
-		radiusValueNode instanceof HTMLOutputElement &&
+		canvas instanceof HTMLCanvasElement &&
 		modeNode instanceof HTMLSelectElement &&
 		resetNode instanceof HTMLButtonElement &&
 		focusNode instanceof HTMLButtonElement &&
-		metricsNode instanceof HTMLOutputElement &&
-		inspectorNode instanceof HTMLOutputElement &&
-		statusNode instanceof HTMLOutputElement
+		metricsNode instanceof HTMLElement &&
+		inspectorNode instanceof HTMLElement &&
+		statusNode instanceof HTMLElement
 	)
 ) {
 	throw new Error("Renderer controls are missing.");
 }
+const controls: ControlsNodes = controlsNodes(document);
+const metrics: HTMLElement = metricsNode;
+const inspector: HTMLElement = inspectorNode;
+const status: HTMLElement = statusNode;
 
-const canvas = canvasNode;
-const radiusInput = radiusNode;
-const radiusOutput = radiusValueNode;
-const modeSelect = modeNode;
-const resetButton = resetNode;
-const focusButton = focusNode;
-const metrics = metricsNode;
-const inspector = inspectorNode;
-const status = statusNode;
-
-const initialView = parseView(location.hash);
-
+let snapshot: Snapshot;
+let hashError: unknown;
+try {
+	snapshot = parseSnapshot(location.hash);
+} catch (error) {
+	snapshot = DEFAULT_SNAPSHOT;
+	hashError = error;
+}
+let selection: Selection = EMPTY_SELECTION;
+let pickAll = false;
 let renderer: Renderer | undefined;
 let wasmMemory: WebAssembly.Memory | undefined;
-let wasmStatus: "loading" | "available" | "unavailable" = "loading";
+let meter: Meter | undefined;
 let framePending = false;
-let pointerId: number | undefined;
-let previousX = 0;
-let previousY = 0;
-let lastPointer: Pointer | undefined;
-let yaw = initialView.yaw;
-let pitch = initialView.pitch;
-let distance = initialView.distance;
-let radius = initialView.radius;
-let mode: ViewMode = initialView.mode;
-let renderedFrames = 0;
-let metricsFrames = 0;
-let metricsAt = performance.now();
-let cpuElapsedMs: number | undefined;
-let metricsTimer: number | undefined;
+let frameRequest: number | undefined;
 let saveTimer: number | undefined;
-
-const clamp = (value: number, low: number, high: number): number => {
-	if (Number.isFinite(value)) {
-		return Math.min(high, Math.max(low, value));
-	}
-	return (low + high) / 2;
-};
-
-const format = (value: number, digits = 3): string => {
-	if (Number.isFinite(value)) {
-		return value.toFixed(digits);
-	}
-	return "—";
-};
-
-const readMode = (): ViewMode => {
-	if (modeSelect.value === "2") {
-		return 2;
-	}
-	if (modeSelect.value === "1") {
-		return 1;
-	}
-	return 0;
-};
+let disposed = false;
 
 const errorMessage = (error: unknown): string => {
 	if (error instanceof Error) {
@@ -135,351 +87,357 @@ const errorMessage = (error: unknown): string => {
 	return String(error);
 };
 
-const toMiB = (bytes: number): string => (bytes / BYTES_PER_MIB).toFixed(1);
-
 const setStatus = (message: string): void => {
 	status.textContent = message;
 };
 
-const readView = (): View => ({ yaw, pitch, distance, radius, mode });
+const stateForControls = (): ControlsState => ({
+	objects: snapshot.objects,
+	selection,
+	pickAll,
+});
 
-const applyView = (view: View): void => {
-	yaw = view.yaw;
-	pitch = view.pitch;
-	distance = view.distance;
-	radius = view.radius;
-	mode = view.mode;
+const updateUi = (): void => {
+	modeNode.value = String(snapshot.mode);
+	renderControls(controls, stateForControls());
 };
 
-const updateControls = (): void => {
-	radiusInput.value = radius.toString();
-	radiusOutput.value = radius.toFixed(2);
-	modeSelect.value = mode.toString();
-	focusButton.hidden = mode !== 2;
-};
-
-const saveView = (): void => {
-	saveTimer = undefined;
-	const hash = serializeView(readView());
-	if (location.hash !== hash) {
-		history.replaceState(null, "", hash);
-	}
-};
-
-const scheduleSave = (): void => {
+const scheduleHash = (): void => {
 	if (saveTimer !== undefined) {
 		window.clearTimeout(saveTimer);
 	}
-	saveTimer = window.setTimeout(saveView, HASH_SAVE_DELAY_MS);
+	saveTimer = window.setTimeout(() => {
+		saveTimer = undefined;
+		const hash = serializeSnapshot(snapshot);
+		if (location.hash !== hash) {
+			history.replaceState(null, "", hash);
+		}
+	}, HASH_DELAY);
 };
 
-const resetView = (): void => {
-	applyView(DEFAULT_VIEW);
-	updateControls();
+const invalidate = (): void => {
+	scheduleHash();
+	if (framePending || disposed) {
+		return;
+	}
+	framePending = true;
+	frameRequest = window.requestAnimationFrame(renderFrame);
+};
+
+const setSnapshot = (next: Snapshot): void => {
+	snapshot = next;
+	updateUi();
 	invalidate();
 };
 
-const resizeCanvas = (): void => {
-	if (!renderer) {
-		return;
-	}
-	const cssWidth = Math.max(MIN_CANVAS_SIZE, canvas.clientWidth);
-	const cssHeight = Math.max(MIN_CANVAS_SIZE, canvas.clientHeight);
-	const dpr = Math.max(
-		MIN_CANVAS_SIZE,
-		window.devicePixelRatio || MIN_CANVAS_SIZE,
-	);
-	const scale = Math.min(
-		dpr,
-		MAX_CANVAS_WIDTH / cssWidth,
-		MAX_CANVAS_HEIGHT / cssHeight,
-	);
-	const width = Math.max(MIN_CANVAS_SIZE, Math.round(cssWidth * scale));
-	const height = Math.max(MIN_CANVAS_SIZE, Math.round(cssHeight * scale));
-	if (canvas.width !== width || canvas.height !== height) {
-		canvas.width = width;
-		canvas.height = height;
-		try {
-			renderer.resize(width, height);
-		} catch (error) {
-			setStatus(`Resize failed: ${errorMessage(error)}`);
-		}
-	}
+const setCamera = (camera: Snapshot["camera"]): void => {
+	setSnapshot({ ...snapshot, camera: normalizeCamera(camera) });
 };
 
-const sampleAt = (values: Float64Array, offset: number): Sample => ({
-	hit: (values[offset] ?? 0) > HIT_THRESHOLD,
-	t: values[offset + 1] ?? Number.NaN,
-	gap: values[offset + 2] ?? Number.NaN,
-	u: values[offset + UV_U_OFFSET] ?? Number.NaN,
-	v: values[offset + UV_V_OFFSET] ?? Number.NaN,
-});
+const resetDefaults = (): void => {
+	selection = EMPTY_SELECTION;
+	pickAll = false;
+	setSnapshot(DEFAULT_SNAPSHOT);
+	inspector.textContent = "Move pointer over the canvas to inspect.";
+};
 
-const describeSample = (name: string, sample: Sample): string => {
-	let travel: string;
-	if (sample.hit) {
-		travel = `hit · t ${format(sample.t)}`;
-	} else {
-		travel = `miss · gap ${format(sample.gap)}`;
+const readMode = (): 0 | 1 | 2 => {
+	const value = Number(modeNode.value);
+	if (value !== 0 && value !== 1 && value !== 2) {
+		throw new Error("invalid display mode");
 	}
-	return `${name} ${travel} · UV ${format(sample.u)}, ${format(sample.v)}`;
+	return value;
+};
+
+const resizeCanvas = (): void => {
+	if (renderer === undefined) {
+		return;
+	}
+	const cssWidth = Math.max(MIN_SIZE, canvas.clientWidth);
+	const cssHeight = Math.max(MIN_SIZE, canvas.clientHeight);
+	const dpr = Math.max(MIN_SIZE, window.devicePixelRatio || MIN_SIZE);
+	const pixelScale = Math.min(
+		dpr,
+		Math.sqrt(MAX_PIXELS / (cssWidth * cssHeight)),
+		MAX_WIDTH / cssWidth,
+		MAX_HEIGHT / cssHeight,
+	);
+	const width = Math.max(
+		MIN_SIZE,
+		Math.min(MAX_WIDTH, Math.round(cssWidth * pixelScale)),
+	);
+	const height = Math.max(
+		MIN_SIZE,
+		Math.min(MAX_HEIGHT, Math.round(cssHeight * pixelScale)),
+	);
+	if (canvas.width === width && canvas.height === height) {
+		return;
+	}
+	canvas.width = width;
+	canvas.height = height;
+	renderer.resize(width, height);
+};
+
+const cameraValues = (): Float64Array =>
+	new Float64Array(cameraPacket(snapshot.camera));
+
+const sceneValues = (): Float64Array => packScene(snapshot.objects);
+
+const screenPoint = (clientX: number, clientY: number): Float64Array => {
+	const [x, y] = canvasPixel(
+		[canvas.width, canvas.height],
+		canvas.getBoundingClientRect(),
+		[clientX, clientY],
+	);
+	return new Float64Array([canvas.width, canvas.height, x, y]);
+};
+
+const queryAt = (
+	clientX: number,
+	clientY: number,
+	mode: 0 | 1 | 2,
+): readonly QueryResult[] => {
+	if (renderer === undefined) {
+		throw new Error("renderer unavailable");
+	}
+	return decodeQueries(
+		query_scene(
+			sceneValues(),
+			cameraValues(),
+			screenPoint(clientX, clientY),
+			mode,
+		),
+	);
 };
 
 const probe = (clientX: number, clientY: number): void => {
-	if (!renderer) {
+	if (!inspector.closest("details")?.open) {
 		return;
 	}
-	lastPointer = { x: clientX, y: clientY };
-	const rect = canvas.getBoundingClientRect();
-	if (rect.width <= 0 || rect.height <= 0) {
-		return;
-	}
-	const x = ((clientX - rect.left) / rect.width) * canvas.width;
-	const y = ((clientY - rect.top) / rect.height) * canvas.height;
 	try {
-		const values = renderer.probe(
-			clamp(x, 0, canvas.width),
-			clamp(y, 0, canvas.height),
-		);
-		if (values.length < MIN_PROBE_VALUES) {
-			throw new Error("probe returned fewer than two samples");
+		const results = queryAt(clientX, clientY, 2);
+		inspector.textContent = "No query results.";
+		if (results.length > 0) {
+			inspector.textContent = results.map(inspectResult).join("\n");
 		}
-		const sphere = sampleAt(values, 0);
-		const plane = sampleAt(values, SAMPLE_STRIDE);
-		inspector.textContent = `${describeSample("Sphere", sphere)}
-${describeSample("Plane", plane)}`;
 	} catch (error) {
-		inspector.textContent = `Probe failed: ${errorMessage(error)}`;
+		inspector.textContent = `Inspect failed: ${errorMessage(error)}`;
+	}
+};
+
+const pick = (clientX: number, clientY: number, all: boolean): void => {
+	try {
+		let queryMode: 0 | 1 = 0;
+		if (all) {
+			queryMode = 1;
+		}
+		const results = queryAt(clientX, clientY, queryMode);
+		selection = selectionFromHits(results);
+		updateUi();
+		invalidate();
+	} catch (error) {
+		updateUi();
+		setStatus(`Pick failed: ${errorMessage(error)}`);
+	}
+};
+
+const centerHitDistance = (): number | null => {
+	const rect = canvas.getBoundingClientRect();
+	const results = queryAt(
+		rect.left + rect.width / 2,
+		rect.top + rect.height / 2,
+		0,
+	);
+	return results.find((result) => result.hit)?.t ?? null;
+};
+
+const zoom = (amount: number): void => {
+	try {
+		setCamera(zoomCamera(snapshot.camera, amount, centerHitDistance()));
+	} catch (error) {
+		updateUi();
+		setStatus(`Zoom failed: ${errorMessage(error)}`);
+	}
+};
+
+const frame = (): void => {
+	try {
+		const aspect =
+			Math.max(MIN_SIZE, canvas.width) / Math.max(MIN_SIZE, canvas.height);
+		setCamera(
+			frameCamera(snapshot.camera, snapshot.objects, selection.ids, aspect),
+		);
+	} catch (error) {
+		updateUi();
+		setStatus(`Frame failed: ${errorMessage(error)}`);
+	}
+};
+
+const handleControls = (event: ControlsEvent): void => {
+	try {
+		if (event.kind === "select") {
+			if (event.id === null) {
+				selection = EMPTY_SELECTION;
+			} else if (!snapshot.objects.some((item) => item.id === event.id)) {
+				throw new Error("unknown object");
+			} else if (selection.ids.includes(event.id)) {
+				selection = activateSelection(selection, event.id);
+			} else {
+				selection = Object.freeze({
+					ids: Object.freeze([event.id]),
+					active: event.id,
+				});
+			}
+			updateUi();
+			invalidate();
+			return;
+		}
+		if (event.kind === "pickAll") {
+			pickAll = event.value;
+			updateUi();
+			invalidate();
+			return;
+		}
+		const object = snapshot.objects.find((item) => item.id === event.id);
+		if (object === undefined) {
+			throw new Error("unknown object");
+		}
+		const objects = updateObject(
+			snapshot.objects,
+			event.id,
+			propertyPatch(object, event.key, event.value),
+		);
+		setSnapshot({ ...snapshot, objects });
+	} catch (error) {
+		updateUi();
+		setStatus(`Control update failed: ${errorMessage(error)}`);
 	}
 };
 
 const renderFrame = (): void => {
+	frameRequest = undefined;
 	framePending = false;
-	resizeCanvas();
-	if (!renderer) {
+	if (renderer === undefined || disposed) {
 		return;
 	}
 	try {
+		resizeCanvas();
 		const started = performance.now();
 		renderer.render(
-			clamp(yaw, -YAW_LIMIT, YAW_LIMIT),
-			clamp(pitch, -ANGLE_LIMIT, ANGLE_LIMIT),
-			clamp(distance, radius + MIN_DISTANCE_GAP, MAX_DISTANCE),
-			clamp(radius, MIN_RADIUS, MAX_RADIUS),
-			mode,
+			cameraValues(),
+			sceneValues(),
+			snapshot.mode,
+			new Uint32Array(selection.ids),
 		);
-		cpuElapsedMs = performance.now() - started;
-		renderedFrames += 1;
+		meter?.record(performance.now() - started);
 		setStatus("");
-		if (lastPointer) {
-			probe(lastPointer.x, lastPointer.y);
-		}
 	} catch (error) {
 		setStatus(`Render failed: ${errorMessage(error)}`);
 	}
 };
 
-const invalidate = (): void => {
-	scheduleSave();
-	if (framePending) {
-		return;
-	}
-	framePending = true;
-	window.requestAnimationFrame(renderFrame);
-};
-
-const updateMetrics = (): void => {
-	if (document.visibilityState !== "visible") {
-		return;
-	}
-	const now = performance.now();
-	const elapsed = Math.max(MIN_CANVAS_SIZE, now - metricsAt);
-	const frames = renderedFrames - metricsFrames;
-	metricsAt = now;
-	metricsFrames = renderedFrames;
-	let fps = "idle";
-	if (frames !== 0) {
-		fps = `${((frames * MS_PER_SECOND) / elapsed).toFixed(1)}`;
-	}
-	let cpu = "—";
-	if (cpuElapsedMs !== undefined) {
-		cpu = cpuElapsedMs.toFixed(2);
-	}
-	let wasm: string = wasmStatus;
-	if (wasmMemory !== undefined) {
-		wasm = `${toMiB(wasmMemory.buffer.byteLength)} MiB`;
-	}
-	let heap = "unavailable";
-	const browserMemory = browserPerformance.memory;
-	if (browserMemory !== undefined) {
-		heap = `${toMiB(browserMemory.usedJSHeapSize)} MiB`;
-	}
-	metrics.textContent = `FPS ${fps} · CPU ${cpu}ms · JS ${heap} / WASM ${wasm}`;
-};
-
-const startMetrics = (): void => {
-	if (metricsTimer !== undefined) {
-		return;
-	}
-	metricsAt = performance.now();
-	metricsFrames = renderedFrames;
-	updateMetrics();
-	metricsTimer = window.setInterval(updateMetrics, METRICS_INTERVAL_MS);
-};
-
-const stopMetrics = (): void => {
-	if (metricsTimer === undefined) {
-		return;
-	}
-	window.clearInterval(metricsTimer);
-	metricsTimer = undefined;
-};
-
-const zoom = (amount: number): void => {
-	distance =
-		radius +
-		clamp(
-			Math.max(distance - radius, MIN_DISTANCE_GAP) * Math.exp(amount),
-			MIN_DISTANCE_GAP,
-			MAX_DISTANCE - radius,
-		);
-	invalidate();
-};
-
-radiusInput.addEventListener("input", () => {
-	radius = clamp(Number(radiusInput.value), MIN_RADIUS, MAX_RADIUS);
-	distance = clamp(distance, radius + MIN_DISTANCE_GAP, MAX_DISTANCE);
-	radiusOutput.value = radius.toFixed(2);
-	invalidate();
-});
-
-modeSelect.addEventListener("change", () => {
-	mode = readMode();
-	updateControls();
-	invalidate();
-});
-
-focusButton.addEventListener("click", () => {
-	yaw = Math.PI / 2;
-	pitch = 0;
-	distance = FOCUS_DISTANCE_FACTOR * radius;
-	updateControls();
-	invalidate();
-});
-
-resetButton.addEventListener("click", resetView);
-
-canvas.addEventListener("pointerdown", (event: PointerEvent) => {
-	pointerId = event.pointerId;
-	previousX = event.clientX;
-	previousY = event.clientY;
-	canvas.setPointerCapture(event.pointerId);
-	canvas.focus();
-});
-
-canvas.addEventListener("pointermove", (event: PointerEvent) => {
-	probe(event.clientX, event.clientY);
-	if (pointerId !== event.pointerId) {
-		return;
-	}
-	yaw -= (event.clientX - previousX) * POINTER_SCALE;
-	pitch = clamp(
-		pitch + (event.clientY - previousY) * POINTER_SCALE,
-		-ANGLE_LIMIT,
-		ANGLE_LIMIT,
-	);
-	previousX = event.clientX;
-	previousY = event.clientY;
-	invalidate();
-});
-
-const endPointer = (event: PointerEvent): void => {
-	if (pointerId !== event.pointerId) {
-		return;
-	}
-	pointerId = undefined;
-	if (canvas.hasPointerCapture(event.pointerId)) {
-		canvas.releasePointerCapture(event.pointerId);
+const hashChanged = (): void => {
+	try {
+		snapshot = parseSnapshot(location.hash);
+		selection = EMPTY_SELECTION;
+		pickAll = false;
+		updateUi();
+		invalidate();
+		setStatus("");
+	} catch (error) {
+		updateUi();
+		setStatus(`Invalid snapshot: ${errorMessage(error)}`);
 	}
 };
 
-canvas.addEventListener("pointerup", endPointer);
-canvas.addEventListener("pointercancel", endPointer);
-canvas.addEventListener(
-	"wheel",
-	(event: WheelEvent) => {
-		event.preventDefault();
-		zoom(event.deltaY * WHEEL_SCALE);
-	},
-	{ passive: false },
-);
+const resized = (): void => {
+	try {
+		resizeCanvas();
+		invalidate();
+	} catch (error) {
+		setStatus(`Resize failed: ${errorMessage(error)}`);
+	}
+};
 
-canvas.addEventListener("keydown", (event: KeyboardEvent) => {
-	if (event.key === "ArrowLeft") {
-		yaw -= KEY_STEP;
-	} else if (event.key === "ArrowRight") {
-		yaw += KEY_STEP;
-	} else if (event.key === "ArrowUp") {
-		pitch = clamp(pitch - KEY_STEP, -ANGLE_LIMIT, ANGLE_LIMIT);
-	} else if (event.key === "ArrowDown") {
-		pitch = clamp(pitch + KEY_STEP, -ANGLE_LIMIT, ANGLE_LIMIT);
-	} else if (event.key === "+" || event.key === "=") {
-		zoom(-KEY_STEP);
-	} else if (event.key === "-" || event.key === "_") {
-		zoom(KEY_STEP);
-	} else if (event.key.toLowerCase() === "r") {
-		resetView();
-	} else {
+const visibilityChanged = (): void => {
+	if (document.visibilityState === "hidden") {
+		if (frameRequest !== undefined) {
+			window.cancelAnimationFrame(frameRequest);
+			frameRequest = undefined;
+			framePending = false;
+		}
 		return;
 	}
-	event.preventDefault();
 	invalidate();
-});
+};
 
-window.addEventListener("resize", () => {
-	resizeCanvas();
-	invalidate();
-});
-
-window.addEventListener("hashchange", () => {
-	applyView(parseView(location.hash));
-	updateControls();
-	invalidate();
-});
-
-document.addEventListener("visibilitychange", () => {
-	if (document.visibilityState === "visible") {
-		startMetrics();
-	} else {
-		stopMetrics();
+const cleanup = (): void => {
+	if (disposed) {
+		return;
 	}
-});
+	disposed = true;
+	if (saveTimer !== undefined) {
+		window.clearTimeout(saveTimer);
+	}
+	if (frameRequest !== undefined) {
+		window.cancelAnimationFrame(frameRequest);
+	}
+	meter?.dispose();
+	renderer?.free();
+	removeControls?.();
+	removeInput?.();
+	window.removeEventListener("resize", resized);
+	window.removeEventListener("hashchange", hashChanged);
+	window.removeEventListener("visibilitychange", visibilityChanged);
+};
 
-metrics.title =
-	"FPS is rendered frames per second; CPU submission walltime is JavaScript wall-clock around render submission, not process CPU usage or GPU time; WASM and JS memory are MiB.";
-updateControls();
-if (document.visibilityState === "visible") {
-	startMetrics();
-}
+let removeControls: (() => void) | undefined;
+let removeInput: (() => void) | undefined;
 
 const start = async (): Promise<void> => {
 	try {
 		const wasm = await init();
 		wasmMemory = wasm.memory;
-		if (wasmMemory !== undefined) {
-			wasmStatus = "available";
-			canvas.dataset.wasmMemory = "available";
-		} else {
-			wasmStatus = "unavailable";
-			canvas.dataset.wasmMemory = "unavailable";
-		}
 		renderer = await Renderer.create(canvas);
 		resizeCanvas();
+		meter = startMetrics(metrics, wasmMemory);
 		invalidate();
 	} catch (error) {
 		setStatus(`WebGPU initialization failed: ${errorMessage(error)}`);
-		wasmStatus = "unavailable";
 	}
 };
 
+const inputBindings: InputBindings = {
+	canvas,
+	getCamera: () => snapshot.camera,
+	setCamera,
+	zoom,
+	pick,
+	probe,
+	probeOpen: () => inspector.closest("details")?.open === true,
+	pickAll: () => pickAll,
+	reset: resetDefaults,
+	frame,
+};
+
+removeControls = listenControls(controls, stateForControls, handleControls);
+removeInput = bindInput(inputBindings);
+modeNode.addEventListener("change", () => {
+	try {
+		setSnapshot({ ...snapshot, mode: readMode() });
+	} catch (error) {
+		updateUi();
+		setStatus(`Mode update failed: ${errorMessage(error)}`);
+	}
+});
+resetNode.addEventListener("click", resetDefaults);
+focusNode.addEventListener("click", frame);
+window.addEventListener("resize", resized);
+window.addEventListener("hashchange", hashChanged);
+window.addEventListener("visibilitychange", visibilityChanged);
+window.addEventListener("beforeunload", cleanup);
+updateUi();
+if (hashError !== undefined) {
+	setStatus(`Invalid snapshot: ${errorMessage(hashError)}`);
+}
 await start();

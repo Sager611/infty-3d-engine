@@ -1,0 +1,51 @@
+# Architecture
+
+Pure values describe the scene; thin adapters own browser and GPU effects.
+
+| Module | Contract |
+|---|---|
+| `src/math/` | f64 rays, roots, UVs, normals, footprints and gap estimates; typed numerical errors |
+| `src/scene/` | Validated objects/cameras; transformed first/all/inspect queries; deterministic packets |
+| `src/api.rs` | WASM packet adapters; invalid inputs become JavaScript errors |
+| `src/gpu.rs` | Explicit render inputs, buffers, resize and frame acquisition; no cached scene/camera model |
+| `src/shaders/` | f32 mirror of geometry/material contracts; shared compile-time shader manifest |
+| `web/{scene,state,query,camera}.ts` | Immutable records, absolute updates, URL codec, query decoding and framing |
+| `web/{controls,input,metrics}.ts` | Small DOM/input/timer adapters with cleanup |
+| `web/app.ts` | Snapshot, selection, queries, invalidation and resource lifecycle |
+
+## Data boundaries
+
+Object stride8: `[id,kind,px,py,pz,size,parameter,0]`. Kinds1/2/3 are sphere/Goursat/plane. Empty scenes are valid; maximum16 objects, unique IDs1..u32::MAX, position components[-20,20], size[0.01,4], Goursat beta[1.05,1.95]. Other parameters/padding are zero. Reject invalid packets; do not silently clamp them.
+
+Camera6: `[yaw,pitch,distance,targetX,targetY,targetZ]`. Normalize finite yaw; constrain pitch[-1.45,1.45], distance[0.0001,100], target[-20,20]. Query screen4 is `[width,height,x,y]`; browser picks floor/clamp CSS coordinates before pixel-center ray construction.
+
+`query_scene(objects8N,camera6,screen4,mode)` and `query_ray(objects8N,ray6,mode)` use mode0 first hit,1 all hits,2 inspection including misses. One nearest forward hit per object; hit order is(world t,id). Normalize ray direction. Uniform transforms use `world=position+size*local`, scaling distances/errors once.
+
+Query24: `[id,kind,hit,t,gapLower,gapUpper,px,py,pz,nx,ny,nz,u,v,rayX,rayY,rayZ,localX,localY,localZ,error,gapKind,status,0]`. Gap kind0 is analytic,1 bounded; public status0 is okay,1 uncertain. Hit gaps are zero. Missing witnesses are errors, not fabricated finite results.
+
+`Renderer.render(camera6,objects8N,displayMode,selectedIds)` receives the entire model explicitly. GPU frame/object layouts are96/48 bytes; scene storage is binding5. Initialization validates the pipeline; surface acquisition failures are explicit. Device recreation requires reloading rather than a background retry loop.
+
+## Geometry and display
+
+Sphere/two-sided-plane queries are analytic. The Goursat surface is `sum((p*p-1)^2)-beta=0`, enclosed by radius `sqrt(3+sqrt(3*beta))`. Cubic stationary roots isolate quartic intervals; finite refinement is not spatial ray marching.
+
+Sphere/plane gaps are analytic within floating-point precision. Quartic misses have an enclosing-sphere lower bound and a bracketed surface-witness upper bound, including position/rounding allowance. Numerical error is separate from interval width: never add it to the upper bound again. Bounds can be loose; uncertain results are labeled, not called exact closest distances.
+
+Selected sphere/quartic misses qualify for an outline only when their valid upper gap is below the pixel-scale thickness and their witness passes the depth test. No duplicate enlarged surfaces or hit fills. Loose witnesses can under-cover; planes have no finite silhouette. Internal shader status2/3 means uncomputed/invalid and cannot qualify.
+
+Modes0/1/2 are UV/Gap/Detail. Canonical UVs and analytic footprints apply object size once. Detail blends three adjacent hashed power-of-two grids with finite precision/LOD limits, not texture images or literally infinite detail.
+
+## State and effects
+
+Right controls are a native disclosure, closed by default. Plain clicks pick first; Alt/pick-all uses the clicked ray's hits. Drags/cancel/multitouch do not become picks. Selection is transient; one active object supplies metadata-driven controls.
+
+Saved scene URLs use `#s=1;camera6;mode;objects8N`. Legacy `#v=yaw,pitch,distance,radius,mode` keeps the original centered sphere/plane scene. URL replacement is single-shot debounced150ms. Updates are absolute/idempotent and copy caller-owned coordinates.
+
+Render only after invalidation. Visible-only1Hz metrics report CPU submission walltime and optional JS heap/WASM bytes—not CPU utilization, GPU time or total browser/GPU memory. Input/timer resources have explicit disposal.
+
+Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests, TypeScript/Biome, Bun tests, shell/Markdown and dependency checks. Browser screenshots/interaction checks remain separate acceptance evidence.
+
+## Changelog
+| When | Who | What | Why |
+|---|---|---|---|
+| 2026-11-08 | Assistant | Documented modules, packets, geometry, state and limits | Make behavior and effect ownership explicit |

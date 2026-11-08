@@ -155,58 +155,104 @@
 		#help strong {
 			font-weight: 650;
 		}
-		#controls {
+		.bottom {
+			position: fixed;
+			z-index: 1;
+			bottom: 14px;
 			left: 50%;
-			bottom: 16px;
+			display: grid;
+			gap: 8px;
 			width: min(440px, calc(100vw - 28px));
-			padding: 10px 12px;
 			transform: translateX(-50%);
+		}
+		#scene-controls {
+			position: fixed;
+			z-index: 2;
+			top: 104px;
+			right: 14px;
+			width: min(264px, calc(100vw - 28px));
+		}
+		#scene-controls:not([open]) {
+			width: auto;
+		}
+		#scene-controls > summary {
+			margin-left: auto;
+			list-style: none;
+			cursor: pointer;
+		}
+		#scene-controls > summary::-webkit-details-marker {
+			display: none;
+		}
+		#controls {
+			position: static;
+			margin-top: 8px;
+			max-height: calc(100dvh - 158px);
+			overflow: auto;
+			padding: 10px 12px;
 			border-radius: var(--radius);
 		}
 		.control-row {
-			display: flex;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 8px;
 			align-items: end;
-			gap: 12px;
 		}
-		.radius {
-			flex: 1;
-			min-width: 0;
+		.control-row > label:last-child {
+			grid-column: 1 / -1;
+		}
+		.properties {
+			margin-top: 8px;
+		}
+		.properties form {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 7px;
 		}
 		label {
 			display: grid;
-			gap: 5px;
+			gap: 4px;
+			min-width: 0;
 			color: var(--muted-foreground);
 			font-size: 12px;
 		}
 		output {
 			font-variant-numeric: tabular-nums;
 		}
-		#radius-value {
-			color: var(--primary);
+		.properties output {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
 		}
-		input[type="range"] {
-			width: 100%;
-			accent-color: var(--primary);
-		}
+		input,
 		select {
-			min-width: 94px;
+			min-width: 0;
+			width: 100%;
 			padding: 6px 8px;
 			border: 1px solid var(--border);
 			border-radius: 9px;
 			background: var(--muted);
+			color: var(--foreground);
+		}
+		input[type="number"] {
+			font-variant-numeric: tabular-nums;
+		}
+		input[type="range"] {
+			accent-color: var(--primary);
+		}
+		#pick-all {
+			align-self: end;
+		}
+		#probe {
+			position: static;
+			max-width: none;
+			padding: 5px 9px;
+			border-radius: 12px;
+		}
+		#probe:not([open]) {
+			justify-self: center;
 		}
 		#probe summary {
 			cursor: pointer;
-		}
-		#focus {
-			flex: 0 0 32px;
-		}
-		#probe {
-			left: 14px;
-			bottom: 14px;
-			max-width: min(340px, calc(100vw - 28px));
-			padding: 5px 9px;
-			border-radius: 12px;
 		}
 		#probe summary {
 			position: relative;
@@ -286,14 +332,17 @@
 				right: 10px;
 				max-width: calc(100vw - 20px);
 			}
-			#controls {
+			.bottom {
 				bottom: 10px;
 				width: calc(100vw - 20px);
-				padding: 9px 10px;
 			}
-			#probe {
-				left: 10px;
-				bottom: 96px;
+			#scene-controls {
+				top: 94px;
+				right: 10px;
+			}
+			#controls {
+				max-height: calc(100dvh - 144px);
+				padding: 9px 10px;
 			}
 			#status {
 				bottom: 78px;
@@ -332,10 +381,8 @@
 				id="focus"
 				class="icon"
 				type="button"
-				aria-label="Focus on detail"
-				data-tip="Focus + zoom"
-				data-detail-only
-				hidden
+				aria-label="Frame scene"
+				data-tip="Frame scene"
 			>
 				⊙
 			</button>
@@ -353,8 +400,15 @@
 		<div id="help" popover>
 			<h2>About</h2>
 			<p>
-				<strong>Controls</strong>Drag to orbit, scroll to zoom, arrows orbit,
-				+/− zoom, R resets.
+				<strong>Controls</strong>Click an object to inspect it. Alt-click or use
+				Pick all for every ray intersection on the next click. Drag to orbit,
+				scroll to zoom, arrows orbit, +/− zoom, R resets.
+			</p>
+			<p>
+				<strong>Scene</strong>Sphere and infinite-plane intersections are exact
+				analytic hits. Quartic surfaces use analytic polynomial refinement, not
+				ray marching: their gaps are bounded estimates with uncertainty. An
+				infinite plane has no finite silhouette.
 			</p>
 			<p>
 				<strong>Metrics</strong>CPU submission walltime is JavaScript wall-clock
@@ -362,10 +416,10 @@
 				memory readings, not GPU memory.
 			</p>
 			<p>
-				<strong>Detail</strong>Nested coordinate-hashed UV tiles use three
-				adjacent powers-of-two grids, smoothly blended from estimated pixel
-				footprint ρ. No loops or bitmap; finite float and pixel precision
-				remain.
+				<strong>Detail</strong>Existing nested coordinate-hashed UV tiles use
+				three adjacent powers-of-two grids, smoothly blended from estimated
+				pixel footprint ρ. No loops or bitmap; finite float and pixel precision
+				limits remain.
 				<br>
 				<code>
 					L = clamp(−log₂(32ρ), 0, 18), l = floor(L);
@@ -376,31 +430,62 @@
 			</p>
 		</div>
 
-		<section id="controls" class="glass" aria-label="Scene controls">
-			<div class="control-row">
-				<label class="radius" for="radius">
-					Radius <output id="radius-value">1.00</output>
-					<input
-						id="radius"
-						type="range"
-						min="0.25"
-						max="1.5"
-						step="0.01"
-						value="1"
-						aria-describedby="radius-value"
-						title="Set sphere radius"
+		<div class="bottom">
+			<details id="probe" class="glass">
+				<summary aria-label="Open crosshair probe" data-tip="Crosshair probe">
+					⌖
+				</summary>
+				<output id="inspector" aria-live="polite">
+					Move pointer over the canvas to probe.
+				</output>
+			</details>
+		</div>
+		<details id="scene-controls">
+			<summary
+				class="icon glass"
+				aria-label="Scene controls"
+				title="Scene controls"
+				data-tip="Scene controls"
+			>
+				<span aria-hidden="true">⚙︎</span>
+			</summary>
+			<section id="controls" class="glass" aria-label="Scene controls">
+				<div class="control-row">
+					<label for="object">
+						Object
+						<select id="object" title="Choose an object to inspect">
+							<option value="">Select object</option>
+						</select>
+					</label>
+					<button
+						id="pick-all"
+						class="icon"
+						type="button"
+						aria-label="Pick all ray intersections"
+						aria-pressed="false"
+						data-tip="Next click selects all ray intersections"
 					>
-				</label>
-				<label for="mode">
-					Mode
-					<select id="mode" title="Choose the ray diagnostic display">
-						<option value="0">UV</option>
-						<option value="1">Gap</option>
-						<option value="2">Detail</option>
-					</select>
-				</label>
-			</div>
-		</section>
+						✦
+					</button>
+					<label for="mode">
+						Mode
+						<select id="mode" title="Choose the ray diagnostic display">
+							<option value="0">UV</option>
+							<option value="1">Gap</option>
+							<option value="2">Detail</option>
+						</select>
+					</label>
+				</div>
+				<div
+					id="properties"
+					class="properties"
+					aria-label="Selected object properties"
+				></div>
+				<p id="selection-hint" class="selection-hint">
+					Select an object to edit its properties.
+				</p>
+			</section>
+		</details>
 
 		<output
 			id="metrics"
@@ -409,31 +494,17 @@
 		>
 			Loading
 		</output>
-		<details id="probe" class="glass">
-			<summary aria-label="Open crosshair probe" data-tip="Crosshair probe">
-				⌖
-			</summary>
-			<output id="inspector" aria-live="polite">
-				Move pointer over the canvas to probe.
-			</output>
-		</details>
 		<output id="status" class="glass" role="status" aria-live="polite"></output>
 
 		<script>
 		"use strict";
-		const mode = document.getElementById("mode");
 		const focus = document.getElementById("focus");
 		const viewport = document.getElementById("viewport");
-		function syncDetail() {
-			focus.hidden = mode.value !== "2";
-		}
 		function focusView() {
 			viewport.focus();
 			viewport.dispatchEvent(new CustomEvent("infty:focus", { bubbles: true }));
 		}
-		mode.addEventListener("change", syncDetail);
 		focus.addEventListener("click", focusView);
-		syncDetail();
 		</script>
 		<script type="module" src="/dist/app.js"></script>
 	</body>
