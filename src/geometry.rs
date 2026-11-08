@@ -121,7 +121,7 @@ impl Geometry {
     }
 }
 
-fn checked(result: GoursatSample) -> Result<GoursatSample, Error> {
+pub fn checked(result: GoursatSample) -> Result<GoursatSample, Error> {
     let sample = result.sample;
     let distances = [sample.t, sample.gap, result.gap_lower, result.error];
     if distances.iter().any(|x| !x.is_finite() || *x < 0.0)

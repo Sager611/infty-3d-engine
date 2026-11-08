@@ -4,7 +4,7 @@
 |---|---|
 | Geometry definition | Immutable validated canonical shape and parameters, shared by instances |
 | Shape kernel | Analytic intersections, surface coordinates and bounded geometry queries in canonical space |
-| Instance | Stable scene ID, geometry reference and positive uniform transform |
+| Instance | Stable scene ID, geometry reference, positive uniform transform and material reference (default0) |
 | Uniform transform | Translation plus one positive scale; distances and errors scale once |
 | Prepared scene | Immutable instances, shared definitions and conservative traversal data |
 | Scene query | Combines kernel results with deterministic ordering; no browser/GPU state |
@@ -20,3 +20,4 @@
 | When | Who | What | Why |
 |---|---|---|---|
 | 2026-11-08 | Assistant | Defined geometry, query and navigation terms | Keep module interfaces and numerical claims consistent |
+| 2026-11-08 | Assistant | Specified the default instance material reference | Separate appearance from shared geometry |

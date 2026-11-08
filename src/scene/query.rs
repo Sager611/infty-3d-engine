@@ -1,5 +1,10 @@
+use crate::geometry::{Error as GeometryError, Geometry};
 use crate::math::{Ray, Sample};
-use crate::scene::model::{Kind, MAX_OBJECTS, Object};
+use crate::scene::{
+    model::{Kind, Object, SceneError},
+    prepared::Prepared,
+    transform::Transform,
+};
 
 /// Which subset of the scene query results to return.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,30 +30,17 @@ pub struct SceneSample {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueryError {
     InvalidRay,
-    TooManyObjects,
-    DuplicateId,
-    InvalidId,
-    NonFinite,
-    InvalidPosition,
-    InvalidSize,
-    InvalidParameter,
-    Goursat,
+    Scene(SceneError),
+    Geometry(GeometryError),
 }
 
 impl std::fmt::Display for QueryError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let message = match self {
-            Self::InvalidRay => "ray origin/direction is invalid",
-            Self::TooManyObjects => "scene has too many objects",
-            Self::DuplicateId => "scene has a duplicate object id",
-            Self::InvalidId => "object id is invalid",
-            Self::NonFinite => "object contains a non-finite value",
-            Self::InvalidPosition => "object position is out of bounds",
-            Self::InvalidSize => "object size is out of bounds",
-            Self::InvalidParameter => "object parameter is invalid",
-            Self::Goursat => "Goursat query failed",
-        };
-        formatter.write_str(message)
+        match self {
+            Self::InvalidRay => formatter.write_str("ray origin/direction is invalid"),
+            Self::Scene(error) => error.fmt(formatter),
+            Self::Geometry(error) => error.fmt(formatter),
+        }
     }
 }
 
@@ -100,56 +92,40 @@ impl SceneSample {
 
 /// Query one object. The ray is normalized once, then transformed to the
 /// object's canonical unit-size coordinates.
+#[cfg(test)]
 pub fn query_object(object: &Object, ray: Ray, need_gap: bool) -> Result<SceneSample, QueryError> {
     validate_ray(ray)?;
-    validate_object(object)?;
-    let ray = normalized_ray(ray);
-    let position = object.position();
-    let size = object.size();
-    let local_ray = Ray {
-        o: [
-            (ray.o[0] - position[0]) / size,
-            (ray.o[1] - position[1]) / size,
-            (ray.o[2] - position[2]) / size,
-        ],
-        d: ray.d,
-    };
+    query_definition(
+        object.id(),
+        object.geometry(),
+        object.transform(),
+        normalized_ray(ray),
+        need_gap,
+    )
+}
 
-    let result = object
-        .geometry()
-        .query(local_ray, need_gap)
-        .map_err(|_| QueryError::Goursat)?;
-    let local_sample = result.sample;
-    let gap_lower = result.gap_lower;
-    let error = result.error;
-    let uncertain = result.uncertain;
-
-    let world_t = local_sample.t * size;
-    let world_gap = local_sample.gap * size;
-    let world_error = error * size;
-    let world_gap_lower = gap_lower * size;
-    let world_point = [
-        size.mul_add(local_sample.p[0], position[0]),
-        size.mul_add(local_sample.p[1], position[1]),
-        size.mul_add(local_sample.p[2], position[2]),
-    ];
-    let sample = Sample {
-        hit: local_sample.hit,
-        t: world_t,
-        gap: if local_sample.hit { 0.0 } else { world_gap },
-        p: world_point,
-        n: local_sample.n,
-        uv: local_sample.uv,
-    };
-
+fn query_definition(
+    id: u32,
+    geometry: Geometry,
+    transform: Transform,
+    ray: Ray,
+    need_gap: bool,
+) -> Result<SceneSample, QueryError> {
+    let result = geometry
+        .query(transform.local_ray(ray), need_gap)
+        .map_err(QueryError::Geometry)?;
+    let local = result.sample.p;
+    let world = transform
+        .world_query(result)
+        .map_err(QueryError::Geometry)?;
     Ok(SceneSample {
-        id: object.id(),
-        kind: object.kind(),
-        sample,
-        local: local_sample.p,
-        gap_lower: if sample.hit { 0.0 } else { world_gap_lower },
-        error: world_error,
-        uncertain,
+        id,
+        kind: geometry.kind(),
+        sample: world.sample,
+        local,
+        gap_lower: world.gap_lower,
+        error: world.error,
+        uncertain: world.uncertain,
     })
 }
 
@@ -160,16 +136,36 @@ pub fn query_objects(
     mode: QueryMode,
 ) -> Result<Vec<SceneSample>, QueryError> {
     validate_ray(ray)?;
-    validate_objects(objects)?;
+    let scene = Prepared::new(objects).map_err(QueryError::Scene)?;
+    query_prepared(&scene, ray, mode)
+}
+
+/// Reuse an immutable scene's definitions and hierarchy; normalize once.
+pub fn query_prepared(
+    scene: &Prepared,
+    ray: Ray,
+    mode: QueryMode,
+) -> Result<Vec<SceneSample>, QueryError> {
+    validate_ray(ray)?;
+    let ray = normalized_ray(ray);
     let need_gap = mode == QueryMode::Inspect;
     let candidates = if need_gap {
-        (0..objects.len()).collect()
+        (0..scene.instances().len()).collect()
     } else {
-        super::spatial::Spatial::new(objects).candidates(ray.o, ray.d)
+        scene.spatial().candidates(ray.o, ray.d)
     };
     let mut samples = candidates
         .into_iter()
-        .map(|index| query_object(&objects[index], ray, need_gap))
+        .map(|index| {
+            let instance = scene.instances()[index];
+            query_definition(
+                instance.id(),
+                scene.geometries()[instance.geometry()],
+                instance.transform(),
+                ray,
+                need_gap,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     match mode {
@@ -206,49 +202,6 @@ fn normalized_ray(ray: Ray) -> Ray {
     Ray {
         o: ray.o,
         d: [ray.d[0] / length, ray.d[1] / length, ray.d[2] / length],
-    }
-}
-
-fn validate_objects(objects: &[Object]) -> Result<(), QueryError> {
-    if objects.len() > MAX_OBJECTS {
-        return Err(QueryError::TooManyObjects);
-    }
-    let mut ids = std::collections::BTreeSet::new();
-    for object in objects {
-        validate_object(object)?;
-        if !ids.insert(object.id()) {
-            return Err(QueryError::DuplicateId);
-        }
-    }
-    Ok(())
-}
-
-fn validate_object(object: &Object) -> Result<(), QueryError> {
-    if object.id() == 0 {
-        return Err(QueryError::InvalidId);
-    }
-    let position = object.position();
-    if position.iter().any(|value| !value.is_finite()) {
-        return Err(QueryError::NonFinite);
-    }
-    if position.iter().any(|value| !(-20.0..=20.0).contains(value)) {
-        return Err(QueryError::InvalidPosition);
-    }
-    let size = object.size();
-    if !size.is_finite() {
-        return Err(QueryError::NonFinite);
-    }
-    if !(0.01..=4.0).contains(&size) {
-        return Err(QueryError::InvalidSize);
-    }
-    let parameter = object.parameter();
-    if !parameter.is_finite() {
-        return Err(QueryError::NonFinite);
-    }
-    match object.kind() {
-        Kind::Goursat if !(1.05..=1.95).contains(&parameter) => Err(QueryError::InvalidParameter),
-        Kind::Sphere | Kind::Plane if parameter != 0.0 => Err(QueryError::InvalidParameter),
-        Kind::Goursat | Kind::Sphere | Kind::Plane => Ok(()),
     }
 }
 
@@ -385,6 +338,10 @@ mod tests {
     fn invalid_ray_and_duplicate_ids_are_explicit() -> TestResult {
         let object = sphere(1, [0.0; 3], 1.0)?;
         assert!(matches!(
+            query_objects(&[object, object], ray([0.0; 3], [0.0; 3]), QueryMode::All),
+            Err(QueryError::InvalidRay)
+        ));
+        assert!(matches!(
             query_object(&object, ray([0.0; 3], [0.0; 3]), false),
             Err(QueryError::InvalidRay)
         ));
@@ -394,7 +351,7 @@ mod tests {
                 ray([0.0; 3], [1.0, 0.0, 0.0]),
                 QueryMode::All
             ),
-            Err(QueryError::DuplicateId)
+            Err(QueryError::Scene(SceneError::DuplicateId))
         ));
         Ok(())
     }

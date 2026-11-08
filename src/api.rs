@@ -9,6 +9,70 @@ const SCREEN_ARITY: usize = 4;
 const RAY_ARITY: usize = 6;
 const PACKED_STRIDE: usize = 24;
 
+/// Immutable validated instances, shared definitions and reusable hierarchy.
+#[wasm_bindgen]
+pub struct PreparedScene {
+    core: crate::scene::prepared::Prepared,
+}
+
+#[wasm_bindgen]
+impl PreparedScene {
+    /// Prepare object8N once; queries never rebuild its hierarchy.
+    ///
+    /// # Errors
+    /// Rejects invalid packets, duplicate IDs and excessive scene capacity.
+    #[wasm_bindgen(constructor)]
+    pub fn new(objects: &[f64]) -> Result<Self, JsValue> {
+        let objects = parse_objects(objects).map_err(scene_error)?;
+        let core = crate::scene::prepared::Prepared::new(&objects).map_err(scene_error)?;
+        Ok(Self { core })
+    }
+
+    /// Number of immutable scene instances.
+    #[must_use]
+    pub fn instance_count(&self) -> usize {
+        self.core.instances().len()
+    }
+
+    /// Number of shared canonical definitions.
+    #[must_use]
+    pub fn geometry_count(&self) -> usize {
+        self.core.geometries().len()
+    }
+
+    /// Query the prepared scene with a normalized origin/direction ray6.
+    ///
+    /// # Errors
+    /// Rejects invalid rays, modes, numerical evaluations and packed results.
+    pub fn query_ray(&self, ray: &[f64], mode: u32) -> Result<Vec<f64>, JsValue> {
+        let ray = parse_ray(ray)?;
+        let samples = crate::scene::query::query_prepared(&self.core, ray, parse_mode(mode)?)
+            .map_err(query_error)?;
+        pack_samples(samples, ray)
+    }
+
+    /// Query the prepared scene through camera6 and screen4.
+    ///
+    /// # Errors
+    /// Rejects invalid cameras, pixels, modes, evaluations and packed results.
+    pub fn query_camera(
+        &self,
+        camera: &[f64],
+        screen: &[f64],
+        mode: u32,
+    ) -> Result<Vec<f64>, JsValue> {
+        let camera = parse_camera(camera).map_err(camera_error)?;
+        let (width, height, x, y) = parse_screen(screen)?;
+        let ray = camera
+            .ray(width, height, x, y)
+            .map_err(camera_error)
+            .and_then(normalize_ray)?;
+        let samples = crate::scene::query::query_prepared(&self.core, ray, parse_mode(mode)?)
+            .map_err(query_error)?;
+        pack_samples(samples, ray)
+    }
+}
+
 /// Query a canonical closest surface point without an instance transform.
 ///
 /// Request3 is [absolute accuracy, relative accuracy, max evaluations].
@@ -85,7 +149,10 @@ pub fn query_scene(
         .ray(width, height, x, y)
         .map_err(camera_error)
         .and_then(normalize_ray)?;
-    collect_query(&objects, ray, mode)
+    pack_samples(
+        query_objects(&objects, ray, mode).map_err(query_error)?,
+        ray,
+    )
 }
 
 /// Query the validated scene with an origin and direction ray.
@@ -103,7 +170,10 @@ pub fn query_ray(objects: &[f64], ray: &[f64], mode: u32) -> Result<Vec<f64>, Js
     let objects = parse_objects(objects).map_err(scene_error)?;
     let ray = parse_ray(ray)?;
     let mode = parse_mode(mode)?;
-    collect_query(&objects, ray, mode)
+    pack_samples(
+        query_objects(&objects, ray, mode).map_err(query_error)?,
+        ray,
+    )
 }
 
 fn parse_screen(screen: &[f64]) -> Result<(u32, u32, f64, f64), JsValue> {
@@ -175,12 +245,10 @@ fn parse_mode(mode: u32) -> Result<QueryMode, JsValue> {
     }
 }
 
-fn collect_query(
-    objects: &[crate::scene::Object],
+fn pack_samples(
+    samples: Vec<crate::scene::query::SceneSample>,
     ray: Ray,
-    mode: QueryMode,
 ) -> Result<Vec<f64>, JsValue> {
-    let samples = query_objects(objects, ray, mode).map_err(query_error)?;
     let mut packed = Vec::with_capacity(samples.len() * PACKED_STRIDE);
     for sample in samples {
         if sample.error.to_bits() == f64::MAX.to_bits() {

@@ -3,6 +3,7 @@ use std::fmt;
 pub const MAX_OBJECTS: usize = 65_536;
 pub const OBJECT_STRIDE: usize = 8;
 
+use super::transform::Transform;
 use crate::geometry::Geometry;
 pub use crate::geometry::Kind;
 
@@ -10,8 +11,7 @@ pub use crate::geometry::Kind;
 pub struct Object {
     id: u32,
     geometry: Geometry,
-    position: [f64; 3],
-    size: f64,
+    transform: Transform,
 }
 
 impl Object {
@@ -25,20 +25,23 @@ impl Object {
         if id == 0 {
             return Err(SceneError::InvalidId);
         }
-        validate_position(position)?;
-        validate_size(size)?;
-        validate_parameter(kind, parameter)?;
+        let transform = Transform::new(position, size)?;
+        if !parameter.is_finite() {
+            return Err(SceneError::NonFinite);
+        }
         let geometry = Geometry::new(kind, parameter).map_err(|_| SceneError::InvalidParameter)?;
         Ok(Self {
             id,
             geometry,
-            position: position.map(normalize_zero),
-            size: normalize_zero(size),
+            transform,
         })
     }
 
     pub const fn geometry(self) -> Geometry {
         self.geometry
+    }
+    pub const fn transform(self) -> Transform {
+        self.transform
     }
 
     #[must_use]
@@ -53,12 +56,13 @@ impl Object {
 
     #[must_use]
     pub const fn position(self) -> [f64; 3] {
-        self.position
+        self.transform.position()
     }
 
+    #[cfg(test)]
     #[must_use]
     pub const fn size(self) -> f64 {
-        self.size
+        self.transform.scale()
     }
 
     #[must_use]
@@ -72,8 +76,7 @@ impl Default for Object {
         Self {
             id: 1,
             geometry: Geometry::SPHERE,
-            position: [0.0; 3],
-            size: 1.0,
+            transform: Transform::IDENTITY,
         }
     }
 }
@@ -178,61 +181,15 @@ pub fn pack_objects(objects: &[Object]) -> Vec<f64> {
         packet.extend_from_slice(&[
             f64::from(object.id),
             f64::from(object.kind().tag()),
-            object.position[0],
-            object.position[1],
-            object.position[2],
-            object.size,
+            object.position()[0],
+            object.position()[1],
+            object.position()[2],
+            object.size(),
             object.parameter(),
             0.0,
         ]);
     }
     packet
-}
-
-fn validate_position(position: [f64; 3]) -> Result<(), SceneError> {
-    if position.iter().any(|value| !value.is_finite()) {
-        return Err(SceneError::NonFinite);
-    }
-    if position.iter().any(|value| !(-20.0..=20.0).contains(value)) {
-        return Err(SceneError::InvalidPosition);
-    }
-    Ok(())
-}
-
-fn validate_size(size: f64) -> Result<(), SceneError> {
-    if !size.is_finite() {
-        return Err(SceneError::NonFinite);
-    }
-    if !(0.01..=4.0).contains(&size) {
-        return Err(SceneError::InvalidSize);
-    }
-    Ok(())
-}
-
-fn validate_parameter(kind: Kind, parameter: f64) -> Result<(), SceneError> {
-    if !parameter.is_finite() {
-        return Err(SceneError::NonFinite);
-    }
-    match kind {
-        Kind::Goursat => {
-            if (1.05..=1.95).contains(&parameter) {
-                Ok(())
-            } else {
-                Err(SceneError::InvalidParameter)
-            }
-        }
-        Kind::Sphere | Kind::Plane => {
-            if parameter == 0.0 {
-                Ok(())
-            } else {
-                Err(SceneError::InvalidParameter)
-            }
-        }
-    }
-}
-
-fn normalize_zero(value: f64) -> f64 {
-    if value == 0.0 { 0.0 } else { value }
 }
 
 #[cfg(test)]

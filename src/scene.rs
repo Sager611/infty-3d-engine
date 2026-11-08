@@ -6,14 +6,18 @@ pub mod camera;
 pub mod model;
 /// Shared geometry and instance storage ABI.
 pub mod packed;
+/// Immutable shared geometry, instances and hierarchy.
+pub mod prepared;
 /// Deterministic analytic scene queries.
 pub mod query;
 /// Conservative finite-object hierarchy with explicit unbounded leaves.
 pub mod spatial;
+/// Validated uniform transforms and coordinate mapping.
+pub mod transform;
 
 #[cfg(target_arch = "wasm32")]
 pub use camera::{CameraError, parse_camera};
 #[cfg(target_arch = "wasm32")]
-pub use model::{Object, SceneError, parse_objects};
+pub use model::{SceneError, parse_objects};
 #[cfg(target_arch = "wasm32")]
 pub use query::{QueryError, QueryMode, query_objects};

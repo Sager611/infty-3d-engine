@@ -10,10 +10,11 @@ pub struct Bounds {
 impl Bounds {
     #[must_use]
     pub fn object(object: Object) -> Option<Self> {
-        let radius = object.geometry().radius()? * object.size();
+        let radius = object.geometry().radius()?;
+        let transform = object.transform();
         Some(Self {
-            min: object.position().map(|x| x - radius),
-            max: object.position().map(|x| x + radius),
+            min: transform.world_point([-radius; 3]),
+            max: transform.world_point([radius; 3]),
         })
     }
 

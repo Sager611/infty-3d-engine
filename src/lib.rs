@@ -19,6 +19,6 @@ mod gpu;
 mod gpu_test;
 
 #[cfg(target_arch = "wasm32")]
-pub use api::{closest_point, query_ray, query_scene};
+pub use api::{PreparedScene, closest_point, query_ray, query_scene};
 #[cfg(target_arch = "wasm32")]
 pub use gpu::Renderer;

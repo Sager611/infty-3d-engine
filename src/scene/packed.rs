@@ -1,10 +1,7 @@
 //! GPU ABI: threaded nodes, instances and interned geometry in one storage buffer.
-use super::{
-    model::Object,
-    spatial::{Node, Spatial},
-};
+use super::{model::Object, prepared::Prepared, spatial::Node};
 use bytemuck::{Pod, Zeroable};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -21,26 +18,24 @@ pub struct Packet {
     pub count: u32,
 }
 
+pub fn pack(objects: &[Object], selected: &[u32]) -> Result<Packet, String> {
+    let scene = Prepared::new(objects).map_err(|error| error.to_string())?;
+    pack_prepared(&scene, selected).map_err(str::to_owned)
+}
+
 #[expect(
     clippy::cast_possible_truncation,
     reason = "Validated scene coordinates fit f32; branch bounds are inflated in shader"
 )]
-pub fn pack(objects: &[Object], selected: &[u32]) -> Result<Packet, &'static str> {
+pub fn pack_prepared(scene: &Prepared, selected: &[u32]) -> Result<Packet, &'static str> {
     let selected: BTreeSet<_> = selected.iter().copied().collect();
-    let ids: BTreeSet<_> = objects.iter().map(|o| o.id()).collect();
-    if !selected.is_subset(&ids) {
+    if selected.iter().any(|&id| scene.find(id).is_none()) {
         return Err("selected object id is unknown");
     }
-    let tree = Spatial::new(objects);
+    let tree = scene.spatial();
     let count = u32::try_from(tree.nodes.len()).map_err(|_| "too many nodes")?;
-    let mut geometries = BTreeMap::new();
-    for object in objects {
-        let key = (object.kind().tag(), object.parameter().to_bits());
-        let next = count + u32::try_from(geometries.len()).map_err(|_| "too many geometries")?;
-        geometries.entry(key).or_insert(next);
-    }
-    let mut records = Vec::with_capacity(tree.nodes.len() + geometries.len());
-    for node in tree.nodes {
+    let mut records = Vec::with_capacity(tree.nodes.len() + scene.geometries().len());
+    for &node in &tree.nodes {
         records.push(match node {
             Node::Branch { bounds, escape } => Record {
                 identity: [
@@ -63,28 +58,35 @@ pub fn pack(objects: &[Object], selected: &[u32]) -> Result<Packet, &'static str
                 ],
             },
             Node::Leaf(slot) => {
-                let object = objects[slot];
-                let p = object.position();
+                let instance = scene.instances()[slot];
+                let geometry = scene.geometries()[instance.geometry()];
+                let transform = instance.transform();
+                let p = transform.position();
                 Record {
                     identity: [
-                        object.id(),
-                        object.kind().tag(),
-                        u32::from(selected.contains(&object.id())),
-                        geometries[&(object.kind().tag(), object.parameter().to_bits())],
+                        instance.id(),
+                        geometry.kind().tag(),
+                        u32::from(selected.contains(&instance.id())),
+                        count
+                            + u32::try_from(instance.geometry())
+                                .map_err(|_| "too many geometries")?,
                     ],
-                    position_size: [p[0] as f32, p[1] as f32, p[2] as f32, object.size() as f32],
-                    params: [0.0; 4],
+                    position_size: [
+                        p[0] as f32,
+                        p[1] as f32,
+                        p[2] as f32,
+                        transform.scale() as f32,
+                    ],
+                    params: [0.0, 0.0, 0.0, f32::from_bits(instance.material())],
                 }
             }
         });
     }
-    let mut geometry_records: Vec<_> = geometries.into_iter().collect();
-    geometry_records.sort_unstable_by_key(|(_, slot)| *slot);
-    for ((kind, parameter), _) in geometry_records {
+    for geometry in scene.geometries() {
         records.push(Record {
-            identity: [0, kind, 0, 0],
+            identity: [0, geometry.kind().tag(), 0, 0],
             position_size: [0.0; 4],
-            params: [f64::from_bits(parameter) as f32, 0.0, 0.0, 0.0],
+            params: [geometry.parameter() as f32, 0.0, 0.0, 0.0],
         });
     }
     // WebGPU storage bindings cannot be empty.
