@@ -10,6 +10,14 @@ import {
 	propertyPatch,
 	renderControls,
 } from "./controls.ts";
+import {
+	addInstance,
+	cleanSelection,
+	createEditor,
+	deleteInstances,
+	type Editor,
+	undoDeletion,
+} from "./editing.ts";
 import { bindInput, type InputBindings } from "./input.ts";
 import { type Meter, startMetrics } from "./metrics.ts";
 import {
@@ -23,6 +31,7 @@ import {
 	selectionFromHits,
 } from "./query.ts";
 import { packScene, updateObject } from "./scene.ts";
+import { listenSceneActions, type SceneAction } from "./scene-actions.ts";
 import {
 	cameraPacket,
 	DEFAULT_SNAPSHOT,
@@ -61,6 +70,26 @@ const controls: ControlsNodes = controlsNodes(document);
 const metrics: HTMLElement = metricsNode;
 const inspector: HTMLElement = inspectorNode;
 const status: HTMLElement = statusNode;
+const toolsNode: HTMLElement | null = document.getElementById("scene-tools");
+const addMenu: HTMLElement | null = document.getElementById("add-menu");
+const deleteButton: HTMLElement | null =
+	document.getElementById("delete-objects");
+const undoButton: HTMLElement | null = document.getElementById("undo-delete");
+const deleteCount: HTMLElement | null = document.getElementById("delete-count");
+const sceneDetails: HTMLElement | null =
+	document.getElementById("scene-controls");
+if (
+	!(
+		toolsNode instanceof HTMLElement &&
+		addMenu instanceof HTMLElement &&
+		deleteButton instanceof HTMLButtonElement &&
+		undoButton instanceof HTMLButtonElement &&
+		deleteCount instanceof HTMLElement &&
+		sceneDetails instanceof HTMLDetailsElement
+	)
+) {
+	throw new Error("Scene tools missing");
+}
 
 let snapshot: Snapshot;
 let hashError: unknown;
@@ -71,6 +100,7 @@ try {
 	hashError = error;
 }
 let selection: Selection = EMPTY_SELECTION;
+let editor: Editor = createEditor(snapshot.objects);
 let pickAll = false;
 let renderer: Renderer | undefined;
 let wasmMemory: WebAssembly.Memory | undefined;
@@ -100,6 +130,13 @@ const stateForControls = (): ControlsState => ({
 const updateUi = (): void => {
 	modeNode.value = String(snapshot.mode);
 	renderControls(controls, stateForControls());
+	deleteButton.disabled = selection.ids.length === 0;
+	undoButton.disabled = editor.undo === null;
+	deleteCount.textContent = String(selection.ids.length);
+	const label = `Delete ${selection.ids.length} selected objects`;
+	deleteButton.ariaLabel = label;
+	deleteButton.title = label;
+	deleteButton.dataset.tip = label;
 };
 
 const scheduleHash = (): void => {
@@ -125,6 +162,11 @@ const invalidate = (): void => {
 };
 
 const setSnapshot = (next: Snapshot): void => {
+	if (snapshot.objects !== next.objects) {
+		editor = { ...editor, objects: next.objects, undo: null };
+		selection = cleanSelection(next.objects, selection);
+		inspector.textContent = "Move pointer over the canvas to inspect.";
+	}
 	snapshot = next;
 	updateUi();
 	invalidate();
@@ -135,6 +177,7 @@ const setCamera = (camera: Snapshot["camera"]): void => {
 };
 
 const resetDefaults = (): void => {
+	editor = createEditor(DEFAULT_SNAPSHOT.objects);
 	selection = EMPTY_SELECTION;
 	pickAll = false;
 	setSnapshot(DEFAULT_SNAPSHOT);
@@ -339,8 +382,10 @@ const renderFrame = (): void => {
 const hashChanged = (): void => {
 	try {
 		snapshot = parseSnapshot(location.hash);
+		editor = createEditor(snapshot.objects);
 		selection = EMPTY_SELECTION;
 		pickAll = false;
+		inspector.textContent = "Move pointer over the canvas to inspect.";
 		updateUi();
 		invalidate();
 		setStatus("");
@@ -385,12 +430,49 @@ const cleanup = (): void => {
 	meter?.dispose();
 	renderer?.free();
 	removeControls?.();
+	removeSceneActions?.();
+	addMenu.removeEventListener("toggle", focusShape);
 	removeInput?.();
 	window.removeEventListener("resize", resized);
 	window.removeEventListener("hashchange", hashChanged);
 	window.removeEventListener("visibilitychange", visibilityChanged);
 };
 
+const focusShape = (): void => {
+	if (addMenu.matches(":popover-open")) {
+		addMenu.querySelector<HTMLButtonElement>("button")?.focus();
+	}
+};
+const handleSceneAction = (action: SceneAction): void => {
+	try {
+		const current = { ...editor, selection };
+		if (action === "delete") {
+			editor = deleteInstances(current);
+		} else if (action === "undo") {
+			editor = undoDeletion(current);
+		} else {
+			editor = addInstance(current, action, {
+				...snapshot.camera,
+				aspect: canvas.width / canvas.height,
+			});
+			addMenu.hidePopover();
+			sceneDetails.open = true;
+		}
+		selection = editor.selection;
+		snapshot = { ...snapshot, objects: editor.objects };
+		inspector.textContent = "Move pointer over the canvas to inspect.";
+		updateUi();
+		invalidate();
+		if (action !== "delete" && action !== "undo") {
+			controls.properties.querySelector<HTMLInputElement>("input")?.focus();
+		} else {
+			canvas.focus();
+		}
+	} catch (error) {
+		setStatus(errorMessage(error));
+	}
+};
+let removeSceneActions: (() => void) | undefined;
 let removeControls: (() => void) | undefined;
 let removeInput: (() => void) | undefined;
 
@@ -420,6 +502,13 @@ const inputBindings: InputBindings = {
 	frame,
 };
 
+addMenu.addEventListener("toggle", focusShape);
+removeSceneActions = listenSceneActions(
+	toolsNode,
+	window,
+	() => addMenu.matches(":popover-open"),
+	handleSceneAction,
+);
 removeControls = listenControls(controls, stateForControls, handleControls);
 removeInput = bindInput(inputBindings);
 modeNode.addEventListener("change", () => {

@@ -249,4 +249,4 @@ const bindInput = (bindings: InputBindings): (() => void) => {
 	};
 };
 
-export { bindInput, isClick, type InputBindings };
+export { bindInput, isClick, editableTarget, type InputBindings };

@@ -171,4 +171,4 @@ const frameCamera = (
 	});
 };
 
-export { frameCamera, orbitCamera, zoomCamera };
+export { FOCAL_LENGTH, objectRadius, frameCamera, orbitCamera, zoomCamera };

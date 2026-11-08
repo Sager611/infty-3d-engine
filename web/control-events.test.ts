@@ -3,6 +3,7 @@
 import { expect, test } from "bun:test";
 import { type ControlsEvent, listenControls } from "./controls.ts";
 import type { Selection } from "./query.ts";
+import { deleteShortcut, listenSceneActions } from "./scene-actions.ts";
 import { DEFAULT_SNAPSHOT } from "./state.ts";
 
 test("delegated property input follows the input target and cleans up", () => {
@@ -87,4 +88,86 @@ test("property forms cannot navigate away on submit", () => {
 	const after = new Event("submit", { cancelable: true });
 	properties.dispatchEvent(after);
 	expect(after.defaultPrevented).toBe(false);
+});
+
+class Button extends EventTarget {
+	dataset = { sceneAction: "sphere" };
+	disabled = false;
+	closest(): Button {
+		return this;
+	}
+}
+
+const installElement = (): PropertyDescriptor | undefined => {
+	const previous = Object.getOwnPropertyDescriptor(globalThis, "Element");
+	Object.defineProperty(globalThis, "Element", {
+		value: Button,
+		configurable: true,
+	});
+	return previous;
+};
+const restoreElement = (previous: PropertyDescriptor | undefined): void => {
+	if (previous) {
+		Object.defineProperty(globalThis, "Element", previous);
+	} else {
+		Reflect.deleteProperty(globalThis, "Element");
+	}
+};
+
+test("scene actions delegate buttons, guard typing and menus, and dispose", () => {
+	const previous = installElement();
+	const root = new EventTarget();
+	const keyboard = new EventTarget();
+	const button = new Button();
+	const actions: string[] = [];
+	let menuOpen = false;
+	const dispose = listenSceneActions(
+		root,
+		keyboard,
+		() => menuOpen,
+		(action) => actions.push(action),
+	);
+	const click = (): void => {
+		const e = new Event("click");
+		Object.defineProperty(e, "target", { value: button });
+		root.dispatchEvent(e);
+	};
+	const key = (target: EventTarget | null): boolean => {
+		const e = new Event("keydown", { cancelable: true });
+		Object.defineProperties(e, {
+			key: { value: "Delete" },
+			target: { value: target },
+		});
+		keyboard.dispatchEvent(e);
+		return e.defaultPrevented;
+	};
+	try {
+		click();
+		button.dataset.sceneAction = "delete";
+		click();
+		button.disabled = true;
+		click();
+		button.disabled = false;
+		button.dataset.sceneAction = "unknown";
+		click();
+		expect(actions).toEqual(["sphere", "delete"]);
+		expect(key(null)).toBe(true);
+		menuOpen = true;
+		expect(key(null)).toBe(false);
+		menuOpen = false;
+		for (const tagName of ["INPUT", "TEXTAREA", "SELECT", "BUTTON"]) {
+			const target = Object.assign(new EventTarget(), { tagName });
+			expect(key(target)).toBe(false);
+		}
+		expect(deleteShortcut("Backspace", null, false, false)).toBe(true);
+		expect(deleteShortcut("Delete", null, true, false)).toBe(false);
+		dispose();
+		button.dataset.sceneAction = "undo";
+		click();
+		expect(key(null)).toBe(false);
+		expect(actions).toEqual(["sphere", "delete", "delete"]);
+	} finally {
+		dispose();
+		restoreElement(previous);
+	}
 });

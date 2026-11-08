@@ -183,6 +183,19 @@ const replaceObjectOptions = (
 	select: HTMLSelectElement,
 	objects: readonly SceneObject[],
 ): void => {
+	const options = select.options;
+	if (
+		options.length === objects.length + 1 &&
+		objects.every(
+			(object, index) =>
+				options[index + 1]?.value === String(object.id) &&
+				options[index + 1]?.textContent === objectLabel(object),
+		)
+	) {
+		return;
+	}
+	const focused = document.activeElement === select;
+	const previous = select.value;
 	const placeholder = document.createElement("option");
 	placeholder.value = "";
 	placeholder.textContent = "Select an object";
@@ -192,6 +205,9 @@ const replaceObjectOptions = (
 		option.value = String(object.id);
 		option.textContent = objectLabel(object);
 		select.append(option);
+	}
+	if (focused) {
+		select.value = previous;
 	}
 };
 

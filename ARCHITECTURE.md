@@ -10,6 +10,8 @@ Pure values describe the scene; thin adapters own browser and GPU effects.
 | `src/gpu.rs` | Explicit render inputs, buffers, resize and frame acquisition; no cached scene/camera model |
 | `src/shaders/` | f32 mirror of geometry/material contracts; shared compile-time shader manifest |
 | `web/{scene,state,query,camera}.ts` | Immutable records, absolute updates, URL codec, query decoding and framing |
+| `web/editing.ts` | Pure add/delete, stable IDs, selection repair and one-deletion undo |
+| `web/scene-actions.ts` | Delegated scene buttons and guarded delete keys; explicit cleanup |
 | `web/{controls,input,metrics}.ts` | Small DOM/input/timer adapters with cleanup |
 | `web/app.ts` | Snapshot, selection, queries, invalidation and resource lifecycle |
 
@@ -44,6 +46,8 @@ Modes0/1/2 are UV/Gap/Detail. Canonical UVs and analytic footprints apply object
 
 Right controls are a native disclosure, closed by default. Plain clicks pick first; Alt/pick-all uses the clicked ray's hits. Drags/cancel/multitouch do not become picks. Selection is transient; one active object supplies metadata-driven controls.
 
+Add chooses bounded candidates in the current camera plane, preferring separation while keeping finite enclosures in view; overlap is possible in crowded scenes. Portrait aspect reduces defaults. Capacity or an impossibly close view is an explicit error. IDs wrap past u32::MAX and skip live instances. Delete removes only selected instances. Undo retains one pre-deletion scene/selection (at most65,536 objects); another deletion replaces it. Add, property edits, reset and external URL loads invalidate it; camera, display and selection changes do not. Undo restores scene/selection, never the camera. Escape/light-dismiss closes the native shape picker; Delete/Backspace ignore editable controls, open picker, modifiers and repeats.
+
 Saved scene URLs use `#s=1;camera6;mode;objects8N`. Legacy `#v=yaw,pitch,distance,radius,mode` keeps the original centered sphere/plane scene. URL replacement is single-shot debounced150ms. Updates are absolute/idempotent and copy caller-owned coordinates.
 
 Render only after invalidation. Visible-only1Hz metrics report CPU submission walltime and optional JS heap/WASM bytes—not CPU utilization, GPU time or total browser/GPU memory. Input/timer resources have explicit disposal.
@@ -55,3 +59,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 |---|---|---|---|
 | 2026-11-08 | Assistant | Documented modules, packets, geometry, state and limits | Make behavior and effect ownership explicit |
 | 2026-11-08 | Assistant | Added shared geometry, scalable selection and threaded finite bounds | Support thousands without dropping gap/outline candidates |
+| 2026-11-08 | Assistant | Documented instance editing and bounded deletion undo | Make invalidation, allocation and keyboard behavior explicit |

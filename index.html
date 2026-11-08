@@ -354,6 +354,75 @@
 				min-width: 78px;
 			}
 		}
+		.scene-tools {
+			left: 14px;
+			bottom: 14px;
+			display: flex;
+			align-items: center;
+			gap: 4px;
+			padding: 4px;
+			border-radius: 999px;
+			z-index: 3;
+		}
+		.scene-tools .icon {
+			min-width: 44px;
+			height: 44px;
+		}
+		#add-object,
+		#delete-objects {
+			width: auto;
+			padding: 0 12px;
+			border-radius: 999px;
+			display: flex;
+			gap: 6px;
+		}
+		button:disabled {
+			opacity: 0.4;
+			cursor: default;
+		}
+		#add-menu {
+			inset: auto auto 76px 14px;
+			margin: 0;
+			width: 180px;
+			padding: 6px;
+			border: 1px solid var(--border);
+			border-radius: 16px;
+			background: var(--glass);
+			color: var(--foreground);
+			box-shadow: var(--shadow);
+			backdrop-filter: blur(16px);
+		}
+		#add-menu button {
+			display: flex;
+			gap: 12px;
+			align-items: center;
+			width: 100%;
+			min-height: 44px;
+			border: 0;
+			padding: 8px 12px;
+			border-radius: 10px;
+			background: transparent;
+			color: inherit;
+			text-align: left;
+		}
+		#add-menu button:hover,
+		#add-menu button:focus-visible {
+			background: var(--accent);
+		}
+		.scene-tools .icon::after {
+			top: auto;
+			bottom: calc(100% + 8px);
+			left: 0;
+			right: auto;
+		}
+		#delete-objects:not(:disabled) {
+			color: #a44940;
+		}
+		@media (max-width: 600px) {
+			#probe:not([open]) {
+				justify-self: end;
+			}
+		}
 		</style>
 	</head>
 	<body>
@@ -486,6 +555,55 @@
 				</p>
 			</section>
 		</details>
+
+		<div id="scene-tools" class="scene-tools glass" aria-label="Scene editing">
+			<button
+				id="add-object"
+				class="icon"
+				type="button"
+				popovertarget="add-menu"
+				aria-label="Add geometry"
+				title="Add geometry"
+				data-tip="Add geometry"
+			>
+				<span aria-hidden="true">＋</span>Add
+			</button>
+			<button
+				id="delete-objects"
+				class="icon"
+				type="button"
+				data-scene-action="delete"
+				aria-label="Delete selected objects"
+				title="Delete selected objects"
+				data-tip="Delete selected objects"
+				disabled
+			>
+				<span aria-hidden="true">⌫</span><span id="delete-count">0</span>
+			</button>
+			<button
+				id="undo-delete"
+				class="icon"
+				type="button"
+				data-scene-action="undo"
+				aria-label="Undo deletion"
+				title="Undo deletion"
+				data-tip="Undo deletion"
+				disabled
+			>
+				↶
+			</button>
+			<div id="add-menu" popover aria-label="Geometry shapes">
+				<button type="button" data-scene-action="sphere">
+					<span aria-hidden="true">○</span>Sphere
+				</button>
+				<button type="button" data-scene-action="goursat">
+					<span aria-hidden="true">✣</span>Goursat
+				</button>
+				<button type="button" data-scene-action="plane">
+					<span aria-hidden="true">▱</span>Plane
+				</button>
+			</div>
+		</div>
 
 		<output
 			id="metrics"
