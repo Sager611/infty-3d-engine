@@ -1,5 +1,6 @@
 > AGENTS.md must be <100 lines, excluding this terminal Changelog.
 
+- REQUIREMENTS.md is the complete source of project requirements.
 - Every change: maximum deletion, minimum addition; minimize final words/characters/code across all files, including AGENTS.md; preserve required behavior/tests.
 - Architecture MUST be modular and functional-first at every level: dynamic, readable, maintainable, changeable, debuggable; specify module behavior, interfaces, state, and errors for every edge case; no hidden state; idempotent updates; pure cores isolated from effects.
 - After every completed change, commit and push.
@@ -21,3 +22,4 @@
 | 2026-11-06 19:34 UTC | Assistant | Added commit-and-push completion rule | Keep completed changes published |
 | 2026-11-07 | Assistant | Added modular functional-first architecture rule | Keep behavior explicit, dynamic, and easy to change/debug |
 | 2026-11-07 | User | Prohibited workers and subagents | Require direct execution |
+| 2026-11-08 | Assistant | Made REQUIREMENTS.md authoritative | Centralize project requirements |
