@@ -3,38 +3,15 @@ use std::fmt;
 pub const MAX_OBJECTS: usize = 65_536;
 pub const OBJECT_STRIDE: usize = 8;
 
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Sphere = 1,
-    Goursat = 2,
-    Plane = 3,
-}
-
-impl Kind {
-    #[must_use]
-    pub const fn from_tag(tag: u32) -> Option<Self> {
-        match tag {
-            1 => Some(Self::Sphere),
-            2 => Some(Self::Goursat),
-            3 => Some(Self::Plane),
-            _ => None,
-        }
-    }
-
-    #[must_use]
-    pub const fn tag(self) -> u32 {
-        self as u32
-    }
-}
+use crate::geometry::Geometry;
+pub use crate::geometry::Kind;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Object {
     id: u32,
-    kind: Kind,
+    geometry: Geometry,
     position: [f64; 3],
     size: f64,
-    parameter: f64,
 }
 
 impl Object {
@@ -51,20 +28,17 @@ impl Object {
         validate_position(position)?;
         validate_size(size)?;
         validate_parameter(kind, parameter)?;
+        let geometry = Geometry::new(kind, parameter).map_err(|_| SceneError::InvalidParameter)?;
         Ok(Self {
             id,
-            kind,
+            geometry,
             position: position.map(normalize_zero),
             size: normalize_zero(size),
-            parameter: normalize_zero(parameter),
         })
     }
 
-    pub const fn geometry(self) -> super::geometry::Geometry {
-        super::geometry::Geometry {
-            kind: self.kind,
-            parameter: self.parameter,
-        }
+    pub const fn geometry(self) -> Geometry {
+        self.geometry
     }
 
     #[must_use]
@@ -74,7 +48,7 @@ impl Object {
 
     #[must_use]
     pub const fn kind(self) -> Kind {
-        self.kind
+        self.geometry.kind()
     }
 
     #[must_use]
@@ -89,7 +63,7 @@ impl Object {
 
     #[must_use]
     pub const fn parameter(self) -> f64 {
-        self.parameter
+        self.geometry.parameter()
     }
 }
 
@@ -97,10 +71,9 @@ impl Default for Object {
     fn default() -> Self {
         Self {
             id: 1,
-            kind: Kind::Sphere,
+            geometry: Geometry::SPHERE,
             position: [0.0; 3],
             size: 1.0,
-            parameter: 0.0,
         }
     }
 }
@@ -204,12 +177,12 @@ pub fn pack_objects(objects: &[Object]) -> Vec<f64> {
     for object in objects {
         packet.extend_from_slice(&[
             f64::from(object.id),
-            f64::from(object.kind.tag()),
+            f64::from(object.kind().tag()),
             object.position[0],
             object.position[1],
             object.position[2],
             object.size,
-            object.parameter,
+            object.parameter(),
             0.0,
         ]);
     }

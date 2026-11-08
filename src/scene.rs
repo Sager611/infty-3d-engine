@@ -2,8 +2,6 @@
 
 /// Validated orbit camera parsing and ray construction.
 pub mod camera;
-/// Canonical analytic geometry contract, independent of instances.
-pub mod geometry;
 /// Validated scene object model and packet conversion.
 pub mod model;
 /// Shared geometry and instance storage ABI.

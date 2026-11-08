@@ -5,6 +5,7 @@ Pure values describe the scene; thin adapters own browser and GPU effects.
 | Module | Contract |
 |---|---|
 | `src/math/` | f64 rays, roots, UVs, normals, footprints and gap estimates; typed numerical errors |
+| `src/geometry.rs`, `src/geometry/` | Validated canonical definitions, kernel dispatch and bounded closest-query contracts |
 | `src/scene/` | Validated objects/cameras; transformed first/all/inspect queries; deterministic packets |
 | `src/api.rs` | WASM packet adapters; invalid inputs become JavaScript errors |
 | `src/gpu.rs` | Explicit render inputs, buffers, resize and frame acquisition; no cached scene/camera model |
@@ -29,7 +30,7 @@ Query24: `[id,kind,hit,t,gapLower,gapUpper,px,py,pz,nx,ny,nz,u,v,rayX,rayY,rayZ,
 
 ## Geometry and display
 
-Extension boundary: `scene/geometry.rs` supplies a canonical analytic query and optional enclosing radius. Add a kind/tag, validated parameters, its CPU kernel and matching WGSL dispatch, then web metadata/material mapping. Transforms, hierarchy, shared-geometry interning and selection stay unchanged. This is a compiled analytic-kernel interface, not runtime shader loading; the existing sphere, quartic and unbounded plane exercise it without a new shape catalog.
+Extension seam: `geometry.rs` supplies validated canonical definitions, analytic queries and an optional enclosing radius. Add a kind/tag, validated parameters, its CPU kernel and matching WGSL dispatch, then web metadata/material mapping. Transforms, hierarchy, shared-geometry interning and selection stay unchanged. This is a compiled analytic-kernel interface, not runtime shader loading; the existing sphere, quartic and unbounded plane exercise it without a new shape catalog.
 
 Primary GPU traversal expands branch bounds for the maximum possible pixel outline cone and the visible gap halo; ray-only rejection is reserved for shadows and CPU hit queries. Thus misses just outside an object's ray bounds remain candidates. Slab tests explicitly handle parallel rays and inflate for rounding. Overlapping geometry or many infinite planes can degrade to exhaustive traversal; no acceleration changes exact first/all ordering or inspection cardinality.
 
@@ -41,6 +42,8 @@ Sphere/plane gaps are analytic within floating-point precision. Quartic misses h
 Selected sphere/quartic misses qualify for an outline only when their valid upper gap is below the pixel-scale thickness and their witness passes the depth test. No duplicate enlarged surfaces or hit fills. Loose witnesses can under-cover; planes have no finite silhouette. Internal shader status2/3 means uncomputed/invalid and cannot qualify.
 
 Modes0/1/2 are UV/Gap/Detail. Canonical UVs and analytic footprints apply object size once. Detail blends three adjacent hashed power-of-two grids with finite precision/LOD limits, not texture images or literally infinite detail.
+
+Closest-point request3 is `[absolute,relative,maxEvaluations]`; maximum65,536 evaluations, default4,096. Closest12 is `[resolution,multiplicity,hasWitness,lower,upper,x,y,z,positionError,evaluations,0,0]`. Resolution0/1 is converged/unresolved; multiplicity0/1/2 is unique/non-unique/unknown. Zero work returns no witness and `[0,infinity]`, never a miss. Distances are unsigned and position error is separate. Sphere/plane adapters are analytic; quartic closest queries remain explicitly unsupported until the bounded solver is integrated.
 
 ## State and effects
 
@@ -60,3 +63,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-08 | Assistant | Documented modules, packets, geometry, state and limits | Make behavior and effect ownership explicit |
 | 2026-11-08 | Assistant | Added shared geometry, scalable selection and threaded finite bounds | Support thousands without dropping gap/outline candidates |
 | 2026-11-08 | Assistant | Documented instance editing and bounded deletion undo | Make invalidation, allocation and keyboard behavior explicit |
+| 2026-11-08 | Assistant | Split canonical query contracts from scene effects | Centralize validation, accuracy and unresolved outcomes |

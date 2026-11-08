@@ -9,6 +9,56 @@ const SCREEN_ARITY: usize = 4;
 const RAY_ARITY: usize = 6;
 const PACKED_STRIDE: usize = 24;
 
+/// Query a canonical closest surface point without an instance transform.
+///
+/// Request3 is [absolute accuracy, relative accuracy, max evaluations].
+/// Result12 is [resolution, multiplicity, has witness, lower, upper,
+/// x, y, z, position error, evaluations, 0, 0]. Resolution0 is converged;
+/// multiplicity0/1/2 is unique/non-unique/unknown. Unresolved upper may be infinity.
+///
+/// # Errors
+/// Rejects malformed/invalid requests, points, kinds and parameters, unsupported
+/// kernels and unrepresentable arithmetic. Budget exhaustion is not a miss.
+#[wasm_bindgen]
+pub fn closest_point(
+    kind: u32,
+    parameter: f64,
+    point: &[f64],
+    request: &[f64],
+) -> Result<Vec<f64>, JsValue> {
+    let kind =
+        crate::geometry::Kind::from_tag(kind).ok_or_else(|| js_error("invalid geometry kind"))?;
+    let geometry =
+        crate::geometry::Geometry::new(kind, parameter).map_err(|e| js_error(e.to_string()))?;
+    let &[x, y, z] = point else {
+        return Err(js_error("point packet must contain three values"));
+    };
+    let &[absolute, relative, evaluations] = request else {
+        return Err(js_error("request packet must contain three values"));
+    };
+    let request = crate::geometry::point::Request {
+        absolute,
+        relative,
+        max_evaluations: checked_evaluations(evaluations)?,
+    };
+    let result = geometry
+        .closest([x, y, z], request)
+        .map_err(|e| js_error(e.to_string()))?;
+    Ok(result.packed().to_vec())
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Finite integral evaluation count is checked before conversion"
+)]
+fn checked_evaluations(value: f64) -> Result<u32, JsValue> {
+    if !value.is_finite() || !(0.0..=65_536.0).contains(&value) || value.fract() != 0.0 {
+        return Err(js_error("invalid evaluation count"));
+    }
+    Ok(value as u32)
+}
+
 /// Query the validated scene through a camera pixel.
 ///
 /// The object packet uses eight values per object. The camera packet is
