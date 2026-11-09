@@ -6,15 +6,7 @@ use super::{
 
 use crate::diagnostic::{Recorder, Tag};
 
-/// A validated Goursat query result.
-#[derive(Clone, Copy)]
-pub struct GoursatSample {
-    pub sample: Sample,
-    pub gap_lower: f64,
-    pub error: f64,
-    pub uncertain: bool,
-    pub gap_computed: bool,
-}
+pub use super::types::GeometrySample as GoursatSample;
 
 /// Errors returned when a Goursat query cannot be evaluated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

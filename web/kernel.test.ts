@@ -55,6 +55,7 @@ test("WASM opt-in traces keep the same result and bounded prefix at every capaci
 		[1, 0],
 		[2, 1.5],
 		[3, 0],
+		[4, 0],
 	] as const) {
 		const normal = closest_point(kind, parameter, position, request);
 		const full = tracePacket(
@@ -219,6 +220,45 @@ test("WASM large quartic holes remain misses and expose only computed inspection
 		} finally {
 			prepared.free();
 		}
+	}
+});
+
+test("WASM crystalline instances retain fixed work, tag four and explicit skipped gaps", () => {
+	const origin = new Float64Array(3);
+	const fixed = new Float64Array([1e-12, 0, 27]);
+	const result = closest_point(4, 0, origin, fixed);
+	expect(Array.from(result.slice(0, 5))).toEqual([0, 0, 1, 0, 0]);
+	expect(result[9]).toBe(27);
+	const short = closest_point(4, 0, origin, new Float64Array([1e-12, 0, 26]));
+	expect(Array.from(short.slice(0, 5))).toEqual([
+		1,
+		2,
+		0,
+		0,
+		Number.POSITIVE_INFINITY,
+	]);
+	expect(short[9]).toBe(0);
+	expect(() => closest_point(4, 1, origin, fixed)).toThrow("parameter");
+	const scene = new PreparedScene(new Float64Array([7, 4, 0, 1, 0, 2, 0, 0]));
+	try {
+		const closest = scene.closest_point(7, new Float64Array([0, 1, 0]), fixed);
+		expect(Array.from(closest.slice(0, 5))).toEqual([0, 0, 1, 0, 0]);
+		expect(Array.from(closest.slice(5, 8))).toEqual([0, 1, 0]);
+		expect(closest[9]).toBe(27);
+		const hit = scene.query_ray(new Float64Array([0, 1, -4, 0, 0, 1]), 2);
+		expect(Array.from(hit.slice(0, 4))).toEqual([7, 4, 1, 4]);
+		expect(hit[22]).toBeLessThan(2);
+		const away = new Float64Array([-6, -5, -6, -1, -1, -1]);
+		const skipped = tracePacket(scene.trace_ray(away, 0, 256));
+		expect(skipped.result.length).toBe(0);
+		expect(skipped.events.some((row) => row[0] === 6 && row[7] === 2)).toBe(
+			true,
+		);
+		const miss = scene.query_ray(away, 2);
+		expect(miss[21]).toBe(1);
+		expect(miss[22]).toBeLessThan(2);
+	} finally {
+		scene.free();
 	}
 });
 

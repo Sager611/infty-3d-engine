@@ -1,10 +1,5 @@
 // Analytic centered-quartic intersection and bounded surface witness.
-struct GoursatQuery {
-  query: Query,
-  gap_lower: f32,
-  error: f32,
-  status: u32,
-};
+alias GoursatQuery = GeometryQuery;
 
 struct GoursatWitness {
   p: vec3f,

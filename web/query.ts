@@ -1,6 +1,6 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: This pure module is not a Qwik component.
 // biome-ignore-all lint/style/noMagicNumbers: Packet indices and locked protocol flags are contract values.
-import type { SceneKind } from "./scene.ts";
+import { type SceneKind, tagKind } from "./scene.ts";
 
 type Triple = readonly [number, number, number];
 type Pair = readonly [number, number];
@@ -80,18 +80,8 @@ const valueAt = (packet: ArrayLike<number>, index: number): number => {
 	return Number(value);
 };
 
-const kindAt = (tag: number): SceneKind => {
-	if (tag === 1) {
-		return "sphere";
-	}
-	if (tag === 2) {
-		return "goursat";
-	}
-	if (tag === 3) {
-		return "plane";
-	}
-	return invalid("invalid kind");
-};
+const kindAt = (tag: number): SceneKind =>
+	tagKind(tag) ?? invalid("invalid kind");
 
 const flagAt = (value: number, name: string): boolean => {
 	if (value !== 0 && value !== 1) {

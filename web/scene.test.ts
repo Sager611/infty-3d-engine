@@ -50,7 +50,12 @@ describe("scene model", () => {
 	});
 
 	test("exposes typed bounds for all supported kinds", () => {
-		expect(Object.keys(DESCRIPTORS)).toEqual(["sphere", "goursat", "plane"]);
+		expect(Object.keys(DESCRIPTORS)).toEqual([
+			"sphere",
+			"goursat",
+			"plane",
+			"crystal",
+		]);
 		expect(DESCRIPTORS.sphere.size).toEqual({ min: 0.01, max: 4 });
 		expect(DESCRIPTORS.goursat.parameter).toEqual({
 			min: 1.05,

@@ -1,7 +1,7 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: This pure module is not a Qwik component.
 // biome-ignore-all lint/style/noMagicNumbers: Packet indices and locked defaults are contract values.
 type Position = readonly [number, number, number];
-type SceneKind = "sphere" | "goursat" | "plane";
+type SceneKind = "sphere" | "goursat" | "plane" | "crystal";
 
 type ReadonlySceneObject = Readonly<{
 	id: number;
@@ -62,12 +62,19 @@ const DESCRIPTORS: ShapeDescriptorMap = {
 		size: { min: MIN_SIZE, max: MAX_SIZE },
 		parameter: { min: 0, max: 0 },
 	},
+	crystal: {
+		kind: "crystal",
+		position: ["x", "y", "z"],
+		size: { min: MIN_SIZE, max: MAX_SIZE },
+		parameter: { min: 0, max: 0 },
+	},
 } satisfies ShapeDescriptorMap;
 
 const KIND_TAGS: Readonly<Record<SceneKind, number>> = {
 	sphere: 1,
 	goursat: 2,
 	plane: 3,
+	crystal: 4,
 };
 
 const tagKind = (tag: number): SceneKind | undefined => {
@@ -80,8 +87,14 @@ const tagKind = (tag: number): SceneKind | undefined => {
 	if (tag === KIND_TAGS.plane) {
 		return "plane";
 	}
+	if (tag === KIND_TAGS.crystal) {
+		return "crystal";
+	}
 	return;
 };
+
+const isSceneKind = (kind: unknown): kind is SceneKind =>
+	typeof kind === "string" && Object.hasOwn(KIND_TAGS, kind);
 
 const position = (x: number, y: number, z: number): Position =>
 	Object.freeze([x, y, z] as const);
@@ -147,10 +160,10 @@ const validateObject = (object: ReadonlySceneObject): void => {
 	if (!validPosition(object.position)) {
 		invalid("invalid position");
 	}
-	const descriptor = DESCRIPTORS[object.kind];
-	if (descriptor === undefined) {
+	if (!isSceneKind(object.kind)) {
 		invalid("invalid kind");
 	}
+	const descriptor = DESCRIPTORS[object.kind];
 	if (
 		!Number.isFinite(object.size) ||
 		object.size < descriptor.size.min ||
@@ -320,6 +333,8 @@ export {
 	MIN_SIZE,
 	PACKET_STRIDE,
 	SceneValidationError,
+	isSceneKind,
+	tagKind,
 	packScene,
 	type NumericRange,
 	type Position,

@@ -2,6 +2,7 @@
 use super::{Error, Geometry};
 use crate::diagnostic::{Recorder, Tag};
 use crate::math::interval::{Interval as I, distance};
+mod crystal;
 mod goursat;
 
 /// Absolute/relative distance accuracy and a finite evaluation budget.
@@ -204,7 +205,7 @@ pub fn query_traced(
     trace: &mut Recorder<'_>,
 ) -> Result<Closest, Error> {
     request.validate()?;
-    if point.iter().any(|x| !x.is_finite()) {
+    if !crate::math::types::finite3(point) {
         return Err(Error::InvalidPoint);
     }
     if request.max_evaluations == 0 {
@@ -228,6 +229,7 @@ pub fn query_traced(
             evaluations: 1,
         },
         super::Kind::Goursat => goursat::query(geometry, point, request, trace)?,
+        super::Kind::CrystallineCluster => crystal::query(point, request)?,
     };
     let result = result.with_accuracy(request);
     result.record(trace, Tag::Bounds);

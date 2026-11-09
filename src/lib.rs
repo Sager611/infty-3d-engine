@@ -1,6 +1,8 @@
 #![doc = "Infty 3D engine."]
 
 #[cfg(any(test, target_arch = "wasm32"))]
+mod device_state;
+#[cfg(any(test, target_arch = "wasm32"))]
 mod diagnostic;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod geometry;

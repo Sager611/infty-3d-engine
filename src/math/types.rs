@@ -57,6 +57,20 @@ pub struct Sample {
     pub uv: [f64; 2],
 }
 
+/// Canonical ray result with bounded gaps and explicitly optional work.
+#[derive(Clone, Copy)]
+pub struct GeometrySample {
+    pub sample: Sample,
+    pub gap_lower: f64,
+    pub error: f64,
+    pub uncertain: bool,
+    pub gap_computed: bool,
+}
+
+pub const fn finite3(p: V) -> bool {
+    p[0].is_finite() && p[1].is_finite() && p[2].is_finite()
+}
+
 impl Sample {
     #[cfg(test)]
     #[must_use]

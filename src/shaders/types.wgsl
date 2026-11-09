@@ -12,6 +12,13 @@ struct Query {
   uv: vec2f,
 };
 
+struct GeometryQuery {
+  query: Query,
+  gap_lower: f32,
+  error: f32,
+  status: u32,
+};
+
 struct Params {
   origin: vec4f,
   right: vec4f,

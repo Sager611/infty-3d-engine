@@ -9,6 +9,8 @@ pub const SOURCE: &str = concat!(
     '\n',
     include_str!("shaders/geometry/goursat.wgsl"),
     '\n',
+    include_str!("shaders/geometry/crystal.wgsl"),
+    '\n',
     include_str!("shaders/scene.wgsl"),
     '\n',
     include_str!("shaders/materials/detail.wgsl"),

@@ -32,6 +32,11 @@ fn surface_base(uv: vec2f, scale: f32, a: vec3f, b: vec3f) -> vec3f {
   return mix(a, b, surface_cell(uv, scale));
 }
 
+fn surface_normal(normal: vec3f, ray: vec3f, kind: u32) -> vec3f {
+  let n = normalize(normal);
+  return select(n, -n, kind == 4u && dot(n, ray) > 0.0);
+}
+
 fn surface_shade(
   q: Query,
   local: vec3f,
@@ -43,7 +48,7 @@ fn surface_shade(
   light: vec3f,
   shadow: f32
 ) -> vec3f {
-  let n = normalize(q.n);
+  let n = surface_normal(q.n, ray, kind);
   let l = normalize(light - q.p);
   let diffuse = max(dot(n, l), 0.0);
   let sphere = kind == 1u;
@@ -57,8 +62,10 @@ fn surface_shade(
   } else if (kind == 2u) {
     base = mix(vec3f(0.37, 0.16, 0.18), vec3f(0.86, 0.28, 0.31),
       surface_cell(local.yz, 2.0));
+  } else if (kind == 4u) {
+    base = vec3f(0.28, 0.68, 0.67);
   }
-  if (mode == 2u) {
+  if (mode == 2u && kind != 4u) {
     let rho = surface_rho(q, local, ray, height, size, sphere);
     if (sphere) {
       base = mix(vec3f(0.31, 0.40, 0.48), vec3f(0.48, 0.55, 0.59),

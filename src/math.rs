@@ -2,6 +2,8 @@
 
 #[path = "math/camera.rs"]
 pub mod camera_impl;
+#[path = "math/crystal.rs"]
+pub mod crystal;
 #[cfg(test)]
 #[path = "math/detail.rs"]
 pub mod detail;

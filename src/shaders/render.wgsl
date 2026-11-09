@@ -39,8 +39,12 @@ fn resolved_object(index: u32) -> SceneObject {
   return object;
 }
 
+fn scene_needs_gap(kind: u32, display_gap: bool, selected: bool) -> bool {
+  return (kind == 2u || kind == 4u) && (display_gap || selected);
+}
+
 fn outline_eligible(sample: SceneSample, selected: bool, thickness: f32) -> bool {
-  return selected && (sample.kind == 1u || sample.kind == 2u) &&
+  return selected && (sample.kind == 1u || sample.kind == 2u || sample.kind == 4u) &&
     !sample.query.hit && sample.status < 2u && sample.query.gap < thickness;
 }
 
@@ -116,7 +120,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     } else {
       let object = resolved_object(i);
       let selected = object.identity.z != 0u;
-      let need_gap = object.identity.y == 2u && (display_gap || selected);
+      let need_gap = scene_needs_gap(object.identity.y, display_gap, selected);
 
       let sample = scene_object(origin, direction, object, need_gap);
       if (sample.query.hit && (sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
@@ -145,7 +149,8 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
 
   var color = vec3f(0.96862745, 0.9647059, 0.9490196);
   if (nearest_hit) {
-    let shadow = shadow_factor(nearest.query.p, normalize(nearest.query.n),
+    let shadow = shadow_factor(nearest.query.p,
+      surface_normal(nearest.query.n, direction, nearest.kind),
       nearest_size, light, count);
     color = surface_shade(nearest.query, nearest.local, nearest.kind,
       direction, height, nearest_size,

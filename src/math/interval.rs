@@ -74,21 +74,15 @@ impl Interval {
         if other.is_point(1.0) {
             return Ok(self);
         }
-        let products = [
+        let [a, b, c, d] = [
             self.lo * other.lo,
             self.lo * other.hi,
             self.hi * other.lo,
             self.hi * other.hi,
         ];
         Self::new(
-            products
-                .into_iter()
-                .fold(f64::INFINITY, f64::min)
-                .next_down(),
-            products
-                .into_iter()
-                .fold(f64::NEG_INFINITY, f64::max)
-                .next_up(),
+            a.min(b).min(c).min(d).next_down(),
+            a.max(b).max(c).max(d).next_up(),
         )
     }
     pub fn scale(self, value: f64) -> Result<Self, ArithmeticError> {
@@ -144,20 +138,28 @@ impl Interval {
 
 /// Scaled Euclidean norm; overflow is an error, not a plausible finite bound.
 pub fn norm(vector: [Interval; 3]) -> Result<Interval, ArithmeticError> {
-    let magnitude = vector.iter().map(|v| v.abs().hi()).fold(0.0, f64::max);
+    let magnitude = vector[0]
+        .abs()
+        .hi()
+        .max(vector[1].abs().hi())
+        .max(vector[2].abs().hi());
     if magnitude == 0.0 {
         return Ok(Interval::ZERO);
     }
-    let mut sum = Interval::ZERO;
-    for coordinate in vector {
-        sum = sum.add(coordinate.divide(magnitude)?.square()?)?;
-    }
+    let sum = vector[0]
+        .divide(magnitude)?
+        .square()?
+        .add(vector[1].divide(magnitude)?.square()?)?
+        .add(vector[2].divide(magnitude)?.square()?)?;
     Interval::new(sum.lo().max(0.0), sum.hi())?
         .sqrt()?
         .scale(magnitude)
 }
 
 pub fn distance(a: [f64; 3], b: [f64; 3]) -> Result<Interval, ArithmeticError> {
-    let [x, y, z] = std::array::from_fn(|i| Interval::point(a[i])?.sub(Interval::point(b[i])?));
-    norm([x?, y?, z?])
+    norm([
+        Interval::point(a[0])?.sub(Interval::point(b[0])?)?,
+        Interval::point(a[1])?.sub(Interval::point(b[1])?)?,
+        Interval::point(a[2])?.sub(Interval::point(b[2])?)?,
+    ])
 }

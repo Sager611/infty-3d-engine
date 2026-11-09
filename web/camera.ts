@@ -46,6 +46,9 @@ const objectRadius = (object: SceneObject): number => {
 	if (object.kind === "sphere") {
 		return object.size;
 	}
+	if (object.kind === "crystal") {
+		return 1.75 * object.size;
+	}
 	return object.size * Math.sqrt(3 + Math.sqrt(3 * object.parameter));
 };
 

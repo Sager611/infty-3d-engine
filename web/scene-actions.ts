@@ -1,5 +1,5 @@
 import { editableTarget } from "./keys.ts";
-import type { SceneKind } from "./scene.ts";
+import { isSceneKind, type SceneKind } from "./scene.ts";
 
 type SceneAction = SceneKind | "delete" | "undo";
 function deleteShortcut(
@@ -32,13 +32,7 @@ function listenSceneActions(
 			return;
 		}
 		const action = button.dataset.sceneAction;
-		if (
-			action === "sphere" ||
-			action === "goursat" ||
-			action === "plane" ||
-			action === "delete" ||
-			action === "undo"
-		) {
+		if (isSceneKind(action) || action === "delete" || action === "undo") {
 			onAction(action);
 		}
 	}

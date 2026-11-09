@@ -7,6 +7,7 @@ use web_sys::HtmlCanvasElement;
 use wgpu::util::DeviceExt;
 
 use crate::api::PreparedScene;
+use crate::device_state::DeviceState;
 use crate::scene::packed::pack_prepared;
 use crate::scene::parse_camera;
 use crate::upload::Upload;
@@ -30,6 +31,7 @@ const _: () = assert!(std::mem::size_of::<Params>() == 96);
 /// WebGPU renderer for the analytic scene.
 #[wasm_bindgen]
 pub struct Renderer {
+    state: DeviceState,
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
@@ -53,13 +55,17 @@ impl Renderer {
     /// # Errors
     ///
     /// Returns a JavaScript error if WebGPU cannot create the surface, adapter,
-    /// device, configuration, or shader pipelines.
+    /// device, configuration, or shader pipelines, or if the device is lost.
     /// Browser WebGPU futures are local to the browser event loop.
     #[allow(clippy::future_not_send, reason = "browser WebGPU futures are local")]
     pub async fn create(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
         let (width, height) = canvas_dimensions(&canvas)?;
         let (surface, device, queue, config) = create_surface(canvas, width, height).await?;
+        let state = DeviceState::default();
+        let lost = state.clone();
+        device.set_device_lost_callback(move |_, _| lost.lose());
         let (compute_pipeline, present_pipeline) = create_pipelines(&device, config.format).await?;
+        state.check().map_err(js_error)?;
         let uniform = create_uniform(&device, width, height);
         let objects = create_objects_buffer(&device, 48);
         let output = create_output(&device, width, height);
@@ -73,6 +79,7 @@ impl Renderer {
         );
 
         Ok(Self {
+            state,
             device,
             queue,
             surface,
@@ -93,8 +100,9 @@ impl Renderer {
     ///
     /// # Errors
     ///
-    /// Returns a JavaScript error if either dimension is zero or exceeds its limit.
+    /// Rejects a lost device, zero dimensions, or dimensions exceeding limits.
     pub fn resize(&mut self, width: u16, height: u16) -> Result<(), JsValue> {
+        self.state.check().map_err(js_error)?;
         if width == 0 || height == 0 {
             return Err(js_error("renderer dimensions must be positive"));
         }
@@ -127,7 +135,7 @@ impl Renderer {
     /// # Errors
     ///
     /// Returns a JavaScript error if the camera, scene, mode, or selected IDs
-    /// are invalid, or if the surface frame is lost, unavailable, or invalid.
+    /// are invalid, the device is lost, or the surface frame is unavailable/invalid.
     pub fn render(
         &mut self,
         camera: &[f64],
@@ -142,7 +150,7 @@ impl Renderer {
     /// Render an explicit prepared scene; camera frames reuse derived uploads.
     ///
     /// # Errors
-    /// Rejects invalid cameras, modes, selections, resources and surface frames.
+    /// Rejects lost devices, invalid cameras, modes, selections and surface frames.
     pub fn render_scene(
         &mut self,
         camera: &[f64],
@@ -150,6 +158,7 @@ impl Renderer {
         mode: f64,
         selected: &[u32],
     ) -> Result<(), JsValue> {
+        self.state.check().map_err(js_error)?;
         let mut params = frame_params(camera, mode, self.width, self.height)?;
         params.screen[3] = upload_scene(self, scene, selected)?;
         self.queue

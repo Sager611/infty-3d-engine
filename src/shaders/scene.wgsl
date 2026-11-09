@@ -31,12 +31,14 @@ fn scene_object(o: vec3f, d: vec3f, obj: SceneObject, need_gap: bool) -> SceneSa
     query = sphere_at(local_o, d, vec3f(0.0), 1.0);
     gap_lower = query.gap;
     status = 0u;
-  } else if (kind == 2u) {
-    let goursat_query = goursat(local_o, d, obj.params.x, need_gap);
-    query = goursat_query.query;
-    gap_lower = goursat_query.gap_lower;
-    error = goursat_query.error;
-    status = goursat_query.status;
+  } else if (kind == 2u || kind == 4u) {
+    var canonical: GeometryQuery;
+    if (kind == 2u) { canonical = goursat(local_o, d, obj.params.x, need_gap); }
+    else { canonical = crystal(local_o, d, need_gap); }
+    query = canonical.query;
+    gap_lower = canonical.gap_lower;
+    error = canonical.error;
+    status = canonical.status;
   } else if (kind == 3u) {
     query = plane(local_o, d);
     gap_lower = query.gap;
