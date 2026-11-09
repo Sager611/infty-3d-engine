@@ -1,5 +1,7 @@
 //! Canonical closest-point requests and bounded results.
 use super::{Error, Geometry};
+use crate::math::interval::{Interval as I, distance};
+mod goursat;
 
 /// Absolute/relative distance accuracy and a finite evaluation budget.
 #[derive(Clone, Copy, Debug)]
@@ -89,6 +91,35 @@ impl Request {
 }
 
 impl Closest {
+    /// Input uncertainty changes distance bounds, not the surface witness.
+    pub fn with_input_error(
+        mut self,
+        geometry: Geometry,
+        point: [f64; 3],
+        error: f64,
+    ) -> Result<Self, Error> {
+        if !error.is_finite() || error < 0.0 {
+            return Err(Error::Numeric);
+        }
+        if error == 0.0 {
+            return Ok(self);
+        }
+        let uncertainty = I::point(error)?;
+        self.distance.lower = I::point(self.distance.lower)?
+            .sub(uncertainty)?
+            .lo()
+            .max(0.0);
+        if self.distance.upper.is_finite() {
+            self.distance.upper = I::point(self.distance.upper)?.add(uncertainty)?.hi();
+        }
+        self.multiplicity = match geometry.kind() {
+            super::Kind::Plane => Multiplicity::Unique,
+            super::Kind::Sphere if distance(point, [0.0; 3])?.lo() > error => Multiplicity::Unique,
+            _ => Multiplicity::Unknown,
+        };
+        self.resolution = Resolution::Unresolved;
+        Ok(self)
+    }
     pub fn with_accuracy(mut self, request: Request) -> Self {
         self.resolution = if self.distance.upper.is_finite()
             && self.distance.upper - self.distance.lower <= request.tolerance(self.distance.upper)
@@ -177,10 +208,13 @@ pub fn query(geometry: Geometry, point: [f64; 3], request: Request) -> Result<Cl
             multiplicity: Multiplicity::Unique,
             evaluations: 1,
         },
-        super::Kind::Goursat => return Err(Error::Unsupported),
+        super::Kind::Goursat => goursat::query(geometry, point, request)?,
     };
     Ok(result.with_accuracy(request))
 }
+
+#[cfg(test)]
+mod goursat_tests;
 
 #[cfg(test)]
 mod tests {

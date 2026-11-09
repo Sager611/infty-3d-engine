@@ -6,6 +6,7 @@ pub const OBJECT_STRIDE: usize = 8;
 use super::transform::Transform;
 use crate::geometry::Geometry;
 pub use crate::geometry::Kind;
+use crate::math::checked_u32;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Object {
@@ -146,27 +147,15 @@ pub fn parse_objects(packet: &[f64]) -> Result<Vec<Object>, SceneError> {
         if padding != 0.0 {
             return Err(SceneError::InvalidPadding);
         }
-        if id < 1.0 || id > f64::from(u32::MAX) || id.fract() != 0.0 {
-            return Err(SceneError::InvalidId);
-        }
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "Finite, integral u32 range validated above."
-        )]
-        let id = id as u32;
+        let id = checked_u32(id)
+            .filter(|&id| id > 0)
+            .ok_or(SceneError::InvalidId)?;
         if !ids.insert(id) {
             return Err(SceneError::DuplicateId);
         }
-        if kind_tag.fract() != 0.0 || !(1.0..=3.0).contains(&kind_tag) {
-            return Err(SceneError::InvalidKind);
-        }
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "Integral tag in 1..=3 validated above."
-        )]
-        let kind = Kind::from_tag(kind_tag as u32).ok_or(SceneError::InvalidKind)?;
+        let kind = checked_u32(kind_tag)
+            .and_then(Kind::from_tag)
+            .ok_or(SceneError::InvalidKind)?;
         let object = Object::new(id, kind, position, size, parameter)?;
         objects.push(object);
     }

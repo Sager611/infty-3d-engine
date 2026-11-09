@@ -132,7 +132,7 @@ impl Renderer {
         &mut self,
         camera: &[f64],
         scene: &[f64],
-        mode: u32,
+        mode: f64,
         selected: &[u32],
     ) -> Result<(), JsValue> {
         let scene = PreparedScene::new(scene)?;
@@ -147,7 +147,7 @@ impl Renderer {
         &mut self,
         camera: &[f64],
         scene: &PreparedScene,
-        mode: u32,
+        mode: f64,
         selected: &[u32],
     ) -> Result<(), JsValue> {
         let mut params = frame_params(camera, mode, self.width, self.height)?;
@@ -235,13 +235,13 @@ fn upload_scene(
 
 fn frame_params(
     camera_packet: &[f64],
-    mode: u32,
+    mode: f64,
     width: u16,
     height: u16,
 ) -> Result<Params, JsValue> {
-    if mode > 2 {
-        return Err(js_error("render mode must be 0, 1, or 2"));
-    }
+    let mode = crate::math::checked_u32(mode)
+        .filter(|&value| value <= 2)
+        .ok_or_else(|| js_error("render mode must be 0, 1, or 2"))?;
     let camera = parse_camera(camera_packet).map_err(|error| js_error(error.to_string()))?;
     let basis = camera.basis();
     Ok(Params {

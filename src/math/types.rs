@@ -3,6 +3,44 @@ use super::pureweight;
 
 pub type V = [f64; 3];
 
+/// Validate JavaScript numbers before a WASM integer binding can coerce them.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Finite integral u32 range is checked before conversion."
+)]
+pub fn checked_u32(value: f64) -> Option<u32> {
+    if !value.is_finite() || !(0.0..=f64::from(u32::MAX)).contains(&value) || value.fract() != 0.0 {
+        return None;
+    }
+    Some(value as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::checked_u32;
+    #[test]
+    fn integer_packets_do_not_truncate_saturate_or_wrap() {
+        for (number, expected) in [
+            (-0.0, 0),
+            (0.0, 0),
+            (1.0, 1),
+            (f64::from(u32::MAX), u32::MAX),
+        ] {
+            assert_eq!(checked_u32(number), Some(expected));
+        }
+        for number in [
+            -1.0,
+            1.5,
+            f64::from(u32::MAX) + 1.0,
+            f64::NAN,
+            f64::INFINITY,
+        ] {
+            assert_eq!(checked_u32(number), None);
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Ray {
     pub o: V,

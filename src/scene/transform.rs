@@ -1,7 +1,17 @@
 //! Translation and positive uniform scale; one instance adapter for every kernel.
 use super::model::SceneError;
-use crate::geometry::{Error, checked};
-use crate::math::{Ray, Sample, goursat_impl::GoursatSample};
+use crate::geometry::{
+    Error, Geometry, checked,
+    point::{Closest, Request},
+};
+#[cfg(test)]
+#[path = "transform/point_tests.rs"]
+mod point_tests;
+use crate::math::{
+    Ray, Sample,
+    goursat_impl::GoursatSample,
+    interval::{Interval as I, norm},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transform {
@@ -43,6 +53,88 @@ impl Transform {
     }
     pub fn world_point(self, point: [f64; 3]) -> [f64; 3] {
         std::array::from_fn(|axis| self.scale.mul_add(point[axis], self.position[axis]))
+    }
+    pub fn closest(
+        self,
+        geometry: Geometry,
+        point: [f64; 3],
+        request: Request,
+    ) -> Result<Closest, Error> {
+        request.validate()?;
+        if point.iter().any(|x| !x.is_finite()) {
+            return Err(Error::InvalidPoint);
+        }
+        if request.max_evaluations == 0 {
+            return Ok(Closest::unknown());
+        }
+        if self == Self::IDENTITY {
+            return geometry.closest(point, request);
+        }
+        let local = self.local_point(point);
+        for i in 0..3 {
+            if !local[i].is_finite() || (local[i] == 0.0 && point[i] - self.position[i] != 0.0) {
+                return Err(Error::Numeric);
+            }
+        }
+        let absolute = request.absolute / self.scale;
+        if !absolute.is_finite() || (request.absolute > 0.0 && absolute == 0.0) {
+            return Err(Error::Numeric);
+        }
+        let local_request = Request {
+            absolute,
+            ..request
+        };
+        let input_error = self.input_error(point, local)?;
+        let closest = geometry.closest(local, local_request)?.with_input_error(
+            geometry,
+            local,
+            input_error,
+        )?;
+        let lower = I::point(closest.distance.lower)?
+            .scale(self.scale)?
+            .lo()
+            .max(0.0);
+        let upper = if closest.distance.upper.is_finite() {
+            I::point(closest.distance.upper)?.scale(self.scale)?.hi()
+        } else {
+            f64::INFINITY
+        };
+        let witness = closest.witness.map(|w| self.world_witness(w)).transpose()?;
+        Ok(Closest {
+            distance: crate::geometry::point::DistanceBounds { lower, upper },
+            witness,
+            ..closest
+        }
+        .with_accuracy(request))
+    }
+    fn input_error(self, point: [f64; 3], local: [f64; 3]) -> Result<f64, Error> {
+        let [x, y, z] = std::array::from_fn(|i| {
+            I::point(point[i])?
+                .sub(I::point(self.position[i])?)?
+                .divide(self.scale)?
+                .sub(I::point(local[i])?)
+                .map(I::abs)
+        });
+        Ok(norm([x?, y?, z?])?.hi())
+    }
+    fn world_witness(
+        self,
+        witness: crate::geometry::point::Witness,
+    ) -> Result<crate::geometry::point::Witness, Error> {
+        let point = self.world_point(witness.point);
+        let [x, y, z] = std::array::from_fn(|i| {
+            I::point(witness.point[i])?
+                .scale(self.scale)?
+                .add(I::point(self.position[i])?)?
+                .sub(I::point(point[i])?)
+                .map(I::abs)
+        });
+        let rounding = norm([x?, y?, z?])?.hi();
+        let error = I::point(witness.error)?
+            .scale(self.scale)?
+            .add(I::point(rounding)?)?
+            .hi();
+        Ok(crate::geometry::point::Witness { point, error })
     }
     pub fn local_ray(self, ray: Ray) -> Ray {
         Ray {

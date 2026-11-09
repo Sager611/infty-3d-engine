@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 
-use crate::math::Ray;
+use crate::geometry::point::Request;
+use crate::math::{Ray, checked_u32};
 use crate::scene::{
     CameraError, QueryError, QueryMode, parse_camera, parse_objects, query_objects,
 };
@@ -48,11 +49,30 @@ impl PreparedScene {
     ///
     /// # Errors
     /// Rejects invalid rays, modes, numerical evaluations and packed results.
-    pub fn query_ray(&self, ray: &[f64], mode: u32) -> Result<Vec<f64>, JsValue> {
+    pub fn query_ray(&self, ray: &[f64], mode: f64) -> Result<Vec<f64>, JsValue> {
         let ray = parse_ray(ray)?;
         let samples = crate::scene::query::query_prepared(&self.core, ray, parse_mode(mode)?)
             .map_err(query_error)?;
         pack_samples(samples, ray)
+    }
+
+    /// Closest surface of one instance by stable ID; point/accuracy are world-space.
+    ///
+    /// # Errors
+    /// Rejects invalid/unknown IDs, malformed queries and unrepresentable arithmetic.
+    pub fn closest_point(
+        &self,
+        id: f64,
+        point: &[f64],
+        request: &[f64],
+    ) -> Result<Vec<f64>, JsValue> {
+        let id = checked_u32(id)
+            .filter(|&id| id > 0)
+            .ok_or_else(|| js_error("invalid object ID"))?;
+        let (point, request) = parse_point_request(point, request)?;
+        let result = crate::scene::query::closest_prepared(&self.core, id, point, request)
+            .map_err(query_error)?;
+        Ok(result.packed().to_vec())
     }
 
     /// Query the prepared scene through camera6 and screen4.
@@ -63,7 +83,7 @@ impl PreparedScene {
         &self,
         camera: &[f64],
         screen: &[f64],
-        mode: u32,
+        mode: f64,
     ) -> Result<Vec<f64>, JsValue> {
         let camera = parse_camera(camera).map_err(camera_error)?;
         let (width, height, x, y) = parse_screen(screen)?;
@@ -85,46 +105,45 @@ impl PreparedScene {
 /// multiplicity0/1/2 is unique/non-unique/unknown. Unresolved upper may be infinity.
 ///
 /// # Errors
-/// Rejects malformed/invalid requests, points, kinds and parameters, unsupported
-/// kernels and unrepresentable arithmetic. Budget exhaustion is not a miss.
+/// Rejects malformed/invalid requests, points, kinds, parameters and
+/// unrepresentable arithmetic. Budget exhaustion is not a miss.
 #[wasm_bindgen]
 pub fn closest_point(
-    kind: u32,
+    kind: f64,
     parameter: f64,
     point: &[f64],
     request: &[f64],
 ) -> Result<Vec<f64>, JsValue> {
-    let kind =
-        crate::geometry::Kind::from_tag(kind).ok_or_else(|| js_error("invalid geometry kind"))?;
+    let kind = checked_u32(kind)
+        .and_then(crate::geometry::Kind::from_tag)
+        .ok_or_else(|| js_error("invalid geometry kind"))?;
     let geometry =
         crate::geometry::Geometry::new(kind, parameter).map_err(|e| js_error(e.to_string()))?;
+    let (point, request) = parse_point_request(point, request)?;
+    let result = geometry
+        .closest(point, request)
+        .map_err(|e| js_error(e.to_string()))?;
+    Ok(result.packed().to_vec())
+}
+
+fn parse_point_request(point: &[f64], request: &[f64]) -> Result<([f64; 3], Request), JsValue> {
     let &[x, y, z] = point else {
         return Err(js_error("point packet must contain three values"));
     };
     let &[absolute, relative, evaluations] = request else {
         return Err(js_error("request packet must contain three values"));
     };
-    let request = crate::geometry::point::Request {
-        absolute,
-        relative,
-        max_evaluations: checked_evaluations(evaluations)?,
-    };
-    let result = geometry
-        .closest([x, y, z], request)
-        .map_err(|e| js_error(e.to_string()))?;
-    Ok(result.packed().to_vec())
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "Finite integral evaluation count is checked before conversion"
-)]
-fn checked_evaluations(value: f64) -> Result<u32, JsValue> {
-    if !value.is_finite() || !(0.0..=65_536.0).contains(&value) || value.fract() != 0.0 {
-        return Err(js_error("invalid evaluation count"));
-    }
-    Ok(value as u32)
+    let max_evaluations = checked_u32(evaluations)
+        .filter(|&n| n <= 65_536)
+        .ok_or_else(|| js_error("invalid evaluation count"))?;
+    Ok((
+        [x, y, z],
+        Request {
+            absolute,
+            relative,
+            max_evaluations,
+        },
+    ))
 }
 
 /// Query the validated scene through a camera pixel.
@@ -143,7 +162,7 @@ pub fn query_scene(
     objects: &[f64],
     camera: &[f64],
     screen: &[f64],
-    mode: u32,
+    mode: f64,
 ) -> Result<Vec<f64>, JsValue> {
     let objects = parse_objects(objects).map_err(scene_error)?;
     let camera = parse_camera(camera).map_err(camera_error)?;
@@ -170,7 +189,7 @@ pub fn query_scene(
 /// Returns a JavaScript error when packet arity, finiteness, ray direction,
 /// mode, scene validation, query evaluation, or packed output validation fails.
 #[wasm_bindgen]
-pub fn query_ray(objects: &[f64], ray: &[f64], mode: u32) -> Result<Vec<f64>, JsValue> {
+pub fn query_ray(objects: &[f64], ray: &[f64], mode: f64) -> Result<Vec<f64>, JsValue> {
     let objects = parse_objects(objects).map_err(scene_error)?;
     let ray = parse_ray(ray)?;
     let mode = parse_mode(mode)?;
@@ -240,11 +259,11 @@ fn normalize_ray(ray: Ray) -> Result<Ray, JsValue> {
     })
 }
 
-fn parse_mode(mode: u32) -> Result<QueryMode, JsValue> {
-    match mode {
-        0 => Ok(QueryMode::First),
-        1 => Ok(QueryMode::All),
-        2 => Ok(QueryMode::Inspect),
+fn parse_mode(mode: f64) -> Result<QueryMode, JsValue> {
+    match checked_u32(mode) {
+        Some(0) => Ok(QueryMode::First),
+        Some(1) => Ok(QueryMode::All),
+        Some(2) => Ok(QueryMode::Inspect),
         _ => Err(js_error("query mode must be 0, 1, or 2")),
     }
 }

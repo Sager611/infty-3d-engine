@@ -41,7 +41,6 @@ pub enum Error {
     InvalidPoint,
     InvalidRequest,
     Numeric,
-    Unsupported,
     Kernel(GoursatError),
 }
 impl std::fmt::Display for Error {
@@ -52,12 +51,16 @@ impl std::fmt::Display for Error {
             Self::InvalidPoint => f.write_str("point must be finite"),
             Self::InvalidRequest => f.write_str("invalid query accuracy or evaluation budget"),
             Self::Numeric => f.write_str("query arithmetic is not representable"),
-            Self::Unsupported => f.write_str("query is unsupported by this kernel"),
             Self::Kernel(error) => error.fmt(f),
         }
     }
 }
 impl std::error::Error for Error {}
+impl From<crate::math::interval::ArithmeticError> for Error {
+    fn from(_: crate::math::interval::ArithmeticError) -> Self {
+        Self::Numeric
+    }
+}
 
 impl Geometry {
     pub const SPHERE: Self = Self {

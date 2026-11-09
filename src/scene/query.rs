@@ -1,4 +1,10 @@
-use crate::geometry::{Error as GeometryError, Geometry};
+use crate::geometry::{
+    Error as GeometryError, Geometry,
+    point::{Closest, Request},
+};
+#[cfg(test)]
+#[path = "query/point_tests.rs"]
+mod point_tests;
 use crate::math::{Ray, Sample};
 use crate::scene::{
     model::{Kind, Object, SceneError},
@@ -30,6 +36,7 @@ pub struct SceneSample {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueryError {
     InvalidRay,
+    UnknownObject,
     Scene(SceneError),
     Geometry(GeometryError),
 }
@@ -38,6 +45,7 @@ impl std::fmt::Display for QueryError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidRay => formatter.write_str("ray origin/direction is invalid"),
+            Self::UnknownObject => formatter.write_str("object ID is not in this scene"),
             Self::Scene(error) => error.fmt(formatter),
             Self::Geometry(error) => error.fmt(formatter),
         }
@@ -45,6 +53,20 @@ impl std::fmt::Display for QueryError {
 }
 
 impl std::error::Error for QueryError {}
+
+/// Closest surface of one immutable instance, using world distances/accuracy.
+pub fn closest_prepared(
+    scene: &Prepared,
+    id: u32,
+    point: [f64; 3],
+    request: Request,
+) -> Result<Closest, QueryError> {
+    let instance = scene.find(id).ok_or(QueryError::UnknownObject)?;
+    instance
+        .transform()
+        .closest(scene.geometries()[instance.geometry()], point, request)
+        .map_err(QueryError::Geometry)
+}
 
 impl SceneSample {
     /// Pack this sample using the locked 24-value query layout.

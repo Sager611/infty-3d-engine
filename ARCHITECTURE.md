@@ -47,7 +47,11 @@ Selected sphere/quartic misses qualify for an outline only when their valid uppe
 
 Modes0/1/2 are UV/Gap/Detail. Canonical UVs and analytic footprints apply object size once. Detail blends three adjacent hashed power-of-two grids with finite precision/LOD limits, not texture images or literally infinite detail.
 
-Closest-point request3 is `[absolute,relative,maxEvaluations]`; maximum65,536 evaluations, default4,096. Closest12 is `[resolution,multiplicity,hasWitness,lower,upper,x,y,z,positionError,evaluations,0,0]`. Resolution0/1 is converged/unresolved; multiplicity0/1/2 is unique/non-unique/unknown. Zero work returns no witness and `[0,infinity]`, never a miss. Distances are unsigned and position error is separate. Sphere/plane adapters are analytic; quartic closest queries remain explicitly unsupported until the bounded solver is integrated.
+Closest-point request3 is `[absolute,relative,maxEvaluations]`; maximum65,536 evaluations, default4,096. Closest12 is `[resolution,multiplicity,hasWitness,lower,upper,x,y,z,positionError,evaluations,0,0]`. Resolution0/1 is converged/unresolved; convergence certifies unsigned distance width <= absolute+relative*upper, not coordinate uniqueness. Multiplicity0/1/2 is proven unique/non-unique/unknown. Position error encloses a surface point near the reported witness, not its separation from an exact global minimizer. Zero work returns no witness and `[0,infinity]`, never a miss.
+
+Sphere/plane closest queries are analytic. Quartic closest search reflects into the positive octant and covers the surface with six analytic two-coordinate charts; maximum-gradient-axis coverage retains ties. Outward-rounded box and separable Lagrangian Taylor bounds certify global distance, while root-enclosed surface witnesses supply upper bounds. Refinement compares all remaining patches, not one projection/Newton start. One evaluation is a bounded seed/patch computation; heap storage is bounded by work. Exhausted work or precision returns unresolved bounds. Exact symmetries and strictly convex lifted exterior problems prove multiplicity; other cases remain unknown.
+
+`closest_point(kind,parameter,point3,request3)` queries canonical geometry. `PreparedScene.closest_point(id,worldPoint3,request3)` queries one instance by stable ID, not the whole scene. Uniform transforms convert absolute accuracy, distances and errors once; query-coordinate uncertainty widens distance bounds and may invalidate multiplicity. World witness rounding remains separate. Nonuniform transforms are not representable by this interface. Invalid scalar kinds/modes/IDs are rejected before WASM integer coercion; overflow/underflow in required coordinate conversion is explicit.
 
 ## State and effects
 
@@ -77,3 +81,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-08 | Assistant | Added tested camera navigation math and expanded camera-only bounds | Prepare free movement without changing scene editing limits |
 | 2026-11-09 | Assistant | Wired guarded free-camera controls, motion frames and persistent action errors | Replace orbit/zoom without idle rendering or silent input failures |
 | 2026-11-09 | Assistant | Added W-only analytic approach easing with closed-form steps | Inspect nearby surfaces without slowing escape or implying collision prevention |
+| 2026-11-09 | Assistant | Added globally bounded quartic closest queries, uniform adaptation and strict scalar validation | Separate global accuracy, surface error, ties and exhausted work without silent coercion |

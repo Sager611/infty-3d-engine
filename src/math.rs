@@ -10,6 +10,8 @@ pub mod detail;
 pub mod footprint_impl;
 #[path = "math/goursat.rs"]
 pub mod goursat_impl;
+#[path = "math/interval.rs"]
+pub mod interval;
 #[path = "math/plane.rs"]
 pub mod plane_impl;
 #[path = "math/polynomial.rs"]
@@ -37,7 +39,7 @@ pub use sphere_impl::sphere;
 pub use sphere_impl::sphere_at;
 #[cfg(test)]
 pub use types::V;
-pub use types::{Ray, Sample};
+pub use types::{Ray, Sample, checked_u32};
 
 #[cfg(test)]
 #[path = "math/tests.rs"]
