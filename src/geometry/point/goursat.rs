@@ -1,5 +1,6 @@
 //! Global closest bounds over six analytic charts, not spatial ray marching.
 use super::{Closest, DistanceBounds, Multiplicity, Request, Resolution, Witness};
+use crate::diagnostic::{Recorder, Tag};
 use crate::{
     geometry::{Error, Geometry},
     math::interval::{Interval as I, distance, norm},
@@ -256,8 +257,15 @@ impl Problem {
         inherited: f64,
         best: &mut Best,
         serial: u32,
+        trace: &mut Recorder<'_>,
     ) -> Result<Option<Cell>, Error> {
+        let axis = [0.0, 1.0, 2.0][patch.axis];
+        let outer = f64::from(u8::from(patch.outer));
         let Some(bounds) = patch.bounds(self.beta, self.maximum)? else {
+            trace.emit(
+                Tag::Reject,
+                [4.0, axis, outer, inherited, best.upper, f64::from(serial)],
+            );
             return Ok(None);
         };
         let candidate = self.candidate(bounds.map(I::middle))?;
@@ -267,6 +275,17 @@ impl Problem {
         let lower = inherited
             .max(self.box_lower(bounds)?)
             .max(self.lagrange_lower(bounds)?);
+        trace.emit(
+            Tag::Patch,
+            [
+                axis,
+                outer,
+                lower,
+                best.upper,
+                f64::from(serial),
+                f64::from(u8::from(lower <= best.upper)),
+            ],
+        );
         Ok((lower <= best.upper).then_some(Cell {
             patch,
             lower,
@@ -376,7 +395,12 @@ fn result(problem: &Problem, best: &Best, lower: f64, evaluations: u32) -> Resul
     })
 }
 
-fn solve(geometry: Geometry, point: [f64; 3], request: Request) -> Result<Closest, Error> {
+fn solve(
+    geometry: Geometry,
+    point: [f64; 3],
+    request: Request,
+    trace: &mut Recorder<'_>,
+) -> Result<Closest, Error> {
     let beta = geometry.parameter();
     if let Some(exact) = symmetric(point, beta)? {
         return Ok(exact);
@@ -398,6 +422,10 @@ fn solve(geometry: Geometry, point: [f64; 3], request: Request) -> Result<Closes
         .next_down()
         .max(0.0);
     let mut evaluations = 1;
+    trace.emit(
+        Tag::Bounds,
+        [annulus, best.upper, best.witness.error, 1.0, 1.0, 2.0],
+    );
     if request.max_evaluations < 7 || best.upper - annulus <= request.tolerance(best.upper) {
         return result(&problem, &best, annulus, evaluations);
     }
@@ -410,7 +438,7 @@ fn solve(geometry: Geometry, point: [f64; 3], request: Request) -> Result<Closes
                 outer,
                 tangent: [I::new(0.0, maximum)?; 2],
             };
-            if let Some(cell) = problem.evaluate(patch, annulus, &mut best, evaluations)? {
+            if let Some(cell) = problem.evaluate(patch, annulus, &mut best, evaluations, trace)? {
                 cells.push(cell);
             }
         }
@@ -442,7 +470,9 @@ fn solve(geometry: Geometry, point: [f64; 3], request: Request) -> Result<Closes
         };
         for patch in children {
             evaluations += 1;
-            if let Some(child) = problem.evaluate(patch, cell.lower, &mut best, evaluations)? {
+            if let Some(child) =
+                problem.evaluate(patch, cell.lower, &mut best, evaluations, trace)?
+            {
                 cells.push(child);
             }
         }
@@ -453,8 +483,9 @@ pub(super) fn query(
     geometry: Geometry,
     point: [f64; 3],
     request: Request,
+    trace: &mut Recorder<'_>,
 ) -> Result<Closest, Error> {
-    let mut result = solve(geometry, point.map(f64::abs), request)?;
+    let mut result = solve(geometry, point.map(f64::abs), request, trace)?;
     if let Some(witness) = result.witness.as_mut() {
         for (i, coordinate) in witness.point.iter_mut().enumerate() {
             if point[i] < 0.0 {

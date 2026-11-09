@@ -123,6 +123,32 @@ fn nonminimum_diagonal_stationary_point_does_not_hide_three_global_minima() -> R
 }
 
 #[test]
+fn asymmetric_dyadic_normal_offsets_have_independent_unique_global_minima() -> Result<(), Error> {
+    let q = [1.5_f64, 1.125, 1.125];
+    let gradient = q.map(|x| 4.0 * x * x.mul_add(x, -1.0));
+    let beta = q
+        .into_iter()
+        .map(|x| x.mul_add(x, -1.0).powi(2))
+        .sum::<f64>();
+    let length = gradient[0].hypot(gradient[1]).hypot(gradient[2]);
+    let request = Request::default();
+    // In lifted coordinates the objective is strictly convex; positive
+    // normal offsets satisfy its ball KKT conditions with multiplier 2*lambda.
+    for lambda in [0.0625_f64, 0.5, 2.0] {
+        for shift in 0..3 {
+            let point = std::array::from_fn(|i| {
+                let axis = (i + shift) % 3;
+                lambda.mul_add(gradient[axis], q[axis]) * if i == 1 { -1.0 } else { 1.0 }
+            });
+            let result = solve(point, beta, request)?;
+            oracle(result, lambda * length, request);
+            assert_eq!(result.multiplicity, Multiplicity::Unique);
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn exact_dyadic_surface_points_cover_inner_outer_and_zero_coordinate_charts() -> Result<(), Error> {
     for point in [
         [0.5_f64, 0.5, 1.0],

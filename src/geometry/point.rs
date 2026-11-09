@@ -1,5 +1,6 @@
 //! Canonical closest-point requests and bounded results.
 use super::{Error, Geometry};
+use crate::diagnostic::{Recorder, Tag};
 use crate::math::interval::{Interval as I, distance};
 mod goursat;
 
@@ -91,6 +92,13 @@ impl Request {
 }
 
 impl Closest {
+    pub fn record(self, trace: &mut Recorder<'_>, tag: Tag) {
+        if !trace.enabled() {
+            return;
+        }
+        let p = self.packed();
+        trace.emit(tag, [p[3], p[4], p[8], p[9], p[0], p[1]]);
+    }
     /// Input uncertainty changes distance bounds, not the surface witness.
     pub fn with_input_error(
         mut self,
@@ -186,12 +194,23 @@ fn sphere(point: [f64; 3]) -> Result<Closest, Error> {
 }
 
 pub fn query(geometry: Geometry, point: [f64; 3], request: Request) -> Result<Closest, Error> {
+    query_traced(geometry, point, request, &mut Recorder::off())
+}
+
+pub fn query_traced(
+    geometry: Geometry,
+    point: [f64; 3],
+    request: Request,
+    trace: &mut Recorder<'_>,
+) -> Result<Closest, Error> {
     request.validate()?;
     if point.iter().any(|x| !x.is_finite()) {
         return Err(Error::InvalidPoint);
     }
     if request.max_evaluations == 0 {
-        return Ok(Closest::unknown());
+        let result = Closest::unknown();
+        result.record(trace, Tag::Bounds);
+        return Ok(result);
     }
     let result = match geometry.kind() {
         super::Kind::Sphere => sphere(point)?,
@@ -208,9 +227,11 @@ pub fn query(geometry: Geometry, point: [f64; 3], request: Request) -> Result<Cl
             multiplicity: Multiplicity::Unique,
             evaluations: 1,
         },
-        super::Kind::Goursat => goursat::query(geometry, point, request)?,
+        super::Kind::Goursat => goursat::query(geometry, point, request, trace)?,
     };
-    Ok(result.with_accuracy(request))
+    let result = result.with_accuracy(request);
+    result.record(trace, Tag::Bounds);
+    Ok(result)
 }
 
 #[cfg(test)]

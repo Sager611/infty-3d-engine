@@ -32,7 +32,9 @@ pub use detail::pureweight;
 pub use footprint_impl::footprint;
 #[cfg(test)]
 pub use goursat_impl::GoursatError;
+#[cfg(test)]
 pub use goursat_impl::goursat;
+pub use goursat_impl::goursat_traced;
 pub use plane_impl::plane;
 #[cfg(test)]
 pub use sphere_impl::sphere;

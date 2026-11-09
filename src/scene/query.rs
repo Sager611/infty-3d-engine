@@ -1,3 +1,4 @@
+use crate::diagnostic::{Recorder, Tag, TraceLog};
 use crate::geometry::{
     Error as GeometryError, Geometry,
     point::{Closest, Request},
@@ -30,6 +31,7 @@ pub struct SceneSample {
     pub gap_lower: f64,
     pub error: f64,
     pub uncertain: bool,
+    pub gap_computed: bool,
 }
 
 /// Errors raised before or during a deterministic scene query.
@@ -65,6 +67,25 @@ pub fn closest_prepared(
     instance
         .transform()
         .closest(scene.geometries()[instance.geometry()], point, request)
+        .map_err(QueryError::Geometry)
+}
+
+pub fn closest_prepared_traced(
+    scene: &Prepared,
+    id: u32,
+    point: [f64; 3],
+    request: Request,
+    trace: &mut Recorder<'_>,
+) -> Result<Closest, QueryError> {
+    let instance = scene.find(id).ok_or(QueryError::UnknownObject)?;
+    instance
+        .transform()
+        .closest_traced(
+            scene.geometries()[instance.geometry()],
+            point,
+            request,
+            trace,
+        )
         .map_err(QueryError::Geometry)
 }
 
@@ -106,7 +127,13 @@ impl SceneSample {
             } else {
                 0.0
             },
-            if self.uncertain { 1.0 } else { 0.0 },
+            if !self.gap_computed {
+                2.0
+            } else if self.uncertain {
+                1.0
+            } else {
+                0.0
+            },
             0.0,
         ]
     }
@@ -123,6 +150,7 @@ pub fn query_object(object: &Object, ray: Ray, need_gap: bool) -> Result<SceneSa
         object.transform(),
         normalized_ray(ray),
         need_gap,
+        &mut Recorder::off(),
     )
 }
 
@@ -132,14 +160,20 @@ fn query_definition(
     transform: Transform,
     ray: Ray,
     need_gap: bool,
+    trace: &mut Recorder<'_>,
 ) -> Result<SceneSample, QueryError> {
-    let result = geometry
-        .query(transform.local_ray(ray), need_gap)
-        .map_err(QueryError::Geometry)?;
+    let local_ray = transform.local_ray(ray);
+    let result = if trace.enabled() {
+        geometry.query_traced(local_ray, need_gap, trace)
+    } else {
+        geometry.query(local_ray, need_gap)
+    }
+    .map_err(QueryError::Geometry)?;
     let local = result.sample.p;
     let world = transform
         .world_query(result)
         .map_err(QueryError::Geometry)?;
+    crate::geometry::record_ray(world, trace, Tag::WorldRay);
     Ok(SceneSample {
         id,
         kind: geometry.kind(),
@@ -148,6 +182,7 @@ fn query_definition(
         gap_lower: world.gap_lower,
         error: world.error,
         uncertain: world.uncertain,
+        gap_computed: world.gap_computed,
     })
 }
 
@@ -168,6 +203,15 @@ pub fn query_prepared(
     ray: Ray,
     mode: QueryMode,
 ) -> Result<Vec<SceneSample>, QueryError> {
+    query_prepared_traced(scene, ray, mode, None)
+}
+
+pub fn query_prepared_traced(
+    scene: &Prepared,
+    ray: Ray,
+    mode: QueryMode,
+    mut trace: Option<&mut TraceLog>,
+) -> Result<Vec<SceneSample>, QueryError> {
     validate_ray(ray)?;
     let ray = normalized_ray(ray);
     let need_gap = mode == QueryMode::Inspect;
@@ -176,6 +220,23 @@ pub fn query_prepared(
     } else {
         scene.spatial().candidates(ray.o, ray.d)
     };
+    if let Some(log) = trace.as_deref_mut() {
+        let total = u32::try_from(scene.instances().len())
+            .map_err(|_| QueryError::Geometry(GeometryError::Numeric))?;
+        let count = u32::try_from(candidates.len())
+            .map_err(|_| QueryError::Geometry(GeometryError::Numeric))?;
+        Recorder::new(Some(log), 0).emit(
+            Tag::Traversal,
+            [
+                f64::from(total),
+                f64::from(count),
+                f64::from(mode as u32),
+                0.0,
+                0.0,
+                0.0,
+            ],
+        );
+    }
     let mut samples = candidates
         .into_iter()
         .map(|index| {
@@ -186,6 +247,7 @@ pub fn query_prepared(
                 instance.transform(),
                 ray,
                 need_gap,
+                &mut Recorder::new(trace.as_deref_mut(), instance.id()),
             )
         })
         .collect::<Result<Vec<_>, _>>()?;

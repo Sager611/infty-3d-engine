@@ -8,6 +8,7 @@ Pure values describe the scene; thin adapters own browser and GPU effects.
 | `src/geometry.rs`, `src/geometry/` | Validated canonical definitions, kernel dispatch and bounded closest-query contracts |
 | `src/scene/` | Immutable shared definitions/instances, uniform transforms, reusable hierarchy and deterministic queries |
 | `src/api.rs` | WASM packet adapters; invalid inputs become JavaScript errors |
+| `src/diagnostic.rs` | Caller-owned, opt-in bounded numerical records; no normal-path trace allocation or logging |
 | `src/{gpu,upload}.rs` | Explicit render inputs, derived uploads, buffers, resize and acquisition; no cached scene/camera model |
 | `src/shaders/` | f32 mirror of geometry/material contracts; shared compile-time shader manifest |
 | `web/{scene,state,query,camera}.ts` | Immutable records, absolute updates, URL codec, query decoding and framing |
@@ -53,6 +54,25 @@ Sphere/plane closest queries are analytic. Quartic closest search reflects into 
 
 `closest_point(kind,parameter,point3,request3)` queries canonical geometry. `PreparedScene.closest_point(id,worldPoint3,request3)` queries one instance by stable ID, not the whole scene. Uniform transforms convert absolute accuracy, distances and errors once; query-coordinate uncertainty widens distance bounds and may invalidate multiplicity. World witness rounding remains separate. Nonuniform transforms are not representable by this interface. Invalid scalar kinds/modes/IDs are rejected before WASM integer coercion; overflow/underflow in required coordinate conversion is explicit.
 
+## Bounded diagnostics
+
+Normal queries use disabled recorders, with no trace storage or logs. Explicit `trace_closest_point(kind,parameter,point3,request3,maxEvents)`, `PreparedScene.trace_closest_point(id,worldPoint3,request3,maxEvents)` and `PreparedScene.trace_ray(ray6,mode,maxEvents)` preserve the ordinary result and work budget. Limits are integral0..256, validated before integer coercion. A full log retains its prefix and counts omitted events (saturating u32); it does not stop or alter solving. Errors remain errors.
+
+Trace packets contain header3 `[resultValueCount,eventCount,omittedCount]`, the unmodified closest12/query24N result, then rows8 `[tag,objectId,a,b,c,d,e,f]`. Object0 denotes canonical queries or scene-wide traversal. Root coordinates are ray parameters relative to the enclosure's shift; chart bounds are canonical (reflected positive octant). Only world-tagged rows have instance distance/error units. The final result is authoritative: a truncated trace may omit its final bounds.
+
+| Tag | Six values |
+|---|---|
+| 1 enclosure | lo, hi, ray shift, search radius, 0, 0 |
+| 2 root candidate | coordinate, polynomial value, evaluation allowance, 0, 0, 0; not proof of an exact repeated root |
+| 3 sign bracket | lo, hi, refined coordinate, bracket error, endpoint values |
+| 4 rejection | reason1: interval lo/hi, endpoint values, sign product; reason2: empty lo/hi, shift, 0, 0; reason4: chart axis/outer, inherited lower, best upper, evaluation |
+| 5/6 canonical/world ray | hit, t, lower gap, upper gap, numerical error, status |
+| 7/8 canonical/world closest | lower, upper, witness position error, evaluations, resolution, multiplicity |
+| 9 chart | axis, outer-root flag, lower, current best upper, evaluation, retained flag |
+| 10 traversal | instance count, candidate count, query mode, 0, 0, 0 |
+
+Ray status2 explicitly marks uncomputed gap/witness fields; first/all discard those misses. They must not be interpreted as valid uppers. Ordinary public query24 remains status0/1 only. Explicit state replaces an overflowing numerical-error sentinel for large scaled misses. Polynomial overflow and underflowed nonzero discriminants report numerical errors, not fabricated roots.
+
 ## State and effects
 
 Right controls are a native disclosure, closed by default. Plain clicks pick first; Alt/pick-all uses the clicked ray's hits. Drags/cancel/multitouch do not become picks. Selection is transient; one active object supplies metadata-driven controls.
@@ -82,3 +102,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-09 | Assistant | Wired guarded free-camera controls, motion frames and persistent action errors | Replace orbit/zoom without idle rendering or silent input failures |
 | 2026-11-09 | Assistant | Added W-only analytic approach easing with closed-form steps | Inspect nearby surfaces without slowing escape or implying collision prevention |
 | 2026-11-09 | Assistant | Added globally bounded quartic closest queries, uniform adaptation and strict scalar validation | Separate global accuracy, surface error, ties and exhausted work without silent coercion |
+| 2026-11-09 | Assistant | Added bounded opt-in numerical traces and independent edge-case oracles | Explain numerical decisions without idle work, false roots or scaled-miss overflow |

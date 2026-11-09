@@ -135,6 +135,83 @@ mod tests {
     };
 
     #[test]
+    fn accelerated_edges_match_exhaustive_ties_inside_parallel_and_tangent_queries()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let objects = [
+            Object::new(9, Kind::Sphere, [0.0; 3], 1.0, 0.0)?,
+            Object::new(2, Kind::Sphere, [0.0; 3], 1.0, 0.0)?,
+            Object::new(7, Kind::Goursat, [2.0, -1.0, 0.0], 2.0, 1.5625)?,
+            Object::new(8, Kind::Goursat, [-2.0, 1.0, 0.0], 0.01, 1.5)?,
+            Object::new(u32::MAX, Kind::Plane, [0.0, -2.0, 0.0], 4.0, 0.0)?,
+        ];
+        let rays = [
+            Ray {
+                o: [1.0, 0.0, -3.0],
+                d: [0.0, 0.0, 1.0],
+            },
+            Ray {
+                o: [0.0; 3],
+                d: [1.0, 0.0, 0.0],
+            },
+            Ray {
+                o: [3.0, 0.0, 0.0],
+                d: [-1.0, 0.0, 0.0],
+            },
+            Ray {
+                o: [0.0, 1.0, 0.0],
+                d: [1.0, -1e-12, 0.0],
+            },
+            Ray {
+                o: [-1e-12, -2.0, 0.0],
+                d: [0.0, 0.0, -1.0],
+            },
+            Ray {
+                o: [20.0; 3],
+                d: [0.6, 0.8, 0.0],
+            },
+            Ray {
+                o: [-3.0, 1.0, 2.0],
+                d: [2.0, -0.25, -1.0],
+            },
+        ];
+        for ray in rays {
+            for mode in [QueryMode::First, QueryMode::All, QueryMode::Inspect] {
+                let mut brute = objects
+                    .iter()
+                    .map(|object| query_object(object, ray, mode == QueryMode::Inspect))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if mode != QueryMode::Inspect {
+                    brute.retain(|sample| sample.sample.hit);
+                }
+                brute.sort_by(|a, b| {
+                    (if mode == QueryMode::Inspect {
+                        b.sample.hit.cmp(&a.sample.hit)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    })
+                    .then_with(|| a.sample.t.total_cmp(&b.sample.t))
+                    .then(a.id.cmp(&b.id))
+                });
+                if mode == QueryMode::First {
+                    brute.truncate(1);
+                }
+                let actual = query_objects(&objects, ray, mode)?;
+                assert_eq!(
+                    actual
+                        .iter()
+                        .map(|sample| sample.packed(ray).map(f64::to_bits))
+                        .collect::<Vec<_>>(),
+                    brute
+                        .iter()
+                        .map(|sample| sample.packed(ray).map(f64::to_bits))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn mixed_hierarchy_matches_brute_force_and_keeps_planes()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut objects = Vec::new();

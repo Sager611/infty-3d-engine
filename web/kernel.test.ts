@@ -7,6 +7,7 @@ import {
 	PreparedScene,
 	query_ray,
 	query_scene,
+	trace_closest_point,
 } from "../pkg/infty.js";
 
 initSync({
@@ -21,6 +22,205 @@ const request: Float64Array = new Float64Array([1e-8, 1e-8, 4096]);
 const ray: Float64Array = new Float64Array([0, 0, 3, 0, 0, -1]);
 const camera: Float64Array = new Float64Array([0, 0, 3, 0, 0, 0]);
 const screen: Float64Array = new Float64Array([8, 8, 4, 4]);
+
+function tracePacket(data: Float64Array): Readonly<{
+	result: Float64Array;
+	events: readonly Float64Array[];
+	omitted: number;
+}> {
+	const length = data[0] ?? Number.NaN;
+	const count = data[1] ?? Number.NaN;
+	const omitted = data[2] ?? Number.NaN;
+	if (
+		[length, count, omitted].some(
+			(value) => !Number.isInteger(value) || value < 0,
+		) ||
+		count > 256 ||
+		data.length !== 3 + length + 8 * count
+	) {
+		throw new Error("Malformed trace packet");
+	}
+	return {
+		result: data.slice(3, 3 + length),
+		omitted,
+		events: Array.from({ length: count }, (_, i) =>
+			data.slice(3 + length + 8 * i, 3 + length + 8 * (i + 1)),
+		),
+	};
+}
+
+test("WASM opt-in traces keep the same result and bounded prefix at every capacity", () => {
+	const position = new Float64Array([0.3, 0.9, 1.3]);
+	for (const [kind, parameter] of [
+		[1, 0],
+		[2, 1.5],
+		[3, 0],
+	] as const) {
+		const normal = closest_point(kind, parameter, position, request);
+		const full = tracePacket(
+			trace_closest_point(kind, parameter, position, request, 256),
+		);
+		expect(full.result).toEqual(normal);
+		expect(full.events.some((row) => row[0] === 7 && row[1] === 0)).toBe(true);
+		const total = full.events.length + full.omitted;
+		for (const limit of [0, 1]) {
+			const trace = tracePacket(
+				trace_closest_point(kind, parameter, position, request, limit),
+			);
+			expect(trace.result).toEqual(normal);
+			expect(trace.events).toEqual(full.events.slice(0, limit));
+			expect(trace.omitted + trace.events.length).toBe(total);
+		}
+	}
+});
+
+test("WASM ray traces retain real root brackets, repeated roots and world units", () => {
+	const prepared = new PreparedScene(
+		new Float64Array([42, 2, 2, -3, 4, 0.5, 1.5625, 0]),
+	);
+	try {
+		for (const [y, distance] of [
+			[-2.5, 0.75],
+			[-2.25, 1],
+		]) {
+			const input = new Float64Array([0.5, y ?? Number.NaN, 4.5, 1, 0, 0]);
+			for (const mode of [0, 1, 2]) {
+				const normal = prepared.query_ray(input, mode);
+				const trace = tracePacket(prepared.trace_ray(input, mode, 256));
+				expect(trace.result).toEqual(normal);
+				expect(trace.result[3]).toBeCloseTo(distance ?? Number.NaN, 12);
+				expect(trace.events.every((row) => row[1] === 0 || row[1] === 42)).toBe(
+					true,
+				);
+				expect(
+					trace.events.some(
+						(row) =>
+							row[0] === 6 &&
+							Math.abs((row[3] ?? Number.NaN) - (distance ?? Number.NaN)) <
+								2e-12,
+					),
+				).toBe(true);
+				if (y === -2.5) {
+					const brackets = trace.events.filter((row) => row[0] === 3);
+					for (const root of [-1.5, 1.5]) {
+						expect(
+							brackets.some(
+								(row) =>
+									(row[2] ?? Number.NaN) <= root &&
+									root <= (row[3] ?? Number.NaN),
+							),
+						).toBe(true);
+					}
+				} else {
+					expect(trace.events.some((row) => row[0] === 2)).toBe(true);
+				}
+			}
+		}
+	} finally {
+		prepared.free();
+	}
+});
+
+test("WASM closest traces separate local bounds from final world accuracy", () => {
+	const prepared = new PreparedScene(
+		new Float64Array([42, 2, 2, -3, 4, 0.5, 1.5, 0]),
+	);
+	try {
+		const position = new Float64Array([2, -3, 4]);
+		const normal = prepared.closest_point(42, position, request);
+		const trace = tracePacket(
+			prepared.trace_closest_point(42, position, request, 256),
+		);
+		expect(trace.result).toEqual(normal);
+		expect(trace.events.every((row) => row[1] === 42)).toBe(true);
+		const world = trace.events.find((row) => row[0] === 8);
+		expect(world?.[2]).toBe(normal[3]);
+		expect(world?.[3]).toBe(normal[4]);
+		expect(world?.[4]).toBe(normal[8]);
+		expect(
+			trace.events.some(
+				(row) => row[0] === 7 && (row[2] ?? 0) > (normal[4] ?? 0),
+			),
+		).toBe(true);
+		const zero = tracePacket(
+			prepared.trace_closest_point(
+				42,
+				position,
+				new Float64Array([1e-8, 0, 0]),
+				1,
+			),
+		);
+		expect(zero.result).toEqual(
+			prepared.closest_point(42, position, new Float64Array([1e-8, 0, 0])),
+		);
+		expect(zero.result[4]).toBe(Number.POSITIVE_INFINITY);
+	} finally {
+		prepared.free();
+	}
+});
+
+test("WASM trace limits, IDs and modes reject coercion rather than wrapping", () => {
+	const prepared = new PreparedScene(
+		new Float64Array([42, 1, 0, 0, 0, 1, 0, 0]),
+	);
+	try {
+		for (const limit of [
+			-1,
+			0.5,
+			257,
+			2 ** 32,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+		]) {
+			expect(() => trace_closest_point(1, 0, point, request, limit)).toThrow(
+				"trace",
+			);
+			expect(() =>
+				prepared.trace_closest_point(42, point, request, limit),
+			).toThrow("trace");
+			expect(() => prepared.trace_ray(ray, 0, limit)).toThrow("trace");
+		}
+		for (const id of [0, 1.5, 2 ** 32 + 42, -1]) {
+			expect(() => prepared.trace_closest_point(id, point, request, 0)).toThrow(
+				"ID",
+			);
+		}
+		expect(() => prepared.trace_closest_point(43, point, request, 0)).toThrow(
+			"not in",
+		);
+		for (const mode of [-1, 0.5, 3, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(() => prepared.trace_ray(ray, mode, 0)).toThrow("mode");
+		}
+	} finally {
+		prepared.free();
+	}
+});
+
+test("WASM large quartic holes remain misses and expose only computed inspection bounds", () => {
+	const input = new Float64Array([0, 0, -6, 0, 0, 1]);
+	for (const size of [1, 2, 4]) {
+		const prepared = new PreparedScene(
+			new Float64Array([42, 2, 0, 0, 0, size, 1.5, 0]),
+		);
+		try {
+			for (const mode of [0, 1]) {
+				expect(prepared.query_ray(input, mode).length).toBe(0);
+				const trace = tracePacket(prepared.trace_ray(input, mode, 256));
+				expect(trace.result.length).toBe(0);
+				expect(trace.events.some((row) => row[0] === 6 && row[7] === 2)).toBe(
+					true,
+				);
+			}
+			const inspection = prepared.query_ray(input, 2);
+			const gap = size * Math.sqrt(2 - Math.sqrt(3));
+			expect(inspection[4]).toBeLessThanOrEqual(gap);
+			expect(inspection[5]).toBeGreaterThanOrEqual(gap);
+			expect(inspection[22]).toBeLessThan(2);
+		} finally {
+			prepared.free();
+		}
+	}
+});
 
 test("WASM quartic closest queries keep global bounds and finite work", () => {
 	let lower = 0;

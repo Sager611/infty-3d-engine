@@ -1,5 +1,6 @@
 //! Translation and positive uniform scale; one instance adapter for every kernel.
 use super::model::SceneError;
+use crate::diagnostic::{Recorder, Tag};
 use crate::geometry::{
     Error, Geometry, checked,
     point::{Closest, Request},
@@ -60,6 +61,26 @@ impl Transform {
         point: [f64; 3],
         request: Request,
     ) -> Result<Closest, Error> {
+        self.closest_traced(geometry, point, request, &mut Recorder::off())
+    }
+    pub fn closest_traced(
+        self,
+        geometry: Geometry,
+        point: [f64; 3],
+        request: Request,
+        trace: &mut Recorder<'_>,
+    ) -> Result<Closest, Error> {
+        let result = self.closest_core(geometry, point, request, trace)?;
+        result.record(trace, Tag::WorldBounds);
+        Ok(result)
+    }
+    fn closest_core(
+        self,
+        geometry: Geometry,
+        point: [f64; 3],
+        request: Request,
+        trace: &mut Recorder<'_>,
+    ) -> Result<Closest, Error> {
         request.validate()?;
         if point.iter().any(|x| !x.is_finite()) {
             return Err(Error::InvalidPoint);
@@ -68,7 +89,7 @@ impl Transform {
             return Ok(Closest::unknown());
         }
         if self == Self::IDENTITY {
-            return geometry.closest(point, request);
+            return geometry.closest_traced(point, request, trace);
         }
         let local = self.local_point(point);
         for i in 0..3 {
@@ -85,11 +106,9 @@ impl Transform {
             ..request
         };
         let input_error = self.input_error(point, local)?;
-        let closest = geometry.closest(local, local_request)?.with_input_error(
-            geometry,
-            local,
-            input_error,
-        )?;
+        let closest = geometry
+            .closest_traced(local, local_request, trace)?
+            .with_input_error(geometry, local, input_error)?;
         let lower = I::point(closest.distance.lower)?
             .scale(self.scale)?
             .lo()
@@ -164,6 +183,7 @@ impl Transform {
             },
             error: result.error * self.scale,
             uncertain: result.uncertain,
+            gap_computed: result.gap_computed,
         })
     }
 }

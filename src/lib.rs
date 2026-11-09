@@ -1,6 +1,8 @@
 #![doc = "Infty 3D engine."]
 
 #[cfg(any(test, target_arch = "wasm32"))]
+mod diagnostic;
+#[cfg(any(test, target_arch = "wasm32"))]
 mod geometry;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod math;
@@ -21,6 +23,6 @@ mod gpu;
 mod gpu_test;
 
 #[cfg(target_arch = "wasm32")]
-pub use api::{PreparedScene, closest_point, query_ray, query_scene};
+pub use api::{PreparedScene, closest_point, query_ray, query_scene, trace_closest_point};
 #[cfg(target_arch = "wasm32")]
 pub use gpu::Renderer;

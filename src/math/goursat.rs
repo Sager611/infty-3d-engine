@@ -1,8 +1,10 @@
 use super::{
-    polynomial::{cubic, quartic},
+    polynomial::{cubic, quartic_traced},
     types::{Ray, Sample, V},
     vector::dot,
 };
+
+use crate::diagnostic::{Recorder, Tag};
 
 /// A validated Goursat query result.
 #[derive(Clone, Copy)]
@@ -11,6 +13,7 @@ pub struct GoursatSample {
     pub gap_lower: f64,
     pub error: f64,
     pub uncertain: bool,
+    pub gap_computed: bool,
 }
 
 /// Errors returned when a Goursat query cannot be evaluated.
@@ -204,7 +207,17 @@ fn witness(ray: Ray, p0: V, d: V, t0: f64, beta: f64) -> Option<Witness> {
 }
 
 /// Intersect a normalized forward ray with the canonical Goursat surface.
+#[cfg(test)]
 pub fn goursat(ray: Ray, beta: f64, need_gap: bool) -> Result<GoursatSample, GoursatError> {
+    goursat_traced(ray, beta, need_gap, &mut Recorder::off())
+}
+
+pub fn goursat_traced(
+    ray: Ray,
+    beta: f64,
+    need_gap: bool,
+    trace: &mut Recorder<'_>,
+) -> Result<GoursatSample, GoursatError> {
     if !beta.is_finite() || !(BETA_MIN..=BETA_MAX).contains(&beta) {
         return Err(GoursatError::InvalidBeta);
     }
@@ -224,9 +237,11 @@ pub fn goursat(ray: Ray, beta: f64, need_gap: bool) -> Result<GoursatSample, Gou
     let lo = (-t0).max(-radius);
     let hi = radius;
     let coeff = coefficients(p0, d, beta);
+    trace.emit(Tag::Enclosure, [lo, hi, t0, radius, 0.0, 0.0]);
     let roots = if lo <= hi {
-        Some(quartic(coeff, lo, hi).map_err(|_| GoursatError::Polynomial)?)
+        Some(quartic_traced(coeff, lo, hi, trace).map_err(|_| GoursatError::Polynomial)?)
     } else {
+        trace.emit(Tag::Reject, [2.0, lo, hi, t0, 0.0, 0.0]);
         None
     };
     if let Some(roots) = roots.filter(|roots| roots.len != 0) {
@@ -245,6 +260,7 @@ pub fn goursat(ray: Ray, beta: f64, need_gap: bool) -> Result<GoursatSample, Gou
             gap_lower: 0.0,
             error: roots.error,
             uncertain: roots.uncertain,
+            gap_computed: true,
         });
     }
     let forward_t = t0.max(0.0);
@@ -265,7 +281,7 @@ pub fn goursat(ray: Ray, beta: f64, need_gap: bool) -> Result<GoursatSample, Gou
         } else {
             [radius, 0.0, 0.0]
         };
-        (q, gap_lower, f64::MAX)
+        (q, gap_lower, 0.0)
     };
     let (n, uv) = normal_uv(wp);
     let witness_t = dot([wp[0] - ray.o[0], wp[1] - ray.o[1], wp[2] - ray.o[2]], d).max(0.0);
@@ -282,6 +298,7 @@ pub fn goursat(ray: Ray, beta: f64, need_gap: bool) -> Result<GoursatSample, Gou
         gap_lower,
         error,
         uncertain: root_uncertain,
+        gap_computed: need_gap,
     })
 }
 

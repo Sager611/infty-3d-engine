@@ -1,3 +1,5 @@
+use crate::diagnostic::{Recorder, Tag};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PolyError {
     NonFinite,
@@ -108,6 +110,13 @@ pub(super) fn cubic(coeff: [f64; 4]) -> Result<Roots, PolyError> {
     let discriminant = half_q.mul_add(half_q, third_p * third_p * third_p);
     let disc_scale = half_q.abs().mul_add(half_q.abs(), third_p.abs().powi(3));
     let disc_bound = 16.0 * EPS * disc_scale.max(f64::MIN_POSITIVE);
+    if [aa, bb, cc, p, q, discriminant, disc_scale, disc_bound]
+        .into_iter()
+        .any(|x| !x.is_finite())
+        || (disc_scale == 0.0 && (p != 0.0 || q != 0.0))
+    {
+        return Err(PolyError::NonFinite);
+    }
     let mut roots = empty_roots();
 
     if discriminant > disc_bound {
@@ -162,7 +171,17 @@ fn bisect(coeff: &[f64], mut lo: f64, mut hi: f64, mut flo: f64, mut fhi: f64) -
     (root, (hi - lo) * 0.5)
 }
 
+#[cfg(test)]
 pub(super) fn quartic(coeff: [f64; 5], lo: f64, hi: f64) -> Result<Roots, PolyError> {
+    quartic_traced(coeff, lo, hi, &mut Recorder::off())
+}
+
+pub(super) fn quartic_traced(
+    coeff: [f64; 5],
+    lo: f64,
+    hi: f64,
+    trace: &mut Recorder<'_>,
+) -> Result<Roots, PolyError> {
     valid_coeff(&coeff)?;
     if !lo.is_finite() || !hi.is_finite() {
         return Err(PolyError::NonFinite);
@@ -191,7 +210,11 @@ pub(super) fn quartic(coeff: [f64; 5], lo: f64, hi: f64) -> Result<Roots, PolyEr
     for &x in &points[..point_len] {
         let value = eval(coeff, x);
         let bound = roundoff_bound(&coeff, x);
+        if !value.is_finite() || !bound.is_finite() {
+            return Err(PolyError::NonFinite);
+        }
         if sign_with_bound(value, bound) == 0 {
+            trace.emit(Tag::Root, [x, value, bound, 0.0, 0.0, 0.0]);
             add_root(&mut roots, x);
             roots.uncertain |= value.abs() > 0.5 * bound;
         }
@@ -206,9 +229,15 @@ pub(super) fn quartic(coeff: [f64; 5], lo: f64, hi: f64) -> Result<Roots, PolyEr
         let sb = sign_with_bound(fb, roundoff_bound(&coeff, b));
         if sa != 0 && sb != 0 && sa != sb {
             let (root, bracket_error) = bisect(&coeff, a, b, fa, fb);
+            trace.emit(Tag::Bracket, [a, b, root, bracket_error, fa, fb]);
             add_root(&mut roots, root);
             roots.error = roots.error.max(bracket_error);
             roots.uncertain |= bracket_error > root_tolerance(root, root);
+        } else {
+            trace.emit(
+                Tag::Reject,
+                [1.0, a, b, fa, fb, f64::from(sa) * f64::from(sb)],
+            );
         }
     }
     Ok(roots)
@@ -274,6 +303,29 @@ mod tests {
     fn cubic_triple_root() -> Result<(), PolyError> {
         assert_roots(cubic([1.0, 0.0, 0.0, 0.0])?, &[0.0]);
         Ok(())
+    }
+
+    #[test]
+    fn unrepresentable_finite_cubic_arithmetic_is_an_error() {
+        assert_eq!(
+            cubic([f64::MIN_POSITIVE, f64::MAX, 1.0, 1.0]),
+            Err(PolyError::NonFinite)
+        );
+    }
+
+    #[test]
+    fn unrepresentable_finite_quartic_arithmetic_is_an_error() {
+        assert_eq!(
+            quartic([1.0, 0.0, 0.0, 0.0, 1.0], 0.0, f64::MAX),
+            Err(PolyError::NonFinite)
+        );
+    }
+
+    #[test]
+    fn underflowed_nonzero_discriminants_are_not_exact_multiple_roots() {
+        for coeff in [[1.0, 0.0, 0.0, 1e-300], [1.0, 0.0, -1e-300, 0.0]] {
+            assert_eq!(cubic(coeff), Err(PolyError::NonFinite));
+        }
     }
 
     #[test]

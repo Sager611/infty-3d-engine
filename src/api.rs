@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 
-use crate::geometry::point::Request;
+use crate::diagnostic::{Recorder, TraceLog};
+use crate::geometry::{Geometry, point::Request};
 use crate::math::{Ray, checked_u32};
 use crate::scene::{
     CameraError, QueryError, QueryMode, parse_camera, parse_objects, query_objects,
@@ -56,6 +57,51 @@ impl PreparedScene {
         pack_samples(samples, ray)
     }
 
+    /// Ray query with at most 256 diagnostic events; header3, query24N, then rows8.
+    ///
+    /// # Errors
+    /// Rejects invalid trace limits and the same inputs/evaluations as `query_ray`.
+    pub fn trace_ray(&self, ray: &[f64], mode: f64, max_events: f64) -> Result<Vec<f64>, JsValue> {
+        let mut log = trace_log(max_events)?;
+        let ray = parse_ray(ray)?;
+        let samples = crate::scene::query::query_prepared_traced(
+            &self.core,
+            ray,
+            parse_mode(mode)?,
+            Some(&mut log),
+        )
+        .map_err(query_error)?;
+        let result = pack_samples(samples, ray)?;
+        log.packed(&result)
+            .map_err(|error| js_error(error.to_string()))
+    }
+
+    /// Closest surface of one instance with bounded diagnostics in world units.
+    ///
+    /// # Errors
+    /// Rejects invalid trace limits and the same inputs/evaluations as `closest_point`.
+    pub fn trace_closest_point(
+        &self,
+        id: f64,
+        point: &[f64],
+        request: &[f64],
+        max_events: f64,
+    ) -> Result<Vec<f64>, JsValue> {
+        let id = parse_id(id)?;
+        let (point, request) = parse_point_request(point, request)?;
+        let mut log = trace_log(max_events)?;
+        let result = crate::scene::query::closest_prepared_traced(
+            &self.core,
+            id,
+            point,
+            request,
+            &mut Recorder::new(Some(&mut log), id),
+        )
+        .map_err(query_error)?;
+        log.packed(&result.packed())
+            .map_err(|error| js_error(error.to_string()))
+    }
+
     /// Closest surface of one instance by stable ID; point/accuracy are world-space.
     ///
     /// # Errors
@@ -66,9 +112,7 @@ impl PreparedScene {
         point: &[f64],
         request: &[f64],
     ) -> Result<Vec<f64>, JsValue> {
-        let id = checked_u32(id)
-            .filter(|&id| id > 0)
-            .ok_or_else(|| js_error("invalid object ID"))?;
+        let id = parse_id(id)?;
         let (point, request) = parse_point_request(point, request)?;
         let result = crate::scene::query::closest_prepared(&self.core, id, point, request)
             .map_err(query_error)?;
@@ -114,16 +158,55 @@ pub fn closest_point(
     point: &[f64],
     request: &[f64],
 ) -> Result<Vec<f64>, JsValue> {
-    let kind = checked_u32(kind)
-        .and_then(crate::geometry::Kind::from_tag)
-        .ok_or_else(|| js_error("invalid geometry kind"))?;
-    let geometry =
-        crate::geometry::Geometry::new(kind, parameter).map_err(|e| js_error(e.to_string()))?;
+    let geometry = parse_geometry(kind, parameter)?;
     let (point, request) = parse_point_request(point, request)?;
     let result = geometry
         .closest(point, request)
         .map_err(|e| js_error(e.to_string()))?;
     Ok(result.packed().to_vec())
+}
+
+/// Canonical closest query plus a bounded numerical trace, never normal-path logging.
+///
+/// Header3 is [result values, retained events, omitted events], then closest12
+/// and rows8 [tag, object ID, six tag-specific values]. Limit is 0..=256.
+///
+/// # Errors
+/// Rejects invalid limits and the same inputs/evaluations as `closest_point`.
+#[wasm_bindgen]
+pub fn trace_closest_point(
+    kind: f64,
+    parameter: f64,
+    point: &[f64],
+    request: &[f64],
+    max_events: f64,
+) -> Result<Vec<f64>, JsValue> {
+    let geometry = parse_geometry(kind, parameter)?;
+    let (point, request) = parse_point_request(point, request)?;
+    let mut log = trace_log(max_events)?;
+    let result = geometry
+        .closest_traced(point, request, &mut Recorder::new(Some(&mut log), 0))
+        .map_err(|error| js_error(error.to_string()))?;
+    log.packed(&result.packed())
+        .map_err(|error| js_error(error.to_string()))
+}
+
+fn parse_geometry(kind: f64, parameter: f64) -> Result<Geometry, JsValue> {
+    let kind = checked_u32(kind)
+        .and_then(crate::geometry::Kind::from_tag)
+        .ok_or_else(|| js_error("invalid geometry kind"))?;
+    Geometry::new(kind, parameter).map_err(|error| js_error(error.to_string()))
+}
+
+fn parse_id(id: f64) -> Result<u32, JsValue> {
+    checked_u32(id)
+        .filter(|&id| id > 0)
+        .ok_or_else(|| js_error("invalid object ID"))
+}
+
+fn trace_log(max_events: f64) -> Result<TraceLog, JsValue> {
+    let limit = checked_u32(max_events).ok_or_else(|| js_error("invalid trace event limit"))?;
+    TraceLog::new(limit).map_err(|error| js_error(error.to_string()))
 }
 
 fn parse_point_request(point: &[f64], request: &[f64]) -> Result<([f64; 3], Request), JsValue> {
