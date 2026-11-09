@@ -87,6 +87,6 @@ test("round-trips mode 2 and deep zoom", () => {
 });
 
 test("uses the default mode for unsupported modes", () => {
-	expect(parseView("#v=0.1,0.2,5,1,3").mode).toBe(DEFAULT_VIEW.mode);
+	expect(parseView("#v=0.1,0.2,5,1,4").mode).toBe(DEFAULT_VIEW.mode);
 	expect(parseView("#v=0.1,0.2,5,1,-1").mode).toBe(DEFAULT_VIEW.mode);
 });

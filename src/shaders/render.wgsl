@@ -28,6 +28,27 @@ fn branch_intersects(node: SceneObject, o: vec3f, d: vec3f, padding: f32) -> boo
   return near <= far;
 }
 
+fn render_goursat_residual(p: vec3f, parameter: f32) -> f32 {
+  let a=fma(p,p,vec3f(-1.0));
+  return fma(a.x,a.x,fma(a.y,a.y,fma(a.z,a.z,-parameter)));
+}
+fn render_material_distance(sample: SceneSample, ray: vec3f, size: f32, parameter: f32) -> f32 {
+  let original=sample.query.t;
+  if (sample.kind!=2u || !sample.query.hit) { return original; }
+  let p=sample.local;let gradient=goursat_gradient(p);
+  let slope=dot(gradient,ray);
+  if (abs(slope)<=1e-6*length(gradient)) { return original; }
+  let residual=render_goursat_residual(p,parameter);
+  let step=-residual/slope;
+  let candidate=original+step*size;
+  // Appearance-only tangent projection: never change hits, proofs, or silhouettes.
+  if (abs(step)<=1e-3 && candidate>0.0 &&
+      abs(render_goursat_residual(fma(vec3f(step),ray,p),parameter))<abs(residual)) {
+    return candidate;
+  }
+  return original;
+}
+
 fn branch_padding(node: SceneObject, origin: vec3f, height: f32, display_gap: bool) -> f32 {
   let extent = max(abs(node.position_size.xyz - origin), abs(node.params.xyz - origin));
   return max(6.0 * length(extent) / (1.8 * height), select(0.0, 1.5, display_gap));
@@ -35,7 +56,7 @@ fn branch_padding(node: SceneObject, origin: vec3f, height: f32, display_gap: bo
 
 fn resolved_object(index: u32) -> SceneObject {
   var object = scene_objects[index];
-  object.params = scene_objects[object.identity.w].params;
+  object.params = vec4f(scene_objects[object.identity.w].params.xyz,object.params.w);
   return object;
 }
 
@@ -99,6 +120,9 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   var nearest_hit = false;
   var nearest_t = 1e30;
   var nearest_size = 1.0;
+  var nearest_parameter = 0.0;
+  var nearest_material = 0u;
+  var nearest_anchor = vec3f(0.0);
   var outline_uv = vec2f(0.0);
   var halo_uv = vec2f(0.0);
   var halo_gap = 1e30;
@@ -127,6 +151,9 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
         nearest = sample;
         nearest_t = sample.query.t;
         nearest_size = object.position_size.w;
+        nearest_parameter = object.params.x;
+        nearest_material = u32(object.params.w);
+        nearest_anchor = object.position_size.xyz;
         nearest_hit = true;
       }
 
@@ -152,9 +179,17 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     let shadow = shadow_factor(nearest.query.p,
       surface_normal(nearest.query.n, direction, nearest.kind),
       nearest_size, light, count);
-    color = surface_shade(nearest.query, nearest.local, nearest.kind,
-      direction, height, nearest_size,
-      frame_params.screen.z, light, shadow);
+    if (frame_params.screen.z==3u) {
+      let normal=surface_normal(nearest.query.n,direction,nearest.kind);
+      let material_t=render_material_distance(nearest,direction,nearest_size,nearest_parameter);
+      let footprint=max(1e-30,2.0*material_t/(frame_params.forward.w*height*max(0.05,abs(dot(normal,direction)))));
+      let material=layered_material(nearest_material,direction*material_t,normal,footprint,nearest_anchor);
+      color=material_shade(material,nearest.query.p,direction,light,shadow);
+    } else {
+      color = surface_shade(nearest.query, nearest.local, nearest.kind,
+        direction, height, nearest_size,
+        frame_params.screen.z, light, shadow);
+    }
   }
 
   if (display_gap) {

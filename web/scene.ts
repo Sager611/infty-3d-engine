@@ -1,5 +1,12 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: This pure module is not a Qwik component.
 // biome-ignore-all lint/style/noMagicNumbers: Packet indices and locked defaults are contract values.
+import {
+	isMaterial,
+	MATERIALS,
+	type MaterialKind,
+	materialKind,
+} from "./material.ts";
+
 type Position = readonly [number, number, number];
 type SceneKind = "sphere" | "goursat" | "plane" | "crystal";
 
@@ -9,6 +16,7 @@ type ReadonlySceneObject = Readonly<{
 	position: Position;
 	size: number;
 	parameter: number;
+	material?: MaterialKind;
 }>;
 
 type SceneObject = ReadonlySceneObject;
@@ -17,6 +25,7 @@ type ScenePatch = Readonly<{
 	position?: Position;
 	size?: number;
 	parameter?: number;
+	material?: MaterialKind;
 }>;
 
 type NumericRange = Readonly<{ min: number; max: number }>;
@@ -102,12 +111,22 @@ const position = (x: number, y: number, z: number): Position =>
 const clonePosition = (value: Position): Position =>
 	Object.freeze([value[0], value[1], value[2]]);
 
+const materialFields = (
+	material: MaterialKind | undefined,
+): Readonly<{ material?: MaterialKind }> => {
+	if (material === undefined || material === "steel") {
+		return {};
+	}
+	return { material };
+};
+
 const sceneObject = ({
 	id,
 	kind,
 	position: objectPosition,
 	size,
 	parameter,
+	material,
 }: ReadonlySceneObject): ReadonlySceneObject =>
 	Object.freeze({
 		id,
@@ -115,6 +134,7 @@ const sceneObject = ({
 		position: clonePosition(objectPosition),
 		size,
 		parameter,
+		...materialFields(material),
 	});
 
 class SceneValidationError extends Error {
@@ -162,6 +182,9 @@ const validateObject = (object: ReadonlySceneObject): void => {
 	}
 	if (!isSceneKind(object.kind)) {
 		invalid("invalid kind");
+	}
+	if (object.material !== undefined && !isMaterial(object.material)) {
+		invalid("invalid material");
 	}
 	const descriptor = DESCRIPTORS[object.kind];
 	if (
@@ -230,7 +253,7 @@ const packScene = (scene: Scene): Float64Array => {
 		packet[offset + 4] = object.position[2];
 		packet[offset + 5] = object.size;
 		packet[offset + 6] = object.parameter;
-		packet[offset + 7] = 0;
+		packet[offset + 7] = MATERIALS[object.material ?? "steel"].tag;
 	});
 	return packet;
 };
@@ -267,8 +290,9 @@ const unpackScene = (packet: ArrayLike<number>): Scene => {
 		if (kind === undefined) {
 			throw new SceneValidationError("invalid kind");
 		}
-		if (packetValue(packet, offset + 7) !== 0) {
-			invalid("invalid padding");
+		const material = materialKind(packetValue(packet, offset + 7));
+		if (material === undefined) {
+			throw new SceneValidationError("invalid material");
 		}
 		const object = sceneObject({
 			id,
@@ -280,6 +304,7 @@ const unpackScene = (packet: ArrayLike<number>): Scene => {
 			),
 			size: packetValue(packet, offset + 5),
 			parameter: packetValue(packet, offset + 6),
+			material,
 		});
 		validateObject(object);
 		if (ids.has(id)) {
@@ -298,7 +323,12 @@ const updateObject = (scene: Scene, id: number, patch: ScenePatch): Scene => {
 		throw new SceneValidationError("unknown id");
 	}
 	for (const key of Object.keys(patch)) {
-		if (key !== "position" && key !== "size" && key !== "parameter") {
+		if (
+			key !== "position" &&
+			key !== "size" &&
+			key !== "parameter" &&
+			key !== "material"
+		) {
 			invalid("invalid patch");
 		}
 	}
@@ -308,6 +338,7 @@ const updateObject = (scene: Scene, id: number, patch: ScenePatch): Scene => {
 		position: patch.position ?? current.position,
 		size: patch.size ?? current.size,
 		parameter: patch.parameter ?? current.parameter,
+		material: patch.material ?? current.material ?? "steel",
 	});
 	validateObject(changed);
 	return Object.freeze(

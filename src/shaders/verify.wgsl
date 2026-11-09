@@ -25,6 +25,66 @@ fn verify_crystal_render(@builtin(global_invocation_id) id: vec3u) {
     vec4f(0.0), vec4f(0.0), vec4f(0.0));
 }
 
+@compute @workgroup_size(1)
+fn verify_material(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= arrayLength(&rays)) { return; }
+  let input=rays[id.x];
+  let q=layered_material(u32(input.o.w),input.o.xyz,normalize(input.d.xyz),input.d.w,vec3f(0.0));
+  results[id.x]=ProbeResult(vec4f(q.albedo,q.roughness),vec4f(q.normal,q.metallic),
+    vec4f(f32(arrayLength(&material_levels)),q.occlusion,
+      clamp(log2(max(1e-30,input.d.w*512.0/material_levels[2u+4u*u32(input.o.w)].surface.x)),0.0,9.0),
+      1.0-smoothstep(4.0,8.0,clamp(log2(max(1e-30,input.d.w*512.0/material_levels[2u+4u*u32(input.o.w)].surface.x)),0.0,9.0))),
+    vec4f(material_shade(q,input.o.xyz,vec3f(0.0,0.0,-1.0),vec3f(3.0,5.0,4.0),1.0),0.0));
+}
+@compute @workgroup_size(1)
+fn verify_studio_brushing(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x>=arrayLength(&rays)) { return; }
+  let input=rays[id.x];let metal=select(0.0,1.0,input.o.w==0.0);
+  let q=MaterialSurface(vec3f(0.56),vec3f(0.0,0.0,1.0),0.29,metal,1.0,input.o.z);
+  let color=material_shade(q,vec3f(0.0),vec3f(0.0,0.0,-1.0),input.d.xyz,1.0);
+  results[id.x]=ProbeResult(vec4f(color,1.0),vec4f(material_environment(q,vec3f(0.0,0.0,1.0)),0.0),vec4f(0.0),vec4f(0.0));
+}
+@compute @workgroup_size(1)
+fn verify_material_fill(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x>=arrayLength(&rays)) { return; }
+  results[id.x]=ProbeResult(vec4f(material_diffuse_light(rays[id.x].o.xyz),1.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
+}
+@compute @workgroup_size(1)
+fn verify_material_variance(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x>=arrayLength(&rays)) { return; }
+  let r=rays[id.x].o;
+  let q=material_compensate(vec4f(0.0,0.0,0.0,r.x),vec4f(0.0,0.0,0.0,r.y),vec4f(0.5,0.5,0.5,r.z),r.w);
+  results[id.x]=ProbeResult(q,vec4f(0.0),vec4f(0.0),vec4f(0.0));
+}
+@compute @workgroup_size(1)
+fn verify_material_contact(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x>=arrayLength(&rays)) { return; }
+  let r=rays[id.x];let q=goursat(r.o.xyz,r.d.xyz,r.o.w,false);
+  let s=SceneSample(q.query,q.query.p,1u,u32(r.d.w),q.gap_lower,q.error,q.status);
+  let t=render_material_distance(s,r.d.xyz,1.0,r.o.w);
+  results[id.x]=ProbeResult(vec4f(t,q.query.t,q.error,f32(q.status)),vec4f(q.query.p,1.0),vec4f(0.0),vec4f(0.0));
+}
+@compute @workgroup_size(1)
+fn verify_material_display(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x>=arrayLength(&rays)) { return; }
+  results[id.x]=ProbeResult(vec4f(material_display(rays[id.x].o.xyz),1.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
+}
+@compute @workgroup_size(1)
+fn verify_material_mapping(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x>=arrayLength(&rays)) { return; }
+  let input=rays[id.x];let level=material_levels[u32(input.o.z)];
+  let q=material_tile(input.o.xy,input.d.xy,level,input.o.w);
+  let raw=textureSampleLevel(material_tiles,material_sampler,input.o.xy+input.d.xy,i32(level.identity.y),input.o.w);
+  results[id.x]=ProbeResult(vec4f(q.color,q.height),vec4f(q.gradient,0.0,0.0),raw,vec4f(0.0));
+}
+@compute @workgroup_size(1)
+fn verify_material_instance(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= arrayLength(&rays)) { return; }
+  let object=resolved_object(u32(rays[id.x].o.x));
+  results[id.x]=ProbeResult(vec4f(object.params.w,f32(object.identity.z),object.params.x,0.0),
+    vec4f(0.0),vec4f(0.0),vec4f(0.0));
+}
+
 fn pack(q: Query, rho: f32) -> ProbeResult {
   let h = select(0.0, 1.0, q.hit);
   return ProbeResult(

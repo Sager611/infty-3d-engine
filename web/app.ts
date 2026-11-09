@@ -67,6 +67,7 @@ import {
 	type Status,
 	statusMessage,
 } from "./status.ts";
+import { MATERIAL_MODE, type ViewMode } from "./view.ts";
 
 const INITIAL_SPEED = 3;
 const SPEED_DIGITS = 3;
@@ -279,9 +280,9 @@ const loadScenePreset = (): void => {
 	}
 };
 
-const readMode = (): 0 | 1 | 2 => {
+const readMode = (): ViewMode => {
 	const value = Number(modeNode.value);
-	if (value !== 0 && value !== 1 && value !== 2) {
+	if (value !== 0 && value !== 1 && value !== 2 && value !== MATERIAL_MODE) {
 		throw new Error("invalid display mode");
 	}
 	return value;

@@ -1,6 +1,27 @@
 // biome-ignore lint/nursery/noUnresolvedImports: Bun provides this virtual module.
 import { expect, test } from "bun:test";
 
+test("Materials is an additional accessible view without replacing diagnostics", async () => {
+	const source = await Bun.file(
+		new URL("../index.html", import.meta.url),
+	).text();
+	const modes: string[] = [];
+	const labels: string[] = [];
+	const parser = new HTMLRewriter().on("#mode option", {
+		element(element: HTMLRewriterTypes.Element): void {
+			modes.push(element.getAttribute("value") ?? "");
+		},
+		text(text: HTMLRewriterTypes.Text): void {
+			if (text.text.trim() !== "") {
+				labels.push(text.text.trim());
+			}
+		},
+	});
+	await parser.transform(new Response(source)).text();
+	expect(modes).toEqual(["0", "1", "2", "3"]);
+	expect(labels).toEqual(["UV", "Gap", "Detail", "Materials"]);
+});
+
 test("property forms have a non-form host and their own grid", async () => {
 	const source = await Bun.file(
 		new URL("../index.html", import.meta.url),

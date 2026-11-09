@@ -49,6 +49,47 @@ function tracePacket(data: Float64Array): Readonly<{
 	};
 }
 
+test("WASM material packets leave prepared geometry queries and traces bit-identical", () => {
+	for (const [kind, parameter] of [
+		[1, 0],
+		[2, 1.5],
+		[3, 0],
+		[4, 0],
+	] as const) {
+		const steel = new PreparedScene(
+			new Float64Array([7, kind, 0, 0, 0, 1, parameter, 0]),
+		);
+		const brick = new PreparedScene(
+			new Float64Array([7, kind, 0, 0, 0, 1, parameter, 1]),
+		);
+		try {
+			expect(brick.closest_point(7, point, request)).toEqual(
+				steel.closest_point(7, point, request),
+			);
+			for (const input of [
+				ray,
+				new Float64Array([0, 1, 3, 0, 0, -1]),
+				new Float64Array([0, 3, 0, 0, -1, 0]),
+			]) {
+				for (const mode of [0, 1, 2]) {
+					expect(brick.query_ray(input, mode)).toEqual(
+						steel.query_ray(input, mode),
+					);
+				}
+				expect(brick.trace_ray(input, 2, 16)).toEqual(
+					steel.trace_ray(input, 2, 16),
+				);
+			}
+		} finally {
+			brick.free();
+			steel.free();
+		}
+	}
+	expect(
+		() => new PreparedScene(new Float64Array([7, 1, 0, 0, 0, 1, 0, 2])),
+	).toThrow();
+});
+
 test("WASM opt-in traces keep the same result and bounded prefix at every capacity", () => {
 	const position = new Float64Array([0.3, 0.9, 1.3]);
 	for (const [kind, parameter] of [

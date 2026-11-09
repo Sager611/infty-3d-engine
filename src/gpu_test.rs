@@ -4,6 +4,7 @@ use crate::math::{Ray, footprint, plane, pureweight, sphere};
 
 mod crystal;
 mod goursat;
+mod material;
 mod render;
 mod scene;
 mod support;

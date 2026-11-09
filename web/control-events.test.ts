@@ -6,18 +6,34 @@ import type { Selection } from "./query.ts";
 import { deleteShortcut, listenSceneActions } from "./scene-actions.ts";
 import { DEFAULT_SNAPSHOT } from "./state.ts";
 
-test("delegated property input follows the input target and cleans up", () => {
+const installElement = (
+	name: string,
+	type: typeof EventTarget,
+): (() => void) => {
+	const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+	Object.defineProperty(globalThis, name, { value: type, configurable: true });
+	return (): void => {
+		if (previous) {
+			Object.defineProperty(globalThis, name, previous);
+		} else {
+			Reflect.deleteProperty(globalThis, name);
+		}
+	};
+};
+
+test("delegated property input follows input and material select targets and cleans up", () => {
 	class Input extends EventTarget {
 		dataset = { controlKey: "parameter" };
 		value = "1.8";
 	}
-	// biome-ignore lint/security/noSecrets: Native DOM class name, not a credential.
-	const inputClass = "HTMLInputElement";
-	const previous = Object.getOwnPropertyDescriptor(globalThis, inputClass);
-	Object.defineProperty(globalThis, inputClass, {
-		value: Input,
-		configurable: true,
-	});
+	class Select extends EventTarget {
+		dataset = { controlKey: "material" };
+		value = "1";
+	}
+	// biome-ignore lint/security/noSecrets: Native DOM class name.
+	const restoreInput = installElement("HTMLInputElement", Input);
+	// biome-ignore lint/security/noSecrets: Native DOM class name.
+	const restoreSelect = installElement("HTMLSelectElement", Select);
 	const properties = new EventTarget();
 	const input = new Input();
 	const events: ControlsEvent[] = [];
@@ -33,9 +49,9 @@ test("delegated property input follows the input target and cleans up", () => {
 			events.push(event);
 		},
 	);
-	const emit = (): void => {
+	const emit = (target: EventTarget = input): void => {
 		const event = new Event("input", { bubbles: true });
-		Object.defineProperty(event, "target", { value: input });
+		Object.defineProperty(event, "target", { value: target });
 		properties.dispatchEvent(event);
 	};
 	try {
@@ -44,23 +60,27 @@ test("delegated property input follows the input target and cleans up", () => {
 			{ kind: "property", id: 2, key: "parameter", value: 1.8 },
 		]);
 		properties.dispatchEvent(new Event("input"));
+		emit(new Select());
+		expect(events[1]).toEqual({
+			kind: "property",
+			id: 2,
+			key: "material",
+			value: 1,
+		});
 		input.dataset.controlKey = "unknown";
 		emit();
 		input.dataset.controlKey = "parameter";
 		selection = { ids: [], active: null };
 		emit();
-		expect(events).toHaveLength(1);
+		expect(events).toHaveLength(2);
 		dispose();
 		selection = { ids: [2], active: 2 };
 		emit();
-		expect(events).toHaveLength(1);
+		expect(events).toHaveLength(2);
 	} finally {
 		dispose();
-		if (previous) {
-			Object.defineProperty(globalThis, inputClass, previous);
-		} else {
-			Reflect.deleteProperty(globalThis, inputClass);
-		}
+		restoreInput();
+		restoreSelect();
 	}
 });
 
@@ -98,24 +118,8 @@ class Button extends EventTarget {
 	}
 }
 
-const installElement = (): PropertyDescriptor | undefined => {
-	const previous = Object.getOwnPropertyDescriptor(globalThis, "Element");
-	Object.defineProperty(globalThis, "Element", {
-		value: Button,
-		configurable: true,
-	});
-	return previous;
-};
-const restoreElement = (previous: PropertyDescriptor | undefined): void => {
-	if (previous) {
-		Object.defineProperty(globalThis, "Element", previous);
-	} else {
-		Reflect.deleteProperty(globalThis, "Element");
-	}
-};
-
 test("scene actions delegate buttons, guard typing and menus, and dispose", () => {
-	const previous = installElement();
+	const restoreElement = installElement("Element", Button);
 	const root = new EventTarget();
 	const keyboard = new EventTarget();
 	const button = new Button();
@@ -168,6 +172,6 @@ test("scene actions delegate buttons, guard typing and menus, and dispose", () =
 		expect(actions).toEqual(["sphere", "delete", "delete"]);
 	} finally {
 		dispose();
-		restoreElement(previous);
+		restoreElement();
 	}
 });

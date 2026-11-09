@@ -6,13 +6,14 @@ pub const OBJECT_STRIDE: usize = 8;
 use super::transform::Transform;
 use crate::geometry::Geometry;
 pub use crate::geometry::Kind;
-use crate::math::checked_u32;
+use crate::{material::Material, math::checked_u32};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Object {
     id: u32,
     geometry: Geometry,
     transform: Transform,
+    material: Material,
 }
 
 impl Object {
@@ -35,9 +36,17 @@ impl Object {
             id,
             geometry,
             transform,
+            material: Material::Steel,
         })
     }
 
+    pub const fn with_material(mut self, material: Material) -> Self {
+        self.material = material;
+        self
+    }
+    pub const fn material(self) -> Material {
+        self.material
+    }
     pub const fn geometry(self) -> Geometry {
         self.geometry
     }
@@ -78,6 +87,7 @@ impl Default for Object {
             id: 1,
             geometry: Geometry::SPHERE,
             transform: Transform::IDENTITY,
+            material: Material::Steel,
         }
     }
 }
@@ -93,7 +103,7 @@ pub enum SceneError {
     InvalidPosition,
     InvalidSize,
     InvalidParameter,
-    InvalidPadding,
+    InvalidMaterial,
 }
 
 impl fmt::Display for SceneError {
@@ -108,7 +118,7 @@ impl fmt::Display for SceneError {
             Self::InvalidPosition => "object position is out of bounds",
             Self::InvalidSize => "object size is out of bounds",
             Self::InvalidParameter => "object parameter is invalid",
-            Self::InvalidPadding => "object packet padding must be zero",
+            Self::InvalidMaterial => "object material must be 0 (steel) or 1 (brick)",
         };
         formatter.write_str(message)
     }
@@ -133,20 +143,20 @@ pub fn parse_objects(packet: &[f64]) -> Result<Vec<Object>, SceneError> {
         let position = [values[2], values[3], values[4]];
         let size = values[5];
         let parameter = values[6];
-        let padding = values[7];
+        let material = values[7];
 
         if !id.is_finite()
             || !kind_tag.is_finite()
             || position.iter().any(|value| !value.is_finite())
             || !size.is_finite()
             || !parameter.is_finite()
-            || !padding.is_finite()
+            || !material.is_finite()
         {
             return Err(SceneError::NonFinite);
         }
-        if padding != 0.0 {
-            return Err(SceneError::InvalidPadding);
-        }
+        let material = checked_u32(material)
+            .and_then(Material::from_tag)
+            .ok_or(SceneError::InvalidMaterial)?;
         let id = checked_u32(id)
             .filter(|&id| id > 0)
             .ok_or(SceneError::InvalidId)?;
@@ -156,7 +166,7 @@ pub fn parse_objects(packet: &[f64]) -> Result<Vec<Object>, SceneError> {
         let kind = checked_u32(kind_tag)
             .and_then(Kind::from_tag)
             .ok_or(SceneError::InvalidKind)?;
-        let object = Object::new(id, kind, position, size, parameter)?;
+        let object = Object::new(id, kind, position, size, parameter)?.with_material(material);
         objects.push(object);
     }
     Ok(objects)
@@ -175,7 +185,7 @@ pub fn pack_objects(objects: &[Object]) -> Vec<f64> {
             object.position()[2],
             object.size(),
             object.parameter(),
-            0.0,
+            f64::from(object.material().tag()),
         ]);
     }
     packet
@@ -314,8 +324,8 @@ mod tests {
             Err(SceneError::InvalidParameter)
         ));
         assert!(matches!(
-            parse_objects(&[1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0]),
-            Err(SceneError::InvalidPadding)
+            parse_objects(&[1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 2.0]),
+            Err(SceneError::InvalidMaterial)
         ));
     }
 

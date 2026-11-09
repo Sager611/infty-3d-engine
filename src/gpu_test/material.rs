@@ -1,0 +1,398 @@
+use super::support::{run, run_scene};
+use crate::scene::{model::parse_objects, packed::pack};
+
+#[test]
+fn diffuse_environment_retains_normals_when_the_key_light_faces_away()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = [
+        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ];
+    let q = run("verify_material_fill", &input, input.len() * 16)?;
+    assert!(q.iter().all(|v| v.is_finite()));
+    assert!(
+        q[0] > q[16] + 0.3 && q[32] > q[48] + 0.3 && q[64] > q[80] + 0.1,
+        "ambient diffuse erases material normals: {q:?}"
+    );
+    for sample in q.chunks_exact(16) {
+        assert!(sample[..3].iter().all(|v| (0.05..0.59).contains(v)));
+    }
+    Ok(())
+}
+
+#[test]
+fn stochastic_variance_preserves_relief_instead_of_clipping_flat_pore_floors()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = [
+        [0.02, 0.04, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0],
+        [0.03, 0.05, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0],
+        [0.96, 0.98, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0],
+    ];
+    let q = run("verify_material_variance", &input, input.len() * 16)?;
+    assert!(q.iter().all(|v| v.is_finite()));
+    assert!(
+        q[3] < -0.15 && q[35] > 1.15,
+        "relief extrema flattened: {}, {}",
+        q[3],
+        q[35]
+    );
+    assert!(
+        0.01_f32
+            .mul_add(-std::f32::consts::SQRT_2, q[19] - q[3])
+            .abs()
+            < 1e-6
+    );
+    for sample in q.chunks_exact(16) {
+        assert!(sample[..3].iter().all(|v| v.to_bits() == 0.0_f32.to_bits()));
+    }
+    Ok(())
+}
+
+#[test]
+fn microscopic_goursat_material_contacts_do_not_collapse_to_the_camera()
+-> Result<(), Box<dyn std::error::Error>> {
+    let origin = [0.109_994_66, 0.869_989_63, 1.296_915_4];
+    let forward = [0.118_670_87, 0.230_963_14, -0.965_698_3];
+    let horizontal = f32::hypot(forward[0], forward[2]);
+    let right = [-forward[2] / horizontal, 0.0, forward[0] / horizontal];
+    let up = [
+        -right[2] * forward[1],
+        right[2].mul_add(forward[0], -right[0] * forward[2]),
+        right[0] * forward[1],
+    ];
+    let mut inputs = Vec::new();
+    for iy in 0_u16..21 {
+        let y = (f32::from(iy) - 10.0) * 0.1;
+        for ix in 0_u16..33 {
+            let x = (f32::from(ix) - 16.0) * 0.1;
+            let d = std::array::from_fn::<_, 3, _>(|i| {
+                up[i].mul_add(y, right[i].mul_add(x, forward[i] * 1.8))
+            });
+            let length = d.iter().map(|v| v * v).sum::<f32>().sqrt();
+            inputs.push([
+                origin[0],
+                origin[1],
+                origin[2],
+                1.5,
+                d[0] / length,
+                d[1] / length,
+                d[2] / length,
+                2.0,
+            ]);
+        }
+    }
+    let q = run("verify_material_contact", &inputs, inputs.len() * 16)?;
+    let p = [0.11_f64, 0.87, 1.296_871_931_632_168_2];
+    let gradient = p.map(|v| 4.0 * v * v.mul_add(v, -1.0));
+    let numerator = (0..3)
+        .map(|i| (p[i] - f64::from(origin[i])) * gradient[i])
+        .sum::<f64>();
+    for (ray, sample) in inputs.iter().zip(q.chunks_exact(16)) {
+        let slope = (0..3)
+            .map(|i| f64::from(ray[4 + i]) * gradient[i])
+            .sum::<f64>();
+        let expected = numerator / slope;
+        assert!(
+            (f64::from(sample[0]) - expected).abs() < 5e-7,
+            "material contact collapsed or escaped its local surface: {:?}, expected {expected}",
+            &sample[..4]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn material_contact_projection_preserves_other_geometry_misses_and_singularities()
+-> Result<(), Box<dyn std::error::Error>> {
+    let inputs = [
+        [
+            0.109_994_66,
+            0.869_989_63,
+            1.296_915_4,
+            1.5,
+            0.118_670_87,
+            0.230_963_14,
+            -0.965_698_3,
+            1.0,
+        ],
+        [
+            0.109_994_66,
+            0.869_989_63,
+            1.296_915_4,
+            1.5,
+            0.118_670_87,
+            0.230_963_14,
+            -0.965_698_3,
+            3.0,
+        ],
+        [
+            0.109_994_66,
+            0.869_989_63,
+            1.296_915_4,
+            1.5,
+            0.118_670_87,
+            0.230_963_14,
+            -0.965_698_3,
+            4.0,
+        ],
+        [10.0, 10.0, 10.0, 1.5, 1.0, 0.0, 0.0, 2.0],
+        [1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 2.0],
+    ];
+    let q = run("verify_material_contact", &inputs, inputs.len() * 16)?;
+    for sample in q.chunks_exact(16) {
+        assert_eq!(sample[0].to_bits(), sample[1].to_bits());
+    }
+    Ok(())
+}
+#[test]
+fn material_display_encodes_linear_light_for_the_unorm_srgb_canvas()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = [
+        [0.18, 0.003_130_8, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [-1.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ];
+    let q = run("verify_material_display", &input, 32)?;
+    for (i, expected) in [
+        (0, 0.461_356),
+        (1, 0.040_45),
+        (2, 1.0),
+        (16, 0.0),
+        (17, 0.0),
+        (18, 1.0),
+    ] {
+        assert!(
+            (q[i] - expected).abs() < 1e-5,
+            "linear output bypassed display encoding: {}",
+            q[i]
+        );
+    }
+    Ok(())
+}
+#[test]
+fn steel_has_directional_highlights_but_brick_stays_isotropic()
+-> Result<(), Box<dyn std::error::Error>> {
+    let inputs = [
+        [0.0, 0.0, 1.0, 0.0, 0.6, 0.0, 0.8, 0.0],
+        [0.0, 0.0, 1.0, 0.0, 0.0, 0.6, 0.8, 0.0],
+        [0.0, 0.0, 1.0, 1.0, 0.6, 0.0, 0.8, 0.0],
+        [0.0, 0.0, 1.0, 1.0, 0.0, 0.6, 0.8, 0.0],
+        [0.0, 0.0, 0.0, 0.0, 0.6, 0.0, 0.8, 0.0],
+        [0.0, 0.0, 1.0, 0.0, 0.6, 0.0, 0.8, 0.0],
+    ];
+    let q = run("verify_studio_brushing", &inputs, inputs.len() * 16)?;
+    assert!(q.iter().all(|v| v.is_finite()));
+    assert!(
+        (q[0] - q[16]).abs() > 0.02,
+        "brushing is shaded as directionless blur"
+    );
+    for c in 0..3 {
+        assert!((q[32 + c] - q[48 + c]).abs() < 1e-6);
+    }
+    assert!(
+        (q[68] - q[84]).abs() > 0.003,
+        "studio environment erases brush direction"
+    );
+    Ok(())
+}
+#[test]
+fn medium_steel_already_samples_fine_orders_before_they_are_pixel_resolved()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = [[0.13, 0.032, 0.0, 0.0, 0.0, 0.0, 1.0, 0.000_226]];
+    let q = run("verify_material", &input, 16)?;
+    assert!(
+        q[10] > 4.0 && q[10] < 5.0,
+        "unexpected physical LOD: {}",
+        q[10]
+    );
+    assert!(q[11] > 0.89, "finer order arrives too late: {}", q[11]);
+    Ok(())
+}
+#[test]
+fn material_mirrors_reflect_source_height_without_periodic_stamps()
+-> Result<(), Box<dyn std::error::Error>> {
+    let inputs = [
+        [0.231, 0.319, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.769, 0.319, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [0.13, 0.08, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.13, 0.08, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ];
+    let q = run("verify_material_mapping", &inputs, inputs.len() * 16)?;
+    for c in 8..12 {
+        assert!(
+            (q[c] - q[16 + c]).abs() < 0.00003,
+            "repeat was not mirrored"
+        );
+    }
+    assert!(
+        (0..3).any(|c| (q[32 + c] - q[48 + c]).abs() > 0.005),
+        "same wall stamp repeated"
+    );
+    Ok(())
+}
+#[test]
+fn material_mapping_is_continuous_across_camera_and_atlas_boundaries()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut inputs = vec![
+        [0.231, 0.319, 7.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        [1.231, 0.319, 7.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ];
+    for layer in [3.0, 4.0, 7.0] {
+        for lod in [0.0, 0.75, 3.7, 6.0] {
+            for edge in [0.0, 0.5, 1.0] {
+                inputs.push([edge - 1e-7, 0.08, layer, lod, 0.0, 0.0, 0.0, 0.0]);
+                inputs.push([edge + 1e-7, 0.08, layer, lod, 0.0, 0.0, 0.0, 0.0]);
+            }
+            inputs.push([0.13, 1.0 / 6.0 - 1e-7, layer, lod, 0.0, 0.0, 0.0, 0.0]);
+            inputs.push([0.13, 1.0 / 6.0 + 1e-7, layer, lod, 0.0, 0.0, 0.0, 0.0]);
+        }
+    }
+    let q = run("verify_material_mapping", &inputs, inputs.len() * 16)?;
+    let slope_scale = crate::material::presets()
+        .iter()
+        .map(|l| f64::from(l.relief) / l.extent)
+        .fold(0.0_f64, f64::max);
+    for (index, pair) in q.chunks_exact(32).enumerate() {
+        assert!(pair.iter().all(|v| v.is_finite()));
+        for c in 0..6 {
+            let delta = (pair[c] - pair[16 + c]).abs();
+            // Compare color/height directly; gradients in physical slope, not UV units.
+            let continuous = if c < 4 {
+                delta < 0.001
+            } else {
+                f64::from(delta) * slope_scale < 0.002
+            };
+            assert!(
+                continuous,
+                "mapping seam: {:?}, channel {c}, delta {delta}",
+                inputs[index * 2]
+            );
+        }
+    }
+    Ok(())
+}
+#[test]
+fn material_height_gradient_follows_the_transformed_scalar_field()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut inputs = Vec::new();
+    for u in [-0.39, 0.39, 1.39] {
+        for lod in [0.0_f32, 1.25, 3.0] {
+            let step = lod.exp2() / 1024.0;
+            inputs.push([u, 0.319, 7.0, lod, 0.0, 0.0, 0.0, 0.0]);
+            inputs.push([u + step, 0.319, 7.0, lod, 0.0, 0.0, 0.0, 0.0]);
+            inputs.push([u - step, 0.319, 7.0, lod, 0.0, 0.0, 0.0, 0.0]);
+        }
+    }
+    let q = run("verify_material_mapping", &inputs, inputs.len() * 16)?;
+    for (i, group) in q.chunks_exact(48).enumerate() {
+        let step = inputs[i * 3][3].exp2() / 1024.0;
+        let gradient = (group[19] - group[35]) / (2.0 * step);
+        assert!(
+            (group[4] - gradient).abs() < 0.003,
+            "flipped height derivative has wrong sign"
+        );
+    }
+    Ok(())
+}
+#[test]
+fn material_and_selection_survive_shared_definition_resolution()
+-> Result<(), Box<dyn std::error::Error>> {
+    let objects = parse_objects(&[
+        1.0, 2.0, 0.0, 0.0, 0.0, 1.0, 1.5, 0.0, 2.0, 2.0, 3.0, 0.0, 0.0, 1.0, 1.5, 1.0,
+    ])?;
+    let packet = pack(&objects, &[2])?;
+    let index = packet
+        .records
+        .iter()
+        .position(|r| r.identity[0] == 2)
+        .ok_or("missing instance")?;
+    let input = [[
+        f32::from(u16::try_from(index)?),
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]];
+    let q = run_scene("verify_material_instance", &input, &packet.records)?;
+    assert_eq!(q[0].to_bits(), 1.0_f32.to_bits());
+    assert_eq!(q[1].to_bits(), 1.0_f32.to_bits());
+    assert_eq!(q[2].to_bits(), 1.5_f32.to_bits());
+    Ok(())
+}
+#[test]
+fn brick_micropores_retain_cavity_shadow_not_flat_painted_dots()
+-> Result<(), Box<dyn std::error::Error>> {
+    // Locate cavities after stochastic mapping, not at an untransformed asset pixel.
+    let input: Vec<_> = (0_u8..32)
+        .flat_map(|y| {
+            (0_u8..32).map(move |x| {
+                [
+                    0.000_42 * (250.0 + (f32::from(x) + 0.5) / 32.0),
+                    0.000_42 * (84.0 + (f32::from(y) + 0.5) / 32.0),
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    1e-8,
+                ]
+            })
+        })
+        .collect();
+    let q = run("verify_material", &input, input.len() * 16)?;
+    let mut darkest = 1.0_f32;
+    for sample in q.chunks_exact(16) {
+        assert!(sample.iter().all(|v| v.is_finite()));
+        darkest = darkest.min(sample[9]);
+    }
+    assert!(
+        darkest > 0.0 && darkest < 0.15,
+        "micropores remain bright painted dots: {darkest}"
+    );
+    Ok(())
+}
+
+#[test]
+fn actual_material_tiles_are_filtered_finite_and_keep_finer_detail()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut inputs = Vec::new();
+    for material in [0.0_f32, 1.0] {
+        for footprint in [0.01_f32, 0.0001, 0.000_001, 0.000_000_01] {
+            for step in [0.0_f32, 0.000_002, 0.000_019] {
+                inputs.push([0.117, 0.073 + step, 0.0, material, 0.0, 0.0, 1.0, footprint]);
+            }
+        }
+    }
+    let actual = run("verify_material", &inputs, inputs.len() * 16)?;
+    for (input, q) in inputs.iter().zip(actual.chunks_exact(16)) {
+        assert!(q.iter().all(|v| v.is_finite()));
+        assert!(q[..3].iter().all(|v| *v > 0.0 && *v <= 1.0));
+        assert!(
+            q[12..15].iter().all(|v| *v > 0.0 && *v <= 1.0),
+            "material lighting is absent"
+        );
+        assert!((0.05..=0.98).contains(&q[3]));
+        let norm = q[4].mul_add(q[4], q[5].mul_add(q[5], q[6] * q[6])).sqrt();
+        assert!((norm - 1.0).abs() < 0.0001);
+        assert!(q[6] > 0.25);
+        assert_eq!(q[7].to_bits(), (1.0 - input[3]).to_bits());
+        assert_eq!(q[8].to_bits(), 8.0_f32.to_bits());
+    }
+    for material in 0..2 {
+        let start = (material * 12 + 9) * 16;
+        assert!(
+            actual[start..start + 16]
+                .iter()
+                .zip(&actual[start + 16..start + 32])
+                .any(|(a, b)| (a - b).abs() > 0.00001),
+            "microscopic texture is flat"
+        );
+    }
+    Ok(())
+}

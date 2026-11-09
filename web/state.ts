@@ -1,5 +1,4 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: This pure module is not a Qwik component.
-// biome-ignore-all lint/correctness/useImportExtensions: Project modules use extensionless imports.
 // biome-ignore-all lint/style/noMagicNumbers: Wire-format constants are contract values.
 // biome-ignore-all lint/nursery/useExplicitType: Constants remain simple contract values.
 // biome-ignore-all lint/nursery/noTernary: Codec branches stay compact.
@@ -9,8 +8,8 @@ import {
 	packScene,
 	type SceneObject,
 	unpackScene,
-} from "./scene";
-import { parseView, type ViewMode } from "./view";
+} from "./scene.ts";
+import { MATERIAL_MODE, parseView, type ViewMode } from "./view.ts";
 
 type PureCamera = Readonly<{
 	yaw: number;
@@ -38,7 +37,7 @@ const cameraError = (message: string): never => {
 };
 
 const validMode = (mode: number): mode is ViewMode =>
-	mode === 0 || mode === 1 || mode === 2;
+	mode === 0 || mode === 1 || mode === 2 || mode === MATERIAL_MODE;
 
 const normalizedYaw = (yaw: number): number => {
 	if (yaw >= -PI && yaw <= PI) {

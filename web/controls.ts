@@ -1,5 +1,6 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: This is a vanilla DOM adapter.
 // biome-ignore-all lint/style/noMagicNumbers: Control increments are shared input defaults.
+import { MATERIALS, materialKind } from "./material.ts";
 import type { Selection } from "./query.ts";
 import {
 	DESCRIPTORS,
@@ -13,10 +14,10 @@ import {
 
 const CONTROL_STEP = 0.01;
 
-type ControlKey = "x" | "y" | "z" | "size" | "parameter";
+type ControlKey = "x" | "y" | "z" | "size" | "parameter" | "material";
 
 type ControlField = Readonly<{
-	key: ControlKey;
+	key: Exclude<ControlKey, "material">;
 	label: string;
 	value: number;
 	min: number;
@@ -170,6 +171,13 @@ const propertyPatch = (
 	if (key === "parameter") {
 		return Object.freeze({ parameter: value });
 	}
+	if (key === "material") {
+		const material = materialKind(value);
+		if (material === undefined) {
+			throw new Error("invalid material");
+		}
+		return Object.freeze({ material });
+	}
 	return unknownProperty(key);
 };
 
@@ -213,9 +221,13 @@ const replaceObjectOptions = (
 
 const updateFieldValues = (
 	form: HTMLFormElement,
-	fields: readonly ControlField[],
+	object: SceneObject,
 ): void => {
-	for (const controlField of fields) {
+	const material = form.elements.namedItem("material");
+	if (material instanceof HTMLSelectElement) {
+		material.value = String(MATERIALS[object.material ?? "steel"].tag);
+	}
+	for (const controlField of fieldsForObject(object)) {
 		const input = form.elements.namedItem(controlField.key);
 		if (input instanceof HTMLInputElement) {
 			input.value = String(controlField.value);
@@ -229,6 +241,27 @@ const updateFieldValues = (
 			}
 		}
 	}
+};
+
+const materialControl = (object: SceneObject): HTMLLabelElement => {
+	const label = document.createElement("label");
+	const select = document.createElement("select");
+	label.textContent = "Material";
+	select.id = `property-${object.id}-material`;
+	select.name = "material";
+	select.dataset.controlKey = "material";
+	select.title = "Surface appearance; geometry unchanged";
+	select.setAttribute("aria-label", "Material");
+	label.htmlFor = select.id;
+	for (const descriptor of Object.values(MATERIALS)) {
+		const option = document.createElement("option");
+		option.value = String(descriptor.tag);
+		option.textContent = descriptor.label;
+		select.append(option);
+	}
+	select.value = String(MATERIALS[object.material ?? "steel"].tag);
+	label.append(select);
+	return label;
 };
 
 const createPropertyForm = (object: SceneObject): HTMLFormElement => {
@@ -262,6 +295,7 @@ const createPropertyForm = (object: SceneObject): HTMLFormElement => {
 		label.append(input);
 		form.append(label);
 	}
+	form.append(materialControl(object));
 	return form;
 };
 
@@ -290,7 +324,7 @@ const renderProperties = (
 		nodes.properties.replaceChildren(createPropertyForm(object));
 		return;
 	}
-	updateFieldValues(current, fieldsForObject(object));
+	updateFieldValues(current, object);
 };
 
 const renderControls = (nodes: ControlsNodes, state: ControlsState): void => {
@@ -344,6 +378,20 @@ const submit = (event: Event): void => {
 	event.preventDefault();
 };
 
+const controlKey = (key: string | undefined): ControlKey | undefined => {
+	if (
+		key === "x" ||
+		key === "y" ||
+		key === "z" ||
+		key === "size" ||
+		key === "parameter" ||
+		key === "material"
+	) {
+		return key;
+	}
+	return;
+};
+
 const listenControls = (
 	nodes: Readonly<{
 		objectSelect: EventTarget & { readonly value: string };
@@ -375,27 +423,23 @@ const listenControls = (
 	};
 	const property = (event: Event): void => {
 		const target = event.target;
-		if (!(target instanceof HTMLInputElement)) {
+		if (
+			!(
+				target instanceof HTMLInputElement ||
+				target instanceof HTMLSelectElement
+			)
+		) {
 			return;
 		}
 		const state = getState();
 		if (state.selection.active === null) {
 			return;
 		}
-		const key = target.dataset.controlKey;
+		const key = controlKey(target.dataset.controlKey);
 		if (key === undefined) {
 			return;
 		}
 		const value = Number(target.value);
-		if (
-			key !== "x" &&
-			key !== "y" &&
-			key !== "z" &&
-			key !== "size" &&
-			key !== "parameter"
-		) {
-			return;
-		}
 		onEvent(
 			{
 				kind: "property",

@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 wgpu = { version = "=30.0.1", default-features = false, features = ["wgsl"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

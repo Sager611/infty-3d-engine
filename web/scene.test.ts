@@ -84,7 +84,7 @@ describe("scene model", () => {
 		).toThrow("nonfinite");
 	});
 
-	test("rejects malformed packet lengths, values, kinds, and padding", () => {
+	test("rejects malformed packet lengths, values, kinds, and materials", () => {
 		expect(() => unpackScene(new Float64Array(7))).toThrow("invalid length");
 		expect(() =>
 			unpackScene(new Float64Array([1, 1, 0, 0, Number.NaN, 1, 0, 0])),
@@ -102,8 +102,8 @@ describe("scene model", () => {
 			unpackScene(new Float64Array([1, 1, 0, 0, 0, 1, 1, 0])),
 		).toThrow("invalid parameter");
 		expect(() =>
-			unpackScene(new Float64Array([1, 1, 0, 0, 0, 1, 0, 1])),
-		).toThrow("invalid padding");
+			unpackScene(new Float64Array([1, 1, 0, 0, 0, 1, 0, 2])),
+		).toThrow("invalid material");
 		expect(() =>
 			unpackScene(
 				new Float64Array([1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0]),

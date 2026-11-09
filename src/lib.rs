@@ -7,6 +7,8 @@ mod diagnostic;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod geometry;
 #[cfg(any(test, target_arch = "wasm32"))]
+mod material;
+#[cfg(any(test, target_arch = "wasm32"))]
 mod math;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod scene;

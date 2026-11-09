@@ -15,6 +15,8 @@ pub const SOURCE: &str = concat!(
     '\n',
     include_str!("shaders/materials/detail.wgsl"),
     '\n',
+    include_str!("shaders/materials/layered.wgsl"),
+    '\n',
     include_str!("shaders/materials/surface.wgsl"),
     '\n',
     include_str!("shaders/render.wgsl"),

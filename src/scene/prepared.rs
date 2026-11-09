@@ -57,7 +57,7 @@ impl Prepared {
                 id: object.id(),
                 geometry,
                 transform: object.transform(),
-                material: 0,
+                material: u32::from(object.material().tag()),
             });
         }
         Ok(Self {

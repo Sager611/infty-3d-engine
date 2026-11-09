@@ -80,7 +80,14 @@ pub fn pack_prepared(scene: &Prepared, selected: &[u32]) -> Result<Packet, &'sta
                         p[2] as f32,
                         transform.scale() as f32,
                     ],
-                    params: [0.0, 0.0, 0.0, f32::from_bits(instance.material())],
+                    params: [
+                        0.0,
+                        0.0,
+                        0.0,
+                        f32::from(
+                            u8::try_from(instance.material()).map_err(|_| "invalid material")?,
+                        ),
+                    ],
                 }
             }
         });

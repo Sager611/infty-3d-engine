@@ -1,5 +1,5 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: This pure module is not a Qwik component.
-type ViewMode = 0 | 1 | 2;
+type ViewMode = 0 | 1 | 2 | 3;
 
 type View = Readonly<{
 	yaw: number;
@@ -16,6 +16,7 @@ const INITIAL_PITCH = 0.25;
 const INITIAL_DISTANCE = 5;
 const DEFAULT_RADIUS = 1;
 const DEFAULT_MODE: ViewMode = 0;
+const MATERIAL_MODE = 3;
 const YAW_LIMIT = 100;
 const ANGLE_LIMIT = 1.5;
 const MAX_DISTANCE = 20;
@@ -51,7 +52,7 @@ const bounded = (
 };
 
 const modeValue = (value: number | undefined): ViewMode => {
-	if (value === 1 || value === 2) {
+	if (value === 1 || value === 2 || value === MATERIAL_MODE) {
 		return value;
 	}
 	return DEFAULT_MODE;
@@ -112,6 +113,7 @@ const serializeView = (view: View): string => {
 
 export {
 	ANGLE_LIMIT,
+	MATERIAL_MODE,
 	DEFAULT_MODE,
 	DEFAULT_RADIUS,
 	DEFAULT_VIEW,
