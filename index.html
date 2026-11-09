@@ -522,6 +522,20 @@
 			</summary>
 			<section id="controls" class="glass" aria-label="Scene controls">
 				<div class="control-row">
+					<label for="scene-preset">
+						Scene
+						<select
+							id="scene-preset"
+							aria-label="Load scene"
+							title="Replace all objects with a preset and frame them"
+						>
+							<option value="" disabled selected>Load…</option>
+							<option value="default">Default · 3 objects</option>
+							<option value="showcase">Showcase · 4,097 objects</option>
+						</select>
+					</label>
+				</div>
+				<div class="control-row">
 					<label for="object">
 						Object
 						<select id="object" title="Choose an object to inspect">

@@ -40,6 +40,7 @@ import {
 	releaseScene,
 	type SceneCache,
 } from "./prepared.ts";
+import { presetSnapshot } from "./presets.ts";
 import {
 	activateSelection,
 	canvasPixel,
@@ -77,6 +78,7 @@ const MAX_PIXELS = 1_000_000;
 const HASH_DELAY = 150;
 const canvas: HTMLElement | null = document.getElementById("viewport");
 const modeNode: HTMLElement | null = document.getElementById("mode");
+const presetNode: HTMLElement | null = document.getElementById("scene-preset");
 const resetNode: HTMLElement | null = document.getElementById("reset");
 const focusNode: HTMLElement | null = document.getElementById("focus");
 const metricsNode: HTMLElement | null = document.getElementById("metrics");
@@ -86,6 +88,7 @@ if (
 	!(
 		canvas instanceof HTMLCanvasElement &&
 		modeNode instanceof HTMLSelectElement &&
+		presetNode instanceof HTMLSelectElement &&
 		resetNode instanceof HTMLButtonElement &&
 		focusNode instanceof HTMLButtonElement &&
 		metricsNode instanceof HTMLElement &&
@@ -249,6 +252,31 @@ const resetDefaults = (): void => {
 	pickAll = false;
 	setSnapshot(DEFAULT_SNAPSHOT);
 	inspector.textContent = "Move pointer over the canvas to inspect.";
+};
+
+const loadScenePreset = (): void => {
+	if (disposed || presetNode.value === "") {
+		return;
+	}
+	removeInput?.stop();
+	try {
+		const next = presetSnapshot(
+			presetNode.value,
+			Math.max(MIN_SIZE, canvas.clientWidth) /
+				Math.max(MIN_SIZE, canvas.clientHeight),
+			snapshot.mode,
+		);
+		editor = createEditor(next.objects);
+		selection = EMPTY_SELECTION;
+		pickAll = false;
+		setSnapshot(next);
+		sceneDetails.open = false;
+		canvas.focus();
+	} catch (error) {
+		setStatus(`Scene load failed: ${errorMessage(error)}`);
+	} finally {
+		presetNode.value = "";
+	}
 };
 
 const readMode = (): 0 | 1 | 2 => {
@@ -539,6 +567,7 @@ const cleanup = (): void => {
 	prepared = releaseScene(prepared);
 	removeControls?.();
 	removeSceneActions?.();
+	presetNode.removeEventListener("change", loadScenePreset);
 	addMenu.removeEventListener("toggle", focusShape);
 	removeInput?.dispose();
 	window.removeEventListener("resize", resized);
@@ -569,6 +598,7 @@ const handleSceneAction = (action: SceneAction): void => {
 		selection = editor.selection;
 		snapshot = { ...snapshot, objects: editor.objects };
 		inspector.textContent = "Move pointer over the canvas to inspect.";
+		setStatus("");
 		updateUi();
 		invalidate();
 		if (action !== "delete" && action !== "undo") {
@@ -651,6 +681,7 @@ modeNode.addEventListener("change", () => {
 		setStatus(`Mode update failed: ${errorMessage(error)}`);
 	}
 });
+presetNode.addEventListener("change", loadScenePreset);
 resetNode.addEventListener("click", resetDefaults);
 focusNode.addEventListener("click", frame);
 window.addEventListener("resize", resized);

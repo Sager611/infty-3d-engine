@@ -26,6 +26,28 @@ test("mobile scene tools leave room for the compact probe", async () => {
 	);
 });
 
+test("scene loader exposes both presets inside the accessible controls", async () => {
+	const source = await Bun.file(
+		new URL("../index.html", import.meta.url),
+	).text();
+	const options: string[] = [];
+	const found: { label: string | null } = { label: null };
+	const parser = new HTMLRewriter()
+		.on("#scene-controls select#scene-preset", {
+			element(element: HTMLRewriterTypes.Element): void {
+				found.label = element.getAttribute("aria-label");
+			},
+		})
+		.on("#scene-preset option", {
+			element(element: HTMLRewriterTypes.Element): void {
+				options.push(element.getAttribute("value") ?? "");
+			},
+		});
+	await parser.transform(new Response(source)).text();
+	expect(found.label).toBe("Load scene");
+	expect(options).toEqual(["", "default", "showcase"]);
+});
+
 test("scene controls stay inside a collapsed, accessible disclosure", async () => {
 	const source: string = await Bun.file(
 		new URL("../index.html", import.meta.url),

@@ -1,6 +1,6 @@
 # Requirements
 
-- Thousands of mixed, instanced objects.
+- Thousands of mixed, instanced objects, with a web selector to load a showcase and return to the default scene.
 - Extensible geometry; no ray marching.
 - Intuitive web controls to add and delete geometry instances.
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
@@ -12,3 +12,4 @@
 | 2026-11-08 | Assistant | Recorded the complete two-item requirements | Keep project scope explicit |
 | 2026-11-08 | User | Required intuitive add/delete controls | Create and remove instances in the visualization |
 | 2026-11-08 | User | Required modular geometry queries and free-camera surface inspection | Keep implementation scope explicit |
+| 2026-11-09 | User | Required a localhost showcase scene selector | Make thousands of instances directly viewable in the app |
