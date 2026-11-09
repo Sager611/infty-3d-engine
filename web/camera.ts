@@ -20,8 +20,6 @@ const MIN_SPEED = 0.01;
 const MAX_SPEED = 100;
 const MAX_STEP = 0.05;
 const POINTER_SCALE = 0.008;
-const MIN_DISTANCE = 0.0001;
-const MAX_DISTANCE = 100;
 const FOCAL_LENGTH = 1.8;
 const FRAME_MARGIN = 1.1;
 
@@ -34,9 +32,6 @@ const finite = (value: number, name: string): void => {
 		invalid(`nonfinite ${name}`);
 	}
 };
-
-const clamp = (value: number, minimum: number, maximum: number): number =>
-	Math.min(maximum, Math.max(minimum, value));
 
 const isFiniteObject = (object: SceneObject): boolean =>
 	Number.isFinite(object.id) &&
@@ -51,44 +46,6 @@ const objectRadius = (object: SceneObject): number => {
 		return object.size;
 	}
 	return object.size * Math.sqrt(3 + Math.sqrt(3 * object.parameter));
-};
-
-const orbitCamera = (
-	camera: PureCamera,
-	totalDx: number,
-	totalDy: number,
-): PureCamera => {
-	finite(totalDx, "horizontal drag");
-	finite(totalDy, "vertical drag");
-	return normalizeCamera({
-		yaw: camera.yaw - totalDx * POINTER_SCALE,
-		pitch: camera.pitch + totalDy * POINTER_SCALE,
-		distance: camera.distance,
-		target: camera.target,
-	});
-};
-
-const zoomCamera = (
-	camera: PureCamera,
-	amount: number,
-	hitDistance: number | null,
-): PureCamera => {
-	finite(amount, "zoom amount");
-	if (hitDistance !== null) {
-		finite(hitDistance, "hit distance");
-		if (hitDistance < 0) {
-			invalid("negative hit distance");
-		}
-	}
-	const start = normalizeCamera(camera);
-	const gap = Math.max(hitDistance ?? start.distance, MIN_DISTANCE);
-	const scaledGap = clamp(gap * Math.exp(amount), MIN_DISTANCE, MAX_DISTANCE);
-	return normalizeCamera({
-		yaw: start.yaw,
-		pitch: start.pitch,
-		distance: start.distance - gap + scaledGap,
-		target: start.target,
-	});
 };
 
 const frameBounds = (
@@ -207,9 +164,16 @@ function lookCamera(
 	camera: PureCamera,
 	totalDx: number,
 	totalDy: number,
+	position: PureCamera = camera,
 ): PureCamera {
-	const turned = orbitCamera(camera, totalDx, totalDy);
-	const { origin } = cameraBasis(camera);
+	finite(totalDx, "horizontal drag");
+	finite(totalDy, "vertical drag");
+	const turned = normalizeCamera({
+		...camera,
+		yaw: camera.yaw - totalDx * POINTER_SCALE,
+		pitch: camera.pitch + totalDy * POINTER_SCALE,
+	});
+	const { origin } = cameraBasis(position);
 	const { forward } = cameraBasis(turned);
 	return normalizeCamera({
 		...turned,
@@ -284,8 +248,6 @@ export {
 	FOCAL_LENGTH,
 	objectRadius,
 	frameCamera,
-	orbitCamera,
-	zoomCamera,
 	cameraBasis,
 	lookCamera,
 	moveCamera,

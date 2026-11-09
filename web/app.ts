@@ -1,6 +1,12 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: Vanilla DOM coordination.
 import init, { PreparedScene, Renderer } from "../pkg/infty.js";
-import { frameCamera, zoomCamera } from "./camera.ts";
+import {
+	frameCamera,
+	type Movement,
+	moveCamera,
+	STOPPED,
+	travelSpeed,
+} from "./camera.ts";
 import {
 	type ControlsEvent,
 	type ControlsNodes,
@@ -18,7 +24,12 @@ import {
 	type Editor,
 	undoDeletion,
 } from "./editing.ts";
-import { bindInput, type InputBindings } from "./input.ts";
+import { createFrames, type Frames } from "./frames.ts";
+import {
+	bindInput,
+	type InputBindings,
+	type InputController,
+} from "./input.ts";
 import { type Meter, startMetrics } from "./metrics.ts";
 import {
 	acquireResource,
@@ -47,7 +58,16 @@ import {
 	type Snapshot,
 	serializeSnapshot,
 } from "./state.ts";
+import {
+	EMPTY_STATUS,
+	renderedStatus,
+	type Status,
+	statusMessage,
+} from "./status.ts";
 
+const INITIAL_SPEED = 3;
+const SPEED_DIGITS = 3;
+const MILLISECONDS_PER_SECOND = 1000;
 const MIN_SIZE = 1;
 const MAX_WIDTH = 1440;
 const MAX_HEIGHT = 1000;
@@ -113,10 +133,12 @@ let renderer: Renderer | undefined;
 let prepared: SceneCache<PreparedScene> = emptySceneCache<PreparedScene>();
 let wasmMemory: WebAssembly.Memory | undefined;
 let meter: Meter | undefined;
-let framePending = false;
-let frameRequest: number | undefined;
+let movement: Movement = STOPPED;
+let movementTime: number | undefined;
+let baseSpeed: number = INITIAL_SPEED;
 let saveTimer: number | undefined;
 let disposed = false;
+let outputStatus: Status = EMPTY_STATUS;
 
 const errorMessage = (error: unknown): string => {
 	if (error instanceof Error) {
@@ -125,8 +147,15 @@ const errorMessage = (error: unknown): string => {
 	return String(error);
 };
 
-const setStatus = (message: string): void => {
-	status.textContent = message;
+const setStatus = (
+	message: string,
+	source: Status["source"] = "action",
+): void => {
+	if (outputStatus.text === message && outputStatus.source === source) {
+		return;
+	}
+	outputStatus = statusMessage(message, source);
+	status.textContent = outputStatus.text;
 };
 
 const stateForControls = (): ControlsState => ({
@@ -161,12 +190,34 @@ const scheduleHash = (): void => {
 };
 
 const invalidate = (): void => {
-	scheduleHash();
-	if (framePending || disposed) {
+	if (disposed) {
 		return;
 	}
-	framePending = true;
-	frameRequest = window.requestAnimationFrame(renderFrame);
+	scheduleHash();
+	frames.invalidate();
+};
+
+const hasMovement = (value: Movement): boolean =>
+	value.forward !== 0 || value.side !== 0;
+const setMovement = (value: Movement): void => {
+	if (
+		disposed ||
+		(movement.forward === value.forward &&
+			movement.side === value.side &&
+			movement.onlyForward === value.onlyForward)
+	) {
+		return;
+	}
+	if (!hasMovement(value)) {
+		movementTime = undefined;
+	} else if (!hasMovement(movement)) {
+		movementTime = performance.now();
+	}
+	movement = value;
+	if (hasMovement(value)) {
+		setStatus("");
+	}
+	invalidate();
 };
 
 const setSnapshot = (next: Snapshot): void => {
@@ -177,14 +228,20 @@ const setSnapshot = (next: Snapshot): void => {
 	}
 	snapshot = next;
 	updateUi();
+	setStatus("");
 	invalidate();
 };
 
 const setCamera = (camera: Snapshot["camera"]): void => {
-	setSnapshot({ ...snapshot, camera: normalizeCamera(camera) });
+	snapshot = { ...snapshot, camera: normalizeCamera(camera) };
+	setStatus("");
+	invalidate();
 };
 
 const resetDefaults = (): void => {
+	removeInput?.stop();
+	baseSpeed = INITIAL_SPEED;
+	metrics.removeAttribute("title");
 	editor = createEditor(DEFAULT_SNAPSHOT.objects);
 	selection = EMPTY_SELECTION;
 	pickAll = false;
@@ -296,6 +353,7 @@ const pick = (clientX: number, clientY: number, all: boolean): void => {
 		const results = queryAt(clientX, clientY, queryMode);
 		selection = selectionFromHits(results);
 		updateUi();
+		setStatus("");
 		invalidate();
 	} catch (error) {
 		updateUi();
@@ -303,26 +361,14 @@ const pick = (clientX: number, clientY: number, all: boolean): void => {
 	}
 };
 
-const centerHitDistance = (): number | null => {
-	const rect = canvas.getBoundingClientRect();
-	const results = queryAt(
-		rect.left + rect.width / 2,
-		rect.top + rect.height / 2,
-		0,
-	);
-	return results.find((result) => result.hit)?.t ?? null;
-};
-
-const zoom = (amount: number): void => {
-	try {
-		setCamera(zoomCamera(snapshot.camera, amount, centerHitDistance()));
-	} catch (error) {
-		updateUi();
-		setStatus(`Zoom failed: ${errorMessage(error)}`);
-	}
+const speed = (amount: number): void => {
+	baseSpeed = travelSpeed(baseSpeed, amount);
+	setStatus("");
+	metrics.title = `Travel speed ${baseSpeed.toPrecision(SPEED_DIGITS)} units/s`;
 };
 
 const frame = (): void => {
+	removeInput?.stop();
 	try {
 		const aspect =
 			Math.max(MIN_SIZE, canvas.width) / Math.max(MIN_SIZE, canvas.height);
@@ -376,15 +422,27 @@ const handleControls = (event: ControlsEvent): void => {
 	}
 };
 
-const renderFrame = (): void => {
-	frameRequest = undefined;
-	framePending = false;
-	if (renderer === undefined || disposed) {
+const renderFrame = (now: number): void => {
+	if (renderer === undefined || disposed || document.hidden) {
 		return;
 	}
+	let phase: Status["source"] = "action";
 	try {
-		resizeCanvas();
 		const started = performance.now();
+		if (hasMovement(movement)) {
+			let seconds = 0;
+			if (movementTime !== undefined) {
+				seconds = Math.max(0, (now - movementTime) / MILLISECONDS_PER_SECOND);
+			}
+			movementTime = now;
+			snapshot = {
+				...snapshot,
+				camera: moveCamera(snapshot.camera, movement, baseSpeed, seconds),
+			};
+			scheduleHash();
+		}
+		phase = "render";
+		resizeCanvas();
 		renderer.render_scene(
 			cameraValues(),
 			preparedScene(),
@@ -392,13 +450,25 @@ const renderFrame = (): void => {
 			new Uint32Array(selection.ids),
 		);
 		meter?.record(performance.now() - started);
-		setStatus("");
+		if (renderedStatus(outputStatus) !== outputStatus) {
+			setStatus("");
+		}
 	} catch (error) {
-		setStatus(`Render failed: ${errorMessage(error)}`);
+		removeInput?.stop();
+		setStatus(`View update failed: ${errorMessage(error)}`, phase);
 	}
 };
 
+const frames: Frames = createFrames({
+	request: (tick: FrameRequestCallback) => window.requestAnimationFrame(tick),
+	cancel: (id: number) => window.cancelAnimationFrame(id),
+	visible: () => !(disposed || document.hidden),
+	moving: () => hasMovement(movement),
+	draw: renderFrame,
+});
+
 const hashChanged = (): void => {
+	removeInput?.stop();
 	try {
 		snapshot = parseSnapshot(location.hash);
 		editor = createEditor(snapshot.objects);
@@ -424,15 +494,11 @@ const resized = (): void => {
 };
 
 const visibilityChanged = (): void => {
-	if (document.visibilityState === "hidden") {
-		if (frameRequest !== undefined) {
-			window.cancelAnimationFrame(frameRequest);
-			frameRequest = undefined;
-			framePending = false;
-		}
-		return;
+	if (document.hidden) {
+		removeInput?.stop();
+		movementTime = undefined;
 	}
-	invalidate();
+	frames.visibility();
 };
 
 const cleanup = (): void => {
@@ -443,19 +509,17 @@ const cleanup = (): void => {
 	if (saveTimer !== undefined) {
 		window.clearTimeout(saveTimer);
 	}
-	if (frameRequest !== undefined) {
-		window.cancelAnimationFrame(frameRequest);
-	}
+	frames.dispose();
 	meter?.dispose();
 	renderer?.free();
 	prepared = releaseScene(prepared);
 	removeControls?.();
 	removeSceneActions?.();
 	addMenu.removeEventListener("toggle", focusShape);
-	removeInput?.();
+	removeInput?.dispose();
 	window.removeEventListener("resize", resized);
 	window.removeEventListener("hashchange", hashChanged);
-	window.removeEventListener("visibilitychange", visibilityChanged);
+	document.removeEventListener("visibilitychange", visibilityChanged);
 };
 
 const focusShape = (): void => {
@@ -494,7 +558,7 @@ const handleSceneAction = (action: SceneAction): void => {
 };
 let removeSceneActions: (() => void) | undefined;
 let removeControls: (() => void) | undefined;
-let removeInput: (() => void) | undefined;
+let removeInput: InputController | undefined;
 
 const acceptRenderer = (value: Renderer): boolean => {
 	if (disposed) {
@@ -527,7 +591,17 @@ const inputBindings: InputBindings = {
 	canvas,
 	getCamera: () => snapshot.camera,
 	setCamera,
-	zoom,
+	speed,
+	movement: setMovement,
+	keyboard: window,
+	visibility: document,
+	hidden: () => document.hidden,
+	blocked: () =>
+		disposed || renderer === undefined || addMenu.matches(":popover-open"),
+	onError: (error: unknown) => {
+		removeInput?.stop();
+		setStatus(`Camera control failed: ${errorMessage(error)}`);
+	},
 	pick,
 	probe,
 	probeOpen: () => inspector.closest("details")?.open === true,
@@ -557,7 +631,7 @@ resetNode.addEventListener("click", resetDefaults);
 focusNode.addEventListener("click", frame);
 window.addEventListener("resize", resized);
 window.addEventListener("hashchange", hashChanged);
-window.addEventListener("visibilitychange", visibilityChanged);
+document.addEventListener("visibilitychange", visibilityChanged);
 window.addEventListener("beforeunload", cleanup);
 updateUi();
 if (hashError !== undefined) {

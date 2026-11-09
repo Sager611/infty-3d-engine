@@ -1,27 +1,24 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: This is a vanilla DOM adapter.
-// biome-ignore-all lint/style/noMagicNumbers: Input increments are shared interaction defaults.
-// biome-ignore-all lint/nursery/noTernary: DOM target checks stay compact.
-// biome-ignore-all lint/security/noSecrets: DOM property names are not secrets.
-import { orbitCamera } from "./camera.ts";
-import { normalizeCamera, type PureCamera } from "./state.ts";
+import { lookCamera } from "./camera.ts";
+import {
+	type KeyBindings,
+	type KeyController,
+	listenKeys,
+	modifiedInput,
+} from "./keys.ts";
+import type { PureCamera } from "./state.ts";
 
 const CLICK_THRESHOLD = 4;
-const KEY_STEP = 0.08;
 const WHEEL_SCALE = 0.001;
-
-type InputBindings = Readonly<{
-	canvas: HTMLCanvasElement;
-	getCamera: () => PureCamera;
-	setCamera: (camera: PureCamera) => void;
-	zoom: (amount: number) => void;
-	pick: (clientX: number, clientY: number, all: boolean) => void;
-	probe: (clientX: number, clientY: number) => void;
-	probeOpen: () => boolean;
-	pickAll: () => boolean;
-	reset: () => void;
-	frame: () => void;
-}>;
-
+type InputBindings = KeyBindings &
+	Readonly<{
+		canvas: HTMLCanvasElement;
+		pick: (clientX: number, clientY: number, all: boolean) => void;
+		probe: (clientX: number, clientY: number) => void;
+		probeOpen: () => boolean;
+		pickAll: () => boolean;
+	}>;
+type InputController = KeyController;
 interface Gesture {
 	pointerId: number;
 	startX: number;
@@ -30,118 +27,63 @@ interface Gesture {
 	moved: boolean;
 	cancelled: boolean;
 }
-
 const isClick = (dx: number, dy: number): boolean =>
 	Number.isFinite(dx) &&
 	Number.isFinite(dy) &&
 	Math.hypot(dx, dy) < CLICK_THRESHOLD;
 
-const editableTarget = (target: EventTarget | null): boolean => {
-	if (target === null || typeof target !== "object") {
-		return false;
-	}
-	const tagName =
-		"tagName" in target && typeof target.tagName === "string"
-			? target.tagName.toUpperCase()
-			: "";
+const LINE_HEIGHT = 16;
+function wheelAmount(delta: number, mode: number, height: number): number {
 	if (
-		tagName === "INPUT" ||
-		tagName === "TEXTAREA" ||
-		tagName === "SELECT" ||
-		tagName === "BUTTON" ||
-		tagName === "OPTION"
+		!(Number.isFinite(delta) && Number.isFinite(height)) ||
+		height <= 0 ||
+		(mode !== 0 && mode !== 1 && mode !== 2)
 	) {
-		return true;
+		throw new Error("Invalid wheel input");
 	}
-	return "isContentEditable" in target && target.isContentEditable === true;
-};
-
-const keyboardCamera = (
-	camera: PureCamera,
-	yawDelta: number,
-	pitchDelta: number,
-): PureCamera =>
-	normalizeCamera({
-		...camera,
-		yaw: camera.yaw + yawDelta,
-		pitch: camera.pitch + pitchDelta,
-	});
-
-type KeyAction =
-	| "left"
-	| "right"
-	| "up"
-	| "down"
-	| "zoomIn"
-	| "zoomOut"
-	| "reset";
-
-const keyAction = (key: string): KeyAction | undefined => {
-	if (key === "ArrowLeft") {
-		return "left";
+	let pixels = delta;
+	if (mode === 1) {
+		pixels *= LINE_HEIGHT;
 	}
-	if (key === "ArrowRight") {
-		return "right";
+	if (mode === 2) {
+		pixels *= height;
 	}
-	if (key === "ArrowUp") {
-		return "up";
+	const amount = pixels * WHEEL_SCALE;
+	if (!Number.isFinite(amount)) {
+		throw new Error("Wheel input overflow");
 	}
-	if (key === "ArrowDown") {
-		return "down";
-	}
-	if (key === "+" || key === "=") {
-		return "zoomIn";
-	}
-	if (key === "-" || key === "_") {
-		return "zoomOut";
-	}
-	if (key.toLowerCase() === "r") {
-		return "reset";
-	}
-	return;
-};
-
-const handleKeydown = (bindings: InputBindings, event: KeyboardEvent): void => {
-	if (editableTarget(event.target)) {
-		return;
-	}
-	const action = keyAction(event.key);
-	if (action === undefined) {
-		return;
-	}
-	if (action === "left") {
-		bindings.setCamera(keyboardCamera(bindings.getCamera(), -KEY_STEP, 0));
-	} else if (action === "right") {
-		bindings.setCamera(keyboardCamera(bindings.getCamera(), KEY_STEP, 0));
-	} else if (action === "up") {
-		bindings.setCamera(keyboardCamera(bindings.getCamera(), 0, -KEY_STEP));
-	} else if (action === "down") {
-		bindings.setCamera(keyboardCamera(bindings.getCamera(), 0, KEY_STEP));
-	} else if (action === "zoomIn") {
-		bindings.zoom(-KEY_STEP);
-	} else if (action === "zoomOut") {
-		bindings.zoom(KEY_STEP);
-	} else {
-		bindings.reset();
-	}
-	event.preventDefault();
-};
+	return amount;
+}
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: The adapter keeps all listener state in one cleanup scope.
-const bindInput = (bindings: InputBindings): (() => void) => {
+const bindInput = (bindings: InputBindings): InputController => {
 	const { canvas } = bindings;
+	const keys = listenKeys(bindings);
 	let gesture: Gesture | undefined;
 	const pointers = new Set<number>();
 	let multiTouch = false;
+	let disposed = false;
 
 	const releaseCapture = (pointerId: number): void => {
 		if (canvas.hasPointerCapture(pointerId)) {
 			canvas.releasePointerCapture(pointerId);
 		}
 	};
-
+	const clearGesture = (): void => {
+		const current = gesture;
+		gesture = undefined;
+		pointers.clear();
+		multiTouch = false;
+		if (current !== undefined) {
+			releaseCapture(current.pointerId);
+		}
+	};
+	const stop = (): void => {
+		keys.stop();
+		clearGesture();
+	};
 	const pointerdown = (event: PointerEvent): void => {
-		if (pointers.has(event.pointerId)) {
+		if (bindings.blocked() || pointers.has(event.pointerId)) {
 			return;
 		}
 		pointers.add(event.pointerId);
@@ -152,20 +94,19 @@ const bindInput = (bindings: InputBindings): (() => void) => {
 			}
 			return;
 		}
-		const validStart =
-			Number.isFinite(event.clientX) && Number.isFinite(event.clientY);
 		gesture = {
 			pointerId: event.pointerId,
 			startX: event.clientX,
 			startY: event.clientY,
 			startCamera: bindings.getCamera(),
 			moved: false,
-			cancelled: !validStart,
+			cancelled: !(
+				Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+			),
 		};
 		canvas.setPointerCapture(event.pointerId);
 		canvas.focus();
 	};
-
 	const pointermove = (event: PointerEvent): void => {
 		if (bindings.probeOpen()) {
 			bindings.probe(event.clientX, event.clientY);
@@ -181,10 +122,16 @@ const bindInput = (bindings: InputBindings): (() => void) => {
 		}
 		if (!isClick(dx, dy)) {
 			gesture.moved = true;
-			bindings.setCamera(orbitCamera(gesture.startCamera, dx, dy));
+			try {
+				bindings.setCamera(
+					lookCamera(gesture.startCamera, dx, dy, bindings.getCamera()),
+				);
+			} catch (error) {
+				stop();
+				bindings.onError(error);
+			}
 		}
 	};
-
 	const finishPointer = (event: PointerEvent, cancelled: boolean): void => {
 		if (!pointers.delete(event.pointerId)) {
 			return;
@@ -201,52 +148,62 @@ const bindInput = (bindings: InputBindings): (() => void) => {
 					event.altKey || bindings.pickAll(),
 				);
 			}
-			releaseCapture(event.pointerId);
 			gesture = undefined;
+			releaseCapture(event.pointerId);
 		}
 		if (pointers.size === 0) {
 			multiTouch = false;
 		}
 	};
-
 	const pointerup = (event: PointerEvent): void => {
 		finishPointer(event, false);
 	};
-
 	const pointercancel = (event: PointerEvent): void => {
 		finishPointer(event, true);
 	};
-
 	const wheel = (event: WheelEvent): void => {
+		if (modifiedInput(event) || bindings.blocked()) {
+			return;
+		}
 		event.preventDefault();
-		bindings.zoom(event.deltaY * WHEEL_SCALE);
-	};
-
-	const keydown = (event: KeyboardEvent): void => {
-		handleKeydown(bindings, event);
+		try {
+			bindings.speed(
+				wheelAmount(event.deltaY, event.deltaMode, canvas.clientHeight),
+			);
+		} catch (error) {
+			stop();
+			bindings.onError(error);
+		}
 	};
 
 	canvas.addEventListener("pointerdown", pointerdown);
 	canvas.addEventListener("pointermove", pointermove);
 	canvas.addEventListener("pointerup", pointerup);
 	canvas.addEventListener("pointercancel", pointercancel);
+	canvas.addEventListener("lostpointercapture", pointercancel);
 	canvas.addEventListener("wheel", wheel, { passive: false });
-	canvas.addEventListener("keydown", keydown);
-
-	return (): void => {
+	bindings.keyboard.addEventListener("blur", stop);
+	const dispose = (): void => {
+		if (disposed) {
+			return;
+		}
+		disposed = true;
+		keys.dispose();
+		clearGesture();
 		canvas.removeEventListener("pointerdown", pointerdown);
 		canvas.removeEventListener("pointermove", pointermove);
 		canvas.removeEventListener("pointerup", pointerup);
 		canvas.removeEventListener("pointercancel", pointercancel);
+		canvas.removeEventListener("lostpointercapture", pointercancel);
 		canvas.removeEventListener("wheel", wheel);
-		canvas.removeEventListener("keydown", keydown);
-		if (gesture !== undefined) {
-			releaseCapture(gesture.pointerId);
-		}
-		gesture = undefined;
-		pointers.clear();
-		multiTouch = false;
+		bindings.keyboard.removeEventListener("blur", stop);
 	};
+	return Object.freeze({ stop, dispose });
 };
-
-export { bindInput, isClick, editableTarget, type InputBindings };
+export {
+	bindInput,
+	isClick,
+	wheelAmount,
+	type InputBindings,
+	type InputController,
+};

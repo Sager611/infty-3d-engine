@@ -1,16 +1,7 @@
 // biome-ignore-all lint/style/noMagicNumbers: Input contract values are asserted directly.
 // biome-ignore lint/nursery/noUnresolvedImports: Bun provides the virtual bun:test module.
 import { describe, expect, test } from "bun:test";
-import { orbitCamera } from "./camera.ts";
-import { isClick } from "./input.ts";
-import type { PureCamera } from "./state.ts";
-
-const camera: PureCamera = {
-	yaw: 0.4,
-	pitch: -0.2,
-	distance: 5,
-	target: [0, 1, 0],
-};
+import { isClick, wheelAmount } from "./input.ts";
 
 describe("input click threshold", () => {
 	test("accepts only finite movement shorter than four pixels", () => {
@@ -26,15 +17,11 @@ describe("input click threshold", () => {
 	});
 });
 
-describe("absolute orbit integration", () => {
-	test("applies total drag from the start camera", () => {
-		const moved = orbitCamera(camera, 25, -10);
-		expect(moved).toEqual({
-			...camera,
-			yaw: 0.2,
-			pitch: -0.28,
-		});
-		expect(orbitCamera(camera, 25, -10)).toEqual(moved);
-		expect(orbitCamera(moved, -25, 10)).toEqual(camera);
-	});
+test("wheel units normalize pixels, lines and pages without accepting invalid input", () => {
+	expect(wheelAmount(1, 0, 100)).toBe(0.001);
+	expect(wheelAmount(1, 1, 100)).toBe(0.016);
+	expect(wheelAmount(1, 2, 100)).toBe(0.1);
+	expect(() => wheelAmount(Number.NaN, 0, 100)).toThrow();
+	expect(() => wheelAmount(1, 3, 100)).toThrow();
+	expect(() => wheelAmount(1, 2, 0)).toThrow();
 });

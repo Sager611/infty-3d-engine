@@ -12,10 +12,8 @@ import {
 	MAX_SPEED,
 	MIN_SPEED,
 	moveCamera,
-	orbitCamera,
 	STOPPED,
 	travelSpeed,
-	zoomCamera,
 	type Movement,
 } from "./camera";
 import type { PureCamera } from "./state";
@@ -40,29 +38,6 @@ const sphere = (
 	position: [x, y, z],
 	size,
 	parameter: 0,
-});
-
-describe("camera gestures", () => {
-	test("uses total drag from the start and reverses exactly", () => {
-		const moved = orbitCamera(camera, 25, -10);
-		expect(moved).toEqual({
-			...camera,
-			yaw: 0.2,
-			pitch: -0.28,
-		});
-		expect(orbitCamera(moved, -25, 10)).toEqual(camera);
-		expect(orbitCamera(camera, 25, -10)).toEqual(moved);
-	});
-
-	test("zooms around the surface hit gap", () => {
-		expect(
-			zoomCamera({ ...camera, distance: 5 }, Math.log(0.5), 4).distance,
-		).toBe(3);
-		expect(zoomCamera({ ...camera, distance: 5 }, -100, 0).distance).toBe(5);
-		expect(() => zoomCamera(camera, Number.NaN, null)).toThrow();
-		expect(() => zoomCamera(camera, 0, -1)).toThrow();
-		expect(() => zoomCamera(camera, 0, Number.POSITIVE_INFINITY)).toThrow();
-	});
 });
 
 describe("camera framing", () => {
@@ -177,6 +152,14 @@ describe("free camera", () => {
 			moveCamera(front, movement(1, 0), 4, 0.05).target,
 		);
 	});
+});
+
+test("absolute drag preserves translation occurring between pointer events", () => {
+	const moving = moveCamera(camera, movement(0, 1), 4, 0.05);
+	const looked = lookCamera(camera, 25, -10, moving);
+	closePosition(eye(looked), eye(moving));
+	expect(looked.yaw).toBe(0.2);
+	expect(looked.pitch).toBe(-0.28);
 });
 
 describe("travel policy", () => {

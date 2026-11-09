@@ -1,4 +1,4 @@
-import { editableTarget } from "./input.ts";
+import { editableTarget } from "./keys.ts";
 import type { SceneKind } from "./scene.ts";
 
 type SceneAction = SceneKind | "delete" | "undo";

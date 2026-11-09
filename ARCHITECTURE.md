@@ -13,7 +13,8 @@ Pure values describe the scene; thin adapters own browser and GPU effects.
 | `web/{scene,state,query,camera}.ts` | Immutable records, absolute updates, URL codec, query decoding and framing |
 | `web/editing.ts` | Pure add/delete, stable IDs, selection repair and one-deletion undo |
 | `web/scene-actions.ts` | Delegated scene buttons and guarded delete keys; explicit cleanup |
-| `web/{controls,input,metrics}.ts` | Small DOM/input/timer adapters with cleanup |
+| `web/{controls,input,keys,frames,metrics}.ts` | Small DOM/input/timer adapters with cleanup |
+| `web/status.ts` | Immutable action/render messages; redraws clear only render failures, and empty messages share canonical state |
 | `web/prepared.ts` | Prepared scene ownership and safe deferred GPU acquisition |
 | `web/app.ts` | Snapshot, selection, queries, invalidation and resource lifecycle |
 
@@ -56,9 +57,9 @@ Add chooses bounded candidates in the current camera plane, preferring separatio
 
 Saved scene URLs use `#s=1;camera6;mode;objects8N`. Legacy `#v=yaw,pitch,distance,radius,mode` keeps the original centered sphere/plane scene. URL replacement is single-shot debounced150ms. Updates are absolute/idempotent and copy caller-owned coordinates.
 
-Fixed-eye look, camera-relative translation, normalized diagonal speed,50ms maximum steps and bounded wheel-speed math are tested. Browser keyboard/animation wiring and W-only approach easing remain pending; the current UI still uses orbit/zoom.
+WASD moves relative to the view; drag/arrows look from a fixed eye, including during translation. Wheel/+/- adjust speed[0.01,100] units/s(default3), never zoom. Diagonals retain base speed; steps cap at50ms. Blur, hidden pages, editable focus, menus, reset/framing, external loads and disposal clear held keys. Motion alone schedules successor frames; idle scenes have no RAF. Speed is transient; poses retain Camera6 saved compatibility. W-only approach easing remains pending.
 
-Render only after invalidation. Visible-only1Hz metrics report CPU submission walltime and optional JS heap/WASM bytes—not CPU utilization, GPU time or total browser/GPU memory. Input/timer resources have explicit disposal.
+Render after changes or active motion, never idle. Visible-only1Hz metrics report CPU submission walltime and optional JS heap/WASM bytes—not CPU utilization, GPU time or total browser/GPU memory. Input/timer resources have explicit disposal.
 
 Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests, TypeScript/Biome, Bun tests, shell/Markdown and dependency checks. Browser screenshots/interaction checks remain separate acceptance evidence.
 
@@ -72,3 +73,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-08 | Assistant | Shared immutable definitions/instances across CPU and GPU adapters | Prepare once, preserve peers and centralize uniform transforms |
 | 2026-11-08 | Assistant | Reused prepared scenes through browser/GPU ownership | Avoid camera-frame rebuilds/uploads and late initialization leaks |
 | 2026-11-08 | Assistant | Added tested camera navigation math and expanded camera-only bounds | Prepare free movement without changing scene editing limits |
+| 2026-11-09 | Assistant | Wired guarded free-camera controls, motion frames and persistent action errors | Replace orbit/zoom without idle rendering or silent input failures |
