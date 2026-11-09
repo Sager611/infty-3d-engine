@@ -1,10 +1,12 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: Vanilla DOM coordination.
 import init, { PreparedScene, Renderer } from "../pkg/infty.js";
 import {
+	cameraBasis,
 	frameCamera,
 	type Movement,
 	moveCamera,
 	STOPPED,
+	stepSpeed,
 	travelSpeed,
 } from "./camera.ts";
 import {
@@ -361,10 +363,27 @@ const pick = (clientX: number, clientY: number, all: boolean): void => {
 	}
 };
 
+const centerHitDistance = (): number | null => {
+	const basis = cameraBasis(snapshot.camera);
+	const [result] = decodeQueries(
+		preparedScene().query_ray(
+			new Float64Array([...basis.origin, ...basis.forward]),
+			0,
+		),
+	);
+	if (result?.uncertain === true) {
+		throw new Error("Center-ray hit is unresolved");
+	}
+	if (result !== undefined && !result.hit) {
+		throw new Error("Center-ray query returned a non-hit");
+	}
+	return result?.t ?? null;
+};
+
 const speed = (amount: number): void => {
 	baseSpeed = travelSpeed(baseSpeed, amount);
 	setStatus("");
-	metrics.title = `Travel speed ${baseSpeed.toPrecision(SPEED_DIGITS)} units/s`;
+	metrics.title = `Base travel speed ${baseSpeed.toPrecision(SPEED_DIGITS)} units/s`;
 };
 
 const frame = (): void => {
@@ -437,7 +456,12 @@ const renderFrame = (now: number): void => {
 			movementTime = now;
 			snapshot = {
 				...snapshot,
-				camera: moveCamera(snapshot.camera, movement, baseSpeed, seconds),
+				camera: moveCamera(
+					snapshot.camera,
+					movement,
+					stepSpeed(movement, baseSpeed, seconds, centerHitDistance),
+					seconds,
+				),
 			};
 			scheduleHash();
 		}

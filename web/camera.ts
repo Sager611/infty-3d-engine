@@ -19,6 +19,7 @@ const STOPPED: Movement = Object.freeze({
 const MIN_SPEED = 0.01;
 const MAX_SPEED = 100;
 const MAX_STEP = 0.05;
+const APPROACH_RANGE = 1;
 const POINTER_SCALE = 0.008;
 const FOCAL_LENGTH = 1.8;
 const FRAME_MARGIN = 1.1;
@@ -184,12 +185,7 @@ function lookCamera(
 		],
 	});
 }
-function moveCamera(
-	camera: PureCamera,
-	movement: Movement,
-	speed: number,
-	seconds: number,
-): PureCamera {
+function validStep(movement: Movement, speed: number, seconds: number): void {
 	finite(speed, "travel speed");
 	finite(seconds, "elapsed time");
 	finite(movement.forward, "forward movement");
@@ -202,6 +198,14 @@ function moveCamera(
 	) {
 		invalid("travel step");
 	}
+}
+function moveCamera(
+	camera: PureCamera,
+	movement: Movement,
+	speed: number,
+	seconds: number,
+): PureCamera {
+	validStep(movement, speed, seconds);
 	const basis = cameraBasis(camera);
 	const length = Math.hypot(movement.forward, movement.side);
 	if (length === 0 || seconds === 0) {
@@ -225,6 +229,69 @@ function moveCamera(
 						movement.side * basis.right[2]),
 		],
 	});
+}
+// Integrate v(gap) = minimum + gain * gap inside the band, at base speed outside.
+// Crossing continues at the floor for the rest of this step: this is not collision.
+function approachSpeed(
+	speed: number,
+	distance: number,
+	seconds: number,
+): number {
+	if (speed === MIN_SPEED || distance >= APPROACH_RANGE + speed * seconds) {
+		return speed;
+	}
+	const free = Math.min(
+		seconds,
+		Math.max(0, distance - APPROACH_RANGE) / speed,
+	);
+	const remaining = seconds - free;
+	const near = Math.min(distance, APPROACH_RANGE);
+	const gain = (speed - MIN_SPEED) / APPROACH_RANGE;
+	const contact = Math.log1p((gain * near) / MIN_SPEED) / gain;
+	let average: number;
+	if (remaining <= contact) {
+		const exponent = gain * remaining;
+		let ratio = 1;
+		if (exponent !== 0) {
+			ratio = -Math.expm1(-exponent) / exponent;
+		}
+		average = (MIN_SPEED + gain * near) * ratio;
+	} else {
+		average = near / remaining + MIN_SPEED * (1 - contact / remaining);
+	}
+	return Math.min(
+		speed,
+		Math.max(
+			MIN_SPEED,
+			speed * (free / seconds) + average * (remaining / seconds),
+		),
+	);
+}
+function stepSpeed(
+	movement: Movement,
+	speed: number,
+	seconds: number,
+	centerHit: () => number | null,
+): number {
+	validStep(movement, speed, seconds);
+	travelSpeed(speed, 0);
+	if (
+		seconds === 0 ||
+		movement.onlyForward !== true ||
+		movement.forward !== 1 ||
+		movement.side !== 0
+	) {
+		return speed;
+	}
+	const distance = centerHit();
+	if (distance === null) {
+		return speed;
+	}
+	finite(distance, "center hit distance");
+	if (distance < 0) {
+		invalid("negative center hit distance");
+	}
+	return approachSpeed(speed, distance, Math.min(seconds, MAX_STEP));
 }
 function travelSpeed(speed: number, amount: number): number {
 	finite(speed, "travel speed");
@@ -251,6 +318,7 @@ export {
 	cameraBasis,
 	lookCamera,
 	moveCamera,
+	stepSpeed,
 	travelSpeed,
 	STOPPED,
 	MIN_SPEED,

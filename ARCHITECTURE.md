@@ -57,7 +57,9 @@ Add chooses bounded candidates in the current camera plane, preferring separatio
 
 Saved scene URLs use `#s=1;camera6;mode;objects8N`. Legacy `#v=yaw,pitch,distance,radius,mode` keeps the original centered sphere/plane scene. URL replacement is single-shot debounced150ms. Updates are absolute/idempotent and copy caller-owned coordinates.
 
-WASD moves relative to the view; drag/arrows look from a fixed eye, including during translation. Wheel/+/- adjust speed[0.01,100] units/s(default3), never zoom. Diagonals retain base speed; steps cap at50ms. Blur, hidden pages, editable focus, menus, reset/framing, external loads and disposal clear held keys. Motion alone schedules successor frames; idle scenes have no RAF. Speed is transient; poses retain Camera6 saved compatibility. W-only approach easing remains pending.
+WASD moves relative to the view; drag/arrows look from a fixed eye, including during translation. Wheel/+/- adjust speed[0.01,100] units/s(default3), never zoom. Diagonals retain base speed; steps cap at50ms. Blur, hidden pages, editable focus, menus, reset/framing, external loads and disposal clear held keys. Motion alone schedules successor frames; idle scenes have no RAF. Speed is transient; poses retain Camera6 saved compatibility.
+
+Only sole W queries the nearest analytic center-ray hit. Inside one world unit, speed eases linearly with remaining distance down to0.01 units/s. Closed-form integration handles band entry/contact within a capped step, then continues through at the floor; this is not collision prevention. Reverse/strafe/diagonal/cancelling chords retain base speed and skip the query. Unresolved hits/errors stop motion explicitly, never become misses.
 
 Render after changes or active motion, never idle. Visible-only1Hz metrics report CPU submission walltime and optional JS heap/WASM bytes—not CPU utilization, GPU time or total browser/GPU memory. Input/timer resources have explicit disposal.
 
@@ -74,3 +76,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-08 | Assistant | Reused prepared scenes through browser/GPU ownership | Avoid camera-frame rebuilds/uploads and late initialization leaks |
 | 2026-11-08 | Assistant | Added tested camera navigation math and expanded camera-only bounds | Prepare free movement without changing scene editing limits |
 | 2026-11-09 | Assistant | Wired guarded free-camera controls, motion frames and persistent action errors | Replace orbit/zoom without idle rendering or silent input failures |
+| 2026-11-09 | Assistant | Added W-only analytic approach easing with closed-form steps | Inspect nearby surfaces without slowing escape or implying collision prevention |
