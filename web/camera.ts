@@ -16,7 +16,7 @@ const STOPPED: Movement = Object.freeze({
 	side: 0,
 	onlyForward: false,
 });
-const MIN_SPEED = 0.01;
+const MIN_SPEED = 0.000_001;
 const MAX_SPEED = 100;
 const MAX_STEP = 0.05;
 const APPROACH_RANGE = 1;

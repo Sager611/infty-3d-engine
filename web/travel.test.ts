@@ -49,7 +49,7 @@ test("approach rates stay positive, monotone and bounded, without clamping motio
 		expect(stepSpeed(FORWARD, speed, 0.05, () => 0)).toBe(MIN_SPEED);
 		expect(stepSpeed(FORWARD, speed, 0.05, () => Number.MAX_VALUE)).toBe(speed);
 	}
-	const gap = 0.000_001;
+	const gap = 0.000_000_001;
 	expect(stepSpeed(FORWARD, 3, 0.05, () => gap) * 0.05).toBeGreaterThan(gap);
 	let previous = MIN_SPEED;
 	for (const speed of [MIN_SPEED, 0.03, 1, 3, 10, 100]) {
@@ -57,6 +57,18 @@ test("approach rates stay positive, monotone and bounded, without clamping motio
 		expect(rate).toBeGreaterThanOrEqual(previous);
 		previous = rate;
 	}
+});
+
+test("micro-unit inspection slows before contact without raising the positive floor", () => {
+	const floor = 0.000_001;
+	const gap = 0.000_001;
+	const seconds = 0.05;
+	const gain = 3 - floor;
+	const distance = stepSpeed(FORWARD, 3, seconds, () => gap) * seconds;
+	const oracle = (gap + floor / gain) * (1 - Math.exp(-gain * seconds));
+	expect(distance).toBeLessThan(gap / 4);
+	expect(Math.abs(distance - oracle)).toBeLessThan(1e-16);
+	expect(stepSpeed(FORWARD, 3, seconds, () => 0)).toBe(floor);
 });
 
 test("closed-form easing cannot skip its band at high speed and agrees across time partitions", () => {

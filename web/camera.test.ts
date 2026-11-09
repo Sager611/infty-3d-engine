@@ -163,6 +163,15 @@ test("absolute drag preserves translation occurring between pointer events", () 
 });
 
 describe("travel policy", () => {
+	test("wheel reaches a micro-unit speed and translation retains the tiny step", () => {
+		const floor = 0.000_001;
+		expect(travelSpeed(3, 1e6)).toBe(floor);
+		expect(travelSpeed(0.000_01, 1)).toBeGreaterThan(floor);
+		expect(travelSpeed(0.000_01, 1)).toBeLessThan(0.000_01);
+		expect(
+			moveCamera(front, movement(1, 0), floor, 0.05).target[2],
+		).toBeCloseTo(-0.000_000_05, 16);
+	});
 	test("wheel scales bounded travel speed, not the pose", () => {
 		expect(travelSpeed(3, -1)).toBeGreaterThan(3);
 		expect(travelSpeed(3, 1)).toBeLessThan(3);
