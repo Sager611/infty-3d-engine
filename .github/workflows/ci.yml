@@ -19,6 +19,9 @@ jobs:
     timeout-minutes: 15
     env:
       CARGO_BUILD_JOBS: "2"
+      # Bound software-GPU JIT memory without skipping probes.
+      RUST_TEST_THREADS: "1"
+      GALLIVM_PERF: nopt
       XDG_RUNTIME_DIR: /tmp/infty-xdg-${{ github.run_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
