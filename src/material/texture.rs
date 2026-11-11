@@ -9,6 +9,12 @@ pub const fn assets(material: Material) -> [&'static [u8]; 4] {
             include_bytes!("tiles/steel-2.rgba.z"),
             include_bytes!("tiles/steel-3.rgba.z"),
         ],
+        Material::Leaf => [
+            include_bytes!("tiles/leaf-0.rgba.z"),
+            include_bytes!("tiles/leaf-1.rgba.z"),
+            include_bytes!("tiles/leaf-2.rgba.z"),
+            include_bytes!("tiles/leaf-3.rgba.z"),
+        ],
         Material::Brick => [
             include_bytes!("tiles/brick-0.rgba.z"),
             include_bytes!("tiles/brick-1.rgba.z"),

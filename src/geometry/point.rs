@@ -123,6 +123,7 @@ impl Closest {
         }
         self.multiplicity = match geometry.kind() {
             super::Kind::Plane => Multiplicity::Unique,
+            super::Kind::FinitePlane if !geometry.leaf => Multiplicity::Unique,
             super::Kind::Sphere if distance(point, [0.0; 3])?.lo() > error => Multiplicity::Unique,
             _ => Multiplicity::Unknown,
         };
@@ -230,6 +231,9 @@ pub fn query_traced(
         },
         super::Kind::Goursat => goursat::query(geometry, point, request, trace)?,
         super::Kind::CrystallineCluster => crystal::query(point, request)?,
+        super::Kind::FinitePlane => {
+            super::finite::closest(point, geometry.parameter(), geometry.leaf, request)?
+        }
     };
     let result = result.with_accuracy(request);
     result.record(trace, Tag::Bounds);

@@ -60,7 +60,7 @@ fn verify_material_variance(@builtin(global_invocation_id) id: vec3u) {
 fn verify_material_contact(@builtin(global_invocation_id) id: vec3u) {
   if (id.x>=arrayLength(&rays)) { return; }
   let r=rays[id.x];let q=goursat(r.o.xyz,r.d.xyz,r.o.w,false);
-  let s=SceneSample(q.query,q.query.p,1u,u32(r.d.w),q.gap_lower,q.error,q.status);
+  let s=SceneSample(q.query,q.query.p,1u,u32(r.d.w),q.gap_lower,q.error,q.status,Pending(0.0,false),q.error,q.status<2u);
   let t=render_material_distance(s,r.d.xyz,1.0,r.o.w);
   results[id.x]=ProbeResult(vec4f(t,q.query.t,q.error,f32(q.status)),vec4f(q.query.p,1.0),vec4f(0.0),vec4f(0.0));
 }
@@ -136,7 +136,7 @@ fn verify_scene(@builtin(global_invocation_id) id: vec3u) {
   );
   results[2u * id.x + 1u] = ProbeResult(
     vec4f(ray_point.z, sample.local),
-    vec4f(sample.error, select(0.0, 1.0, (kind == 2u || kind == 4u) && !q.hit), f32(sample.status), 0.0),
+    vec4f(sample.error, select(0.0, 1.0, (kind == 2u || kind == 4u || kind == 5u) && !q.hit), f32(sample.status), 0.0),
     vec4f(0.0), vec4f(0.0)
   );
 }
@@ -159,7 +159,7 @@ fn verify_outline(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let ray = rays[id.x];
   let q = Query(ray.d.x != 0.0, 2.0, ray.o.x, vec3f(0.0), vec3f(0.0, 1.0, 0.0), vec2f(0.0));
-  let sample = SceneSample(q, vec3f(0.0), 7u, u32(ray.o.w), ray.o.y, ray.o.z, u32(ray.d.w));
+  let sample = SceneSample(q, vec3f(0.0), 7u, u32(ray.o.w), ray.o.y, ray.o.z, u32(ray.d.w),Pending(0.0,false),ray.o.z,ray.d.w<2.0);
   let eligible = outline_eligible(sample, ray.d.y != 0.0, ray.d.z);
   results[id.x] = ProbeResult(vec4f(select(0.0, 1.0, eligible), 0.0, 0.0, 0.0),
     vec4f(0.0), vec4f(0.0), vec4f(0.0));
@@ -211,7 +211,7 @@ fn verify_spatial(@builtin(global_invocation_id) id: vec3u) {
     } else {
       visits++;
       let sample = scene_object(ray.o.xyz, direction, resolved_object(i), false);
-      if (sample.query.hit && (sample.query.t < nearest.query.t ||
+      if (sample.query.hit && (!nearest.query.hit || sample.query.t < nearest.query.t ||
           (sample.query.t == nearest.query.t && sample.id < nearest.id))) { nearest = sample; }
     }
     i++;
@@ -240,7 +240,7 @@ fn verify_spatial_gaps(@builtin(global_invocation_id) id: vec3u) {
         gap = min(gap, sample.query.gap);
       }
       let thickness = 6.0 * sample.query.t / 1800.0;
-      if (outline_eligible(sample, record.identity.z != 0u, thickness)) { outlines += 1.0; }
+      if (outline_eligible(sample,scene_selected(record),thickness)) { outlines += 1.0; }
     }
     i++;
   }

@@ -4,7 +4,10 @@ use super::{
     spatial::Spatial,
     transform::Transform,
 };
-use crate::geometry::Geometry;
+use crate::{
+    geometry::{Error, Geometry, Kind},
+    material::Material,
+};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug)]
@@ -33,6 +36,8 @@ pub struct Prepared {
     instances: Box<[Instance]>,
     spatial: Spatial,
     by_id: BTreeMap<u32, usize>,
+    leaf: bool,
+    leaf_finish: bool,
 }
 impl Prepared {
     pub fn new(objects: &[Object]) -> Result<Self, SceneError> {
@@ -43,10 +48,14 @@ impl Prepared {
         let mut geometries = Vec::new();
         let mut interned = BTreeMap::new();
         let mut by_id = BTreeMap::new();
+        let mut leaf = false;
+        let mut leaf_finish = false;
         for (index, object) in objects.iter().enumerate() {
             if by_id.insert(object.id(), index).is_some() {
                 return Err(SceneError::DuplicateId);
             }
+            leaf_finish |= object.material() == Material::Leaf;
+            leaf |= object.kind() == Kind::FinitePlane && object.material() == Material::Leaf;
             let key = (object.kind().tag(), object.parameter().to_bits());
             let geometry = *interned.entry(key).or_insert_with(|| {
                 let slot = geometries.len();
@@ -65,7 +74,23 @@ impl Prepared {
             instances: instances.into_boxed_slice(),
             spatial: Spatial::new(objects),
             by_id,
+            leaf,
+            leaf_finish,
         })
+    }
+    pub const fn has_leaf_finish(&self) -> bool {
+        self.leaf_finish
+    }
+    pub const fn has_leaf(&self) -> bool {
+        self.leaf
+    }
+    pub fn surface(&self, instance: Instance) -> Result<Geometry, Error> {
+        Ok(self
+            .geometries
+            .get(instance.geometry)
+            .copied()
+            .ok_or(Error::Numeric)?
+            .with_leaf_surface(instance.material == u32::from(Material::Leaf.tag())))
     }
     pub fn geometries(&self) -> &[Geometry] {
         &self.geometries

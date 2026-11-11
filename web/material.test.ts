@@ -28,13 +28,13 @@ test("material selection is per instance, immutable and snapshot-persistent", ()
 		);
 		expect(packScene(steel)[7]).toBe(0);
 		expect(unpackScene(packScene(steel))).toEqual(steel);
-		expect(() => propertyPatch(object, "material", 2)).toThrow();
+		expect(() => propertyPatch(object, "material", 3)).toThrow();
 	}
 });
 test("legacy scenes stay valid and unknown material IDs are rejected", () => {
 	const packet = packScene(DEFAULT_SCENE);
 	expect(unpackScene(packet)).toEqual(DEFAULT_SCENE);
-	for (const invalid of [-1, 0.5, 2, Number.NaN, Number.POSITIVE_INFINITY]) {
+	for (const invalid of [-1, 0.5, 3, Number.NaN, Number.POSITIVE_INFINITY]) {
 		const bad = packet.slice();
 		bad[7] = invalid;
 		expect(() => unpackScene(bad)).toThrow();

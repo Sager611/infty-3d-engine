@@ -8,7 +8,7 @@ import {
 } from "./material.ts";
 
 type Position = readonly [number, number, number];
-type SceneKind = "sphere" | "goursat" | "plane" | "crystal";
+type SceneKind = "sphere" | "goursat" | "plane" | "crystal" | "finite";
 
 type ReadonlySceneObject = Readonly<{
 	id: number;
@@ -77,6 +77,12 @@ const DESCRIPTORS: ShapeDescriptorMap = {
 		size: { min: MIN_SIZE, max: MAX_SIZE },
 		parameter: { min: 0, max: 0 },
 	},
+	finite: {
+		kind: "finite",
+		position: ["x", "y", "z"],
+		size: { min: MIN_SIZE, max: MAX_SIZE },
+		parameter: { min: 0, max: 2 },
+	},
 } satisfies ShapeDescriptorMap;
 
 const KIND_TAGS: Readonly<Record<SceneKind, number>> = {
@@ -84,6 +90,7 @@ const KIND_TAGS: Readonly<Record<SceneKind, number>> = {
 	goursat: 2,
 	plane: 3,
 	crystal: 4,
+	finite: 5,
 };
 
 const tagKind = (tag: number): SceneKind | undefined => {
@@ -98,6 +105,9 @@ const tagKind = (tag: number): SceneKind | undefined => {
 	}
 	if (tag === KIND_TAGS.crystal) {
 		return "crystal";
+	}
+	if (tag === KIND_TAGS.finite) {
+		return "finite";
 	}
 	return;
 };
@@ -196,6 +206,7 @@ const validateObject = (object: ReadonlySceneObject): void => {
 	}
 	if (
 		!Number.isFinite(object.parameter) ||
+		(object.kind === "finite" && !Number.isInteger(object.parameter)) ||
 		object.parameter < descriptor.parameter.min ||
 		object.parameter > descriptor.parameter.max
 	) {

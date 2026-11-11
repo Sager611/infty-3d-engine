@@ -34,7 +34,7 @@ fn surface_base(uv: vec2f, scale: f32, a: vec3f, b: vec3f) -> vec3f {
 
 fn surface_normal(normal: vec3f, ray: vec3f, kind: u32) -> vec3f {
   let n = normalize(normal);
-  return select(n, -n, kind == 4u && dot(n, ray) > 0.0);
+  return select(n, -n, (kind == 4u || kind==5u) && dot(n, ray) > 0.0);
 }
 
 fn surface_shade(

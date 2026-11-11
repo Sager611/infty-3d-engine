@@ -6,6 +6,20 @@ import {
 	type SceneObject,
 } from "./scene.ts";
 import { DEFAULT_SNAPSHOT, type Snapshot } from "./state.ts";
+import { MATERIAL_MODE } from "./view.ts";
+
+const LEAF_SIZE = 0.07;
+const LEAF_FRAME = 0.4;
+const LEAF: Scene = Object.freeze([
+	Object.freeze({
+		id: 1,
+		kind: "finite",
+		position: Object.freeze([0, 1, 0] as const),
+		size: LEAF_SIZE,
+		parameter: 0,
+		material: "leaf",
+	}),
+]);
 
 const SIDE = 16;
 const LAYER: number = SIDE * SIDE;
@@ -61,15 +75,27 @@ export function presetSnapshot(
 ): Snapshot {
 	let objects = DEFAULT_SCENE;
 	let camera = DEFAULT_SNAPSHOT.camera;
+	let viewMode = mode;
 	if (name === "showcase") {
 		objects = showcase();
 		camera = { ...camera, yaw: YAW, pitch: PITCH };
+	} else if (name === "leaf") {
+		objects = LEAF;
+		camera = { ...camera, yaw: 0, pitch: 0 };
+		viewMode = MATERIAL_MODE;
 	} else if (name !== "default") {
 		throw new Error("Unknown scene preset");
 	}
+	camera = frameCamera(camera, objects, [], aspect);
+	if (name === "leaf") {
+		camera = Object.freeze({
+			...camera,
+			distance: camera.distance * LEAF_FRAME,
+		});
+	}
 	return Object.freeze({
 		objects,
-		mode,
-		camera: frameCamera(camera, objects, [], aspect),
+		mode: viewMode,
+		camera,
 	});
 }

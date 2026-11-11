@@ -47,7 +47,7 @@ test("mobile scene tools leave room for the compact probe", async () => {
 	);
 });
 
-test("scene loader exposes both presets inside the accessible controls", async () => {
+test("scene loader exposes all presets inside the accessible controls", async () => {
 	const source = await Bun.file(
 		new URL("../index.html", import.meta.url),
 	).text();
@@ -66,7 +66,7 @@ test("scene loader exposes both presets inside the accessible controls", async (
 		});
 	await parser.transform(new Response(source)).text();
 	expect(found.label).toBe("Load scene");
-	expect(options).toEqual(["", "default", "showcase"]);
+	expect(options).toEqual(["", "default", "showcase", "leaf"]);
 });
 
 test("scene controls stay inside a collapsed, accessible disclosure", async () => {

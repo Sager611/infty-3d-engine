@@ -82,10 +82,13 @@ const positionIndex = (key: string): number => {
 	return -1;
 };
 
-const field = (values: Omit<ControlField, "step">): ControlField =>
+const field = (
+	values: Omit<ControlField, "step">,
+	step: number = CONTROL_STEP,
+): ControlField =>
 	Object.freeze({
 		...values,
-		step: CONTROL_STEP,
+		step,
 	});
 
 const positionValue = (
@@ -117,6 +120,8 @@ const fieldsForObject = (object: SceneObject): readonly ControlField[] => {
 		sizeLabel = "Radius";
 	} else if (object.kind === "plane") {
 		sizeLabel = "Grid size";
+	} else if (object.kind === "finite") {
+		sizeLabel = "Half-size";
 	}
 	fields.push(
 		field({
@@ -136,6 +141,20 @@ const fieldsForObject = (object: SceneObject): readonly ControlField[] => {
 				min: descriptor.parameter.min,
 				max: descriptor.parameter.max,
 			}),
+		);
+	}
+	if (object.kind === "finite") {
+		fields.push(
+			field(
+				{
+					key: "parameter",
+					label: "Axis (0Z/1X/2Y)",
+					value: object.parameter,
+					min: 0,
+					max: 2,
+				},
+				1,
+			),
 		);
 	}
 	return Object.freeze(fields);
@@ -250,7 +269,8 @@ const materialControl = (object: SceneObject): HTMLLabelElement => {
 	select.id = `property-${object.id}-material`;
 	select.name = "material";
 	select.dataset.controlKey = "material";
-	select.title = "Surface appearance; geometry unchanged";
+	select.title =
+		"Leaf adds relief and cutouts to finite planes; other geometry stays unchanged";
 	select.setAttribute("aria-label", "Material");
 	label.htmlFor = select.id;
 	for (const descriptor of Object.values(MATERIALS)) {

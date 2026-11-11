@@ -1,4 +1,4 @@
-//! Physical-scale tiles: linear RGB reflectance + normalized relief, no displacement.
+//! Linear RGB/height tiles; leaf relief additionally defines finite-plane geometry.
 use std::collections::BTreeSet;
 pub mod gpu;
 mod texture;
@@ -8,18 +8,21 @@ pub use texture::texture;
 pub enum Material {
     Steel,
     Brick,
+    Leaf,
 }
 impl Material {
     pub const fn tag(self) -> u8 {
         match self {
             Self::Steel => 0,
             Self::Brick => 1,
+            Self::Leaf => 2,
         }
     }
     pub const fn from_tag(tag: u32) -> Option<Self> {
         match tag {
             0 => Some(Self::Steel),
             1 => Some(Self::Brick),
+            2 => Some(Self::Leaf),
             _ => None,
         }
     }
@@ -42,12 +45,22 @@ pub struct Level {
     pub roughness: f32,
 }
 pub fn presets() -> Vec<Level> {
-    [Material::Steel, Material::Brick]
+    presets_with_leaf(false)
+}
+pub fn presets_with_leaf(leaf: bool) -> Vec<Level> {
+    [Material::Steel, Material::Brick, Material::Leaf]
         .into_iter()
+        .take(if leaf { 3 } else { 2 })
         .flat_map(|material| {
             let relief = match material {
                 Material::Steel => [0.000_05, 0.000_01, 0.000_002, 0.000_000_4],
                 Material::Brick => [0.006, 0.000_8, 0.000_08, 0.000_006],
+                Material::Leaf => [
+                    0.002_187_5,
+                    0.000_068_359_375,
+                    0.000_008_544_922,
+                    0.000_002_136_230_5,
+                ],
             };
             relief
                 .into_iter()
@@ -61,7 +74,11 @@ pub fn presets() -> Vec<Level> {
                     source,
                     material,
                     order,
-                    extent: 0.42 / 10.0_f64.powi(order),
+                    extent: (if material == Material::Leaf {
+                        0.14
+                    } else {
+                        0.42
+                    }) / 10.0_f64.powi(order),
                     relief,
                     color: if order == 0 { 1.0 } else { 0.65 },
                     roughness: 0.025,
@@ -80,7 +97,8 @@ pub fn validate(levels: &[Level], limit: u32) -> Result<(), &'static str> {
         if !keys.insert((level.material.tag(), level.order)) {
             return Err("duplicate material order");
         }
-        if level.source.is_empty()
+        if (level.material == Material::Leaf && !(0..4).contains(&level.order))
+            || level.source.is_empty()
             || level.atlas.is_some_and(|a| {
                 a.cells.into_iter().any(|v| v == 0 || u32::from(v) > EDGE)
                     || a.border

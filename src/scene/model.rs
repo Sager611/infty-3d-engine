@@ -304,7 +304,7 @@ mod tests {
             Err(SceneError::DuplicateId)
         ));
         assert!(matches!(
-            parse_objects(&[1.0, 5.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+            parse_objects(&[1.0, 6.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
             Err(SceneError::InvalidKind)
         ));
         assert!(matches!(
@@ -324,7 +324,7 @@ mod tests {
             Err(SceneError::InvalidParameter)
         ));
         assert!(matches!(
-            parse_objects(&[1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 2.0]),
+            parse_objects(&[1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 3.0]),
             Err(SceneError::InvalidMaterial)
         ));
     }

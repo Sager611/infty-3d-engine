@@ -12,6 +12,8 @@ struct Query {
   uv: vec2f,
 };
 
+struct Pending {lower:f32,valid:bool};
+
 struct GeometryQuery {
   query: Query,
   gap_lower: f32,
@@ -19,6 +21,7 @@ struct GeometryQuery {
   status: u32,
 };
 
+// origin.w/right.w/up.w: low origin XYZ; forward.w: focal length.96 bytes.
 struct Params {
   origin: vec4f,
   right: vec4f,

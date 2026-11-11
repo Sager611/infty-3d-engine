@@ -55,6 +55,7 @@ describe("scene model", () => {
 			"goursat",
 			"plane",
 			"crystal",
+			"finite",
 		]);
 		expect(DESCRIPTORS.sphere.size).toEqual({ min: 0.01, max: 4 });
 		expect(DESCRIPTORS.goursat.parameter).toEqual({
@@ -102,7 +103,7 @@ describe("scene model", () => {
 			unpackScene(new Float64Array([1, 1, 0, 0, 0, 1, 1, 0])),
 		).toThrow("invalid parameter");
 		expect(() =>
-			unpackScene(new Float64Array([1, 1, 0, 0, 0, 1, 0, 2])),
+			unpackScene(new Float64Array([1, 1, 0, 0, 0, 1, 0, 3])),
 		).toThrow("invalid material");
 		expect(() =>
 			unpackScene(

@@ -1,7 +1,8 @@
 //! Lazy immutable texture array; only camera-phase metadata changes per frame.
-use super::{EDGE, Level, mip, phase, presets, texture, validate};
+use super::{EDGE, Level, mip, phase, presets, presets_with_leaf, texture, validate};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
+pub mod resources;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -17,6 +18,8 @@ const _: () = assert!(std::mem::size_of::<Row>() == 80);
 pub struct Tiles {
     pub texture: wgpu::Texture,
     pub sampler: wgpu::Sampler,
+    pub repeat: wgpu::Sampler,
+    pub clamp: wgpu::Sampler,
     pub buffer: wgpu::Buffer,
     levels: Vec<Level>,
     means: Vec<[f32; 4]>,
@@ -37,11 +40,11 @@ fn image(device: &wgpu::Device, edge: u32, layers: u32, mips: u32) -> wgpu::Text
         view_formats: &[],
     })
 }
-fn sampler(device: &wgpu::Device) -> wgpu::Sampler {
+fn sampler(device: &wgpu::Device, mode: wgpu::AddressMode) -> wgpu::Sampler {
     device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("material mirrors + mip filter"),
-        address_mode_u: wgpu::AddressMode::MirrorRepeat,
-        address_mode_v: wgpu::AddressMode::MirrorRepeat,
+        label: Some("material mip filter"),
+        address_mode_u: mode,
+        address_mode_v: mode,
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
         mipmap_filter: wgpu::MipmapFilterMode::Linear,
@@ -52,7 +55,9 @@ impl Tiles {
     pub fn empty(device: &wgpu::Device) -> Self {
         Self {
             texture: image(device, 1, 1, 1),
-            sampler: sampler(device),
+            sampler: sampler(device, wgpu::AddressMode::MirrorRepeat),
+            repeat: sampler(device, wgpu::AddressMode::Repeat),
+            clamp: sampler(device, wgpu::AddressMode::ClampToEdge),
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("material phases"),
                 contents: bytemuck::bytes_of(&Row::zeroed()),
@@ -69,11 +74,17 @@ impl Tiles {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        leaf: bool,
     ) -> Result<bool, &'static str> {
-        if self.ready() {
+        if self.ready() && self.levels.len() >= if leaf { 12 } else { 8 } {
             return Ok(false);
         }
-        *self = Self::new(device, queue, &presets())?;
+        let levels = if leaf {
+            presets_with_leaf(true)
+        } else {
+            presets()
+        };
+        *self = Self::new(device, queue, &levels)?;
         Ok(true)
     }
     pub fn new(
@@ -126,10 +137,12 @@ impl Tiles {
                 index += 1;
             }
         }
-        let rows = rows(levels, &means, [0.0; 3])?;
+        let rows = rows(levels, &means, [0.0; 3], true)?;
         Ok(Self {
             texture: texture_array,
-            sampler: sampler(device),
+            sampler: sampler(device, wgpu::AddressMode::MirrorRepeat),
+            repeat: sampler(device, wgpu::AddressMode::Repeat),
+            clamp: sampler(device, wgpu::AddressMode::ClampToEdge),
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("material phases"),
                 contents: bytemuck::cast_slice(&rows),
@@ -139,12 +152,17 @@ impl Tiles {
             means,
         })
     }
-    pub fn update(&self, queue: &wgpu::Queue, origin: [f64; 3]) -> Result<(), &'static str> {
-        let records = rows(&self.levels, &self.means, origin)?;
+    pub fn update(
+        &self,
+        queue: &wgpu::Queue,
+        origin: [f64; 3],
+        leaf: bool,
+    ) -> Result<usize, &'static str> {
+        let records = rows(&self.levels, &self.means, origin, leaf)?;
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&records));
-        Ok(())
+        Ok(records.len() * 80)
     }
-    pub fn bindings<'a>(&'a self, view: &'a wgpu::TextureView) -> [wgpu::BindGroupEntry<'a>; 3] {
+    pub fn bindings<'a>(&'a self, view: &'a wgpu::TextureView) -> [wgpu::BindGroupEntry<'a>; 5] {
         [
             wgpu::BindGroupEntry {
                 binding: 6,
@@ -157,6 +175,14 @@ impl Tiles {
             wgpu::BindGroupEntry {
                 binding: 8,
                 resource: self.buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: wgpu::BindingResource::Sampler(&self.repeat),
+            },
+            wgpu::BindGroupEntry {
+                binding: 11,
+                resource: wgpu::BindingResource::Sampler(&self.clamp),
             },
         ]
     }
@@ -171,17 +197,28 @@ impl Tiles {
     clippy::cast_possible_truncation,
     reason = "Validated extents fit f32 and normalized channel means deliberately round to f32"
 )]
-fn rows(levels: &[Level], means: &[[f32; 4]], origin: [f64; 3]) -> Result<Vec<Row>, &'static str> {
+fn rows(
+    levels: &[Level],
+    means: &[[f32; 4]],
+    origin: [f64; 3],
+    leaf: bool,
+) -> Result<Vec<Row>, &'static str> {
     levels
         .iter()
         .zip(means)
         .enumerate()
+        .filter(|(_, (level, _))| leaf || level.material != super::Material::Leaf)
         .map(|(index, (level, mean))| {
             Ok(Row {
                 identity: [
                     u32::from(level.material.tag()),
                     u32::try_from(index).map_err(|_| "material layer")?,
-                    u32::from(level.order == 0),
+                    u32::from(level.order == 0)
+                        | if level.material == super::Material::Leaf {
+                            u32::try_from(level.order).map_err(|_| "leaf order")? << 8
+                        } else {
+                            0
+                        },
                     level
                         .atlas
                         .map_or(0, |a| u32::from(a.cells[0]) | (u32::from(a.cells[1]) << 16)),

@@ -6,10 +6,32 @@ use crate::scene::{
 };
 
 #[test]
+fn leaf_palette_appends_four_physical_orders_without_changing_the_baseline()
+-> Result<(), &'static str> {
+    let base = presets();
+    let all = presets_with_leaf(true);
+    assert_eq!(all.len(), 12);
+    validate(&all, 12)?;
+    for (before, after) in base.iter().zip(&all) {
+        assert_eq!(before.material, after.material);
+        assert_eq!(before.extent.to_bits(), after.extent.to_bits());
+        assert!(std::ptr::eq(before.source, after.source));
+    }
+    for (index, level) in all[8..].iter().enumerate() {
+        assert_eq!(level.material, Material::Leaf);
+        let order = i32::try_from(index).map_err(|_| "order")?;
+        assert!((level.extent - 0.14 / 10_f64.powi(order)).abs() < 1e-15);
+        assert!(level.atlas.is_none());
+        assert_eq!(texture(*level)?.len(), 512 * 512 * 4);
+    }
+    Ok(())
+}
+#[test]
 fn four_physical_orders_per_finish_not_a_shader_level_limit() -> Result<(), &'static str> {
     assert_eq!(Material::from_tag(0), Some(Material::Steel));
     assert_eq!(Material::from_tag(1), Some(Material::Brick));
-    assert_eq!(Material::from_tag(2), None);
+    assert_eq!(Material::from_tag(2), Some(Material::Leaf));
+    assert_eq!(Material::from_tag(3), None);
     assert_eq!(Material::Brick.tag(), 1);
     let levels = presets();
     assert_eq!(levels.len(), 8);

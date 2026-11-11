@@ -66,7 +66,11 @@ pub fn closest_prepared(
     let instance = scene.find(id).ok_or(QueryError::UnknownObject)?;
     instance
         .transform()
-        .closest(scene.geometries()[instance.geometry()], point, request)
+        .closest(
+            scene.surface(*instance).map_err(QueryError::Geometry)?,
+            point,
+            request,
+        )
         .map_err(QueryError::Geometry)
 }
 
@@ -81,7 +85,7 @@ pub fn closest_prepared_traced(
     instance
         .transform()
         .closest_traced(
-            scene.geometries()[instance.geometry()],
+            scene.surface(*instance).map_err(QueryError::Geometry)?,
             point,
             request,
             trace,
@@ -122,7 +126,12 @@ impl SceneSample {
             self.local[1],
             self.local[2],
             self.error,
-            if !self.sample.hit && matches!(self.kind, Kind::Goursat | Kind::CrystallineCluster) {
+            if !self.sample.hit
+                && matches!(
+                    self.kind,
+                    Kind::Goursat | Kind::CrystallineCluster | Kind::FinitePlane
+                )
+            {
                 1.0
             } else {
                 0.0
@@ -146,7 +155,9 @@ pub fn query_object(object: &Object, ray: Ray, need_gap: bool) -> Result<SceneSa
     validate_ray(ray)?;
     query_definition(
         object.id(),
-        object.geometry(),
+        object
+            .geometry()
+            .with_leaf_surface(object.material() == crate::material::Material::Leaf),
         object.transform(),
         normalized_ray(ray),
         need_gap,
@@ -243,7 +254,7 @@ pub fn query_prepared_traced(
             let instance = scene.instances()[index];
             query_definition(
                 instance.id(),
-                scene.geometries()[instance.geometry()],
+                scene.surface(instance).map_err(QueryError::Geometry)?,
                 instance.transform(),
                 ray,
                 need_gap,

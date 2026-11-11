@@ -56,40 +56,84 @@ test("WASM material packets leave prepared geometry queries and traces bit-ident
 		[3, 0],
 		[4, 0],
 	] as const) {
-		const steel = new PreparedScene(
-			new Float64Array([7, kind, 0, 0, 0, 1, parameter, 0]),
-		);
-		const brick = new PreparedScene(
-			new Float64Array([7, kind, 0, 0, 0, 1, parameter, 1]),
-		);
-		try {
-			expect(brick.closest_point(7, point, request)).toEqual(
-				steel.closest_point(7, point, request),
+		for (const finish of [1, 2]) {
+			const steel = new PreparedScene(
+				new Float64Array([7, kind, 0, 0, 0, 1, parameter, 0]),
 			);
-			for (const input of [
-				ray,
-				new Float64Array([0, 1, 3, 0, 0, -1]),
-				new Float64Array([0, 3, 0, 0, -1, 0]),
-			]) {
-				for (const mode of [0, 1, 2]) {
-					expect(brick.query_ray(input, mode)).toEqual(
-						steel.query_ray(input, mode),
+			const brick = new PreparedScene(
+				new Float64Array([7, kind, 0, 0, 0, 1, parameter, finish]),
+			);
+			try {
+				expect(brick.closest_point(7, point, request)).toEqual(
+					steel.closest_point(7, point, request),
+				);
+				for (const input of [
+					ray,
+					new Float64Array([0, 1, 3, 0, 0, -1]),
+					new Float64Array([0, 3, 0, 0, -1, 0]),
+				]) {
+					for (const mode of [0, 1, 2]) {
+						expect(brick.query_ray(input, mode)).toEqual(
+							steel.query_ray(input, mode),
+						);
+					}
+					expect(brick.trace_ray(input, 2, 16)).toEqual(
+						steel.trace_ray(input, 2, 16),
 					);
 				}
-				expect(brick.trace_ray(input, 2, 16)).toEqual(
-					steel.trace_ray(input, 2, 16),
-				);
+			} finally {
+				brick.free();
+				steel.free();
 			}
-		} finally {
-			brick.free();
-			steel.free();
 		}
 	}
 	expect(
-		() => new PreparedScene(new Float64Array([7, 1, 0, 0, 0, 1, 0, 2])),
+		() => new PreparedScene(new Float64Array([7, 1, 0, 0, 0, 1, 0, 3])),
 	).toThrow();
 });
 
+test("WASM finite leaf keeps shared carriers, real cutouts, bounds and result-neutral traces", (): void => {
+	const leaf = new PreparedScene(
+		new Float64Array([7, 5, 0, 0, 0, 0.07, 0, 2, 8, 5, 0.5, 0, 0, 0.07, 0, 0]),
+	);
+	const card = new PreparedScene(new Float64Array([7, 5, 0, 0, 0, 0.07, 0, 0]));
+	try {
+		expect(leaf.instance_count()).toBe(2);
+		expect(leaf.geometry_count()).toBe(1);
+		const input = new Float64Array([0, 0, 0.05, 0, 0, -1]);
+		const hit = leaf.query_ray(input, 0);
+		const flat = card.query_ray(input, 0);
+		expect(hit).toHaveLength(24);
+		expect(hit[1]).toBe(5);
+		expect(hit[2]).toBe(1);
+		expect(
+			Math.abs((hit[3] ?? Number.NaN) - (flat[3] ?? Number.NaN)),
+		).toBeGreaterThan(1e-9);
+		const cutout = new Float64Array([-0.067, -0.067, 0.05, 0, 0, -1]);
+		expect(leaf.query_ray(cutout, 0)).toHaveLength(0);
+		expect(card.query_ray(cutout, 0)).toHaveLength(24);
+		const closest = leaf.closest_point(
+			7,
+			new Float64Array([0, 0, 0.05]),
+			new Float64Array([1e-20, 0, 1]),
+		);
+		expect(closest).toHaveLength(12);
+		expect(closest[2]).toBe(1);
+		expect(closest[9] ?? Number.NaN).toBeLessThanOrEqual(1);
+		expect(closest[3] ?? Number.NaN).toBeLessThanOrEqual(
+			closest[4] ?? Number.NaN,
+		);
+		const expected = leaf.query_ray(input, 2);
+		for (const capacity of [0, 1, 16, 256]) {
+			const trace = tracePacket(leaf.trace_ray(input, 2, capacity));
+			expect(trace.result).toEqual(expected);
+			expect(trace.events.length).toBeLessThanOrEqual(capacity);
+		}
+	} finally {
+		leaf.free();
+		card.free();
+	}
+});
 test("WASM opt-in traces keep the same result and bounded prefix at every capacity", () => {
 	const position = new Float64Array([0.3, 0.9, 1.3]);
 	for (const [kind, parameter] of [

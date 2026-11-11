@@ -3,7 +3,10 @@ use std::error::Error;
 use crate::math::{Ray, footprint, plane, pureweight, sphere};
 
 mod crystal;
+mod finite;
+mod finite_shadow;
 mod goursat;
+mod heightfield;
 mod material;
 mod render;
 mod scene;

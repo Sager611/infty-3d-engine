@@ -3,6 +3,19 @@ use super::pureweight;
 
 pub type V = [f64; 3];
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "Checked f32 high parts and deliberately rounded residuals"
+)]
+pub fn split32(value: V) -> Option<([f32; 3], [f32; 3])> {
+    let high = value.map(|v| v as f32);
+    if high.into_iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let low = [0, 1, 2].map(|axis| (value[axis] - f64::from(high[axis])) as f32);
+    Some((high, low))
+}
+
 /// Validate JavaScript numbers before a WASM integer binding can coerce them.
 #[expect(
     clippy::cast_possible_truncation,
@@ -19,6 +32,22 @@ pub fn checked_u32(value: f64) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::checked_u32;
+    #[test]
+    fn split_origins_retain_sub_f32_motion_and_reject_overflow() -> Result<(), &'static str> {
+        let value = [
+            1.000_000_031_25,
+            -std::f64::consts::PI,
+            0.000_000_141_421_356,
+        ];
+        let (high, low) = super::split32(value).ok_or("split")?;
+        for axis in 0..3 {
+            assert!((f64::from(high[axis]) + f64::from(low[axis]) - value[axis]).abs() < 2e-14);
+        }
+        assert!(low[0] != 0.0 && low[1] != 0.0);
+        assert!(super::split32([f64::MAX; 3]).is_none());
+        assert!(super::split32([f64::NAN; 3]).is_none());
+        Ok(())
+    }
     #[test]
     fn integer_packets_do_not_truncate_saturate_or_wrap() {
         for (number, expected) in [

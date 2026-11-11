@@ -1,4 +1,5 @@
 //! Validated canonical kernels; instances and presentation do not own geometry.
+pub mod finite;
 pub mod point;
 use crate::diagnostic::{Recorder, Tag};
 use crate::math::{
@@ -15,6 +16,7 @@ pub enum Kind {
     Goursat = 2,
     Plane = 3,
     CrystallineCluster = 4,
+    FinitePlane = 5,
 }
 
 impl Kind {
@@ -24,6 +26,7 @@ impl Kind {
             2 => Some(Self::Goursat),
             3 => Some(Self::Plane),
             4 => Some(Self::CrystallineCluster),
+            5 => Some(Self::FinitePlane),
             _ => None,
         }
     }
@@ -36,6 +39,7 @@ impl Kind {
 pub struct Geometry {
     kind: Kind,
     parameter: f64,
+    leaf: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +48,7 @@ pub enum Error {
     InvalidRay,
     InvalidPoint,
     InvalidRequest,
+    Unresolved,
     Numeric,
     Kernel(GoursatError),
 }
@@ -54,6 +59,9 @@ impl std::fmt::Display for Error {
             Self::InvalidRay => f.write_str("canonical ray must be finite and unit length"),
             Self::InvalidPoint => f.write_str("point must be finite"),
             Self::InvalidRequest => f.write_str("invalid query accuracy or evaluation budget"),
+            Self::Unresolved => {
+                f.write_str("finite-plane query exceeded its fixed work or precision bound")
+            }
             Self::Numeric => f.write_str("query arithmetic is not representable"),
             Self::Kernel(error) => error.fmt(f),
         }
@@ -70,10 +78,12 @@ impl Geometry {
     pub const SPHERE: Self = Self {
         kind: Kind::Sphere,
         parameter: 0.0,
+        leaf: false,
     };
     pub fn new(kind: Kind, parameter: f64) -> Result<Self, Error> {
         let valid = match kind {
             Kind::Goursat => (1.05..=1.95).contains(&parameter),
+            Kind::FinitePlane => matches!(parameter, 0.0 | 1.0 | 2.0),
             Kind::Sphere | Kind::Plane | Kind::CrystallineCluster => parameter == 0.0,
         };
         if !valid || !parameter.is_finite() {
@@ -82,10 +92,17 @@ impl Geometry {
         Ok(Self {
             kind,
             parameter: if parameter == 0.0 { 0.0 } else { parameter },
+            leaf: false,
         })
     }
     pub const fn kind(self) -> Kind {
         self.kind
+    }
+    pub const fn with_leaf_surface(self, enabled: bool) -> Self {
+        Self {
+            leaf: enabled && matches!(self.kind, Kind::FinitePlane),
+            ..self
+        }
     }
     pub const fn parameter(self) -> f64 {
         self.parameter
@@ -96,6 +113,7 @@ impl Geometry {
             Kind::Goursat => Some((3.0 + (3.0 * self.parameter).sqrt()).sqrt()),
             Kind::Plane => None,
             Kind::CrystallineCluster => Some(crystal::RADIUS),
+            Kind::FinitePlane => Some(1.5),
         }
     }
     /// Query a finite unit-direction ray in canonical coordinates.
@@ -115,9 +133,11 @@ impl Geometry {
         let sample = match self.kind {
             Kind::Sphere => sphere_at(ray, [0.0; 3], 1.0),
             Kind::Plane => plane(ray, [0.0; 3], [0.0, 1.0, 0.0]),
-            Kind::Goursat | Kind::CrystallineCluster => {
+            Kind::Goursat | Kind::CrystallineCluster | Kind::FinitePlane => {
                 let result = if self.kind == Kind::Goursat {
                     goursat_traced(ray, self.parameter, need_gap, trace).map_err(Error::Kernel)?
+                } else if self.kind == Kind::FinitePlane {
+                    finite::query(ray, self.parameter, self.leaf, need_gap)?
                 } else {
                     crystal::query(ray, need_gap)?
                 };
@@ -194,6 +214,9 @@ pub fn checked(result: GeometrySample) -> Result<GeometrySample, Error> {
 #[cfg(test)]
 #[path = "geometry/crystal_tests.rs"]
 mod crystal_tests;
+#[cfg(test)]
+#[path = "geometry/finite_tests.rs"]
+mod finite_tests;
 
 #[cfg(test)]
 mod tests {

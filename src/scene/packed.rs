@@ -64,26 +64,33 @@ pub fn pack_prepared(scene: &Prepared, selected: &[u32]) -> Result<Packet, &'sta
                 let instance = scene.instances()[slot];
                 let geometry = scene.geometries()[instance.geometry()];
                 let transform = instance.transform();
-                let p = transform.position();
+                let (high, low) = crate::math::types::split32(transform.position())
+                    .ok_or("object exceeds GPU coordinates")?;
+                let finite = geometry.kind() == crate::geometry::Kind::FinitePlane;
+                let low = if finite { low } else { [0.0; 3] };
+                let axis = if finite {
+                    match geometry.parameter() {
+                        0.0 => 0,
+                        1.0 => 256,
+                        _ => 512,
+                    }
+                } else {
+                    0
+                };
                 Record {
                     identity: [
                         instance.id(),
                         geometry.kind().tag(),
-                        u32::from(selected.contains(&instance.id())),
+                        u32::from(selected.contains(&instance.id())) | axis,
                         count
                             + u32::try_from(instance.geometry())
                                 .map_err(|_| "too many geometries")?,
                     ],
-                    position_size: [
-                        p[0] as f32,
-                        p[1] as f32,
-                        p[2] as f32,
-                        transform.scale() as f32,
-                    ],
+                    position_size: [high[0], high[1], high[2], transform.scale() as f32],
                     params: [
-                        0.0,
-                        0.0,
-                        0.0,
+                        low[0],
+                        low[1],
+                        low[2],
                         f32::from(
                             u8::try_from(instance.material()).map_err(|_| "invalid material")?,
                         ),
@@ -111,6 +118,29 @@ mod tests {
     use super::*;
     use crate::scene::model::Kind;
 
+    #[test]
+    fn finite_instance_low_parts_preserve_shared_carriers_and_axis_bits()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let position = [1.000_000_031_25, 0.031_250_000_01, -1.000_000_012_5];
+        let a = Object::new(7, Kind::FinitePlane, position, 0.07, 2.0)?
+            .with_material(crate::material::Material::Leaf);
+        let b = Object::new(8, Kind::FinitePlane, [2.0, 0.0, 0.0], 0.07, 2.0)?;
+        let packet = pack(&[a, b], &[7])?;
+        assert_eq!(packet.records.len(), 4);
+        let leaf = packet
+            .records
+            .iter()
+            .find(|row| row.identity[0] == 7)
+            .ok_or("instance")?;
+        assert_eq!(leaf.identity[2] & 1, 1);
+        assert_eq!(leaf.identity[2] >> 8, 2);
+        assert_eq!(leaf.params[3].to_bits(), 2_f32.to_bits());
+        for (axis, value) in position.into_iter().enumerate() {
+            let restored = f64::from(leaf.position_size[axis]) + f64::from(leaf.params[axis]);
+            assert!((restored - value).abs() < 2e-14, "lost instance low part");
+        }
+        Ok(())
+    }
     #[test]
     fn shared_geometry_and_selection_are_not_slot_masks() -> Result<(), Box<dyn std::error::Error>>
     {

@@ -7,7 +7,7 @@ fn crystal_catalogue_and_budget() -> Result<(), Error> {
     let c = Geometry::new(Kind::CrystallineCluster, -0.0)?;
     assert_eq!(Kind::from_tag(4), Some(c.kind()));
     assert_eq!(c.kind().tag(), 4);
-    assert_eq!(Kind::from_tag(5), None);
+    assert_eq!(Kind::from_tag(6), None);
     assert_eq!(c.parameter().to_bits(), 0);
     assert_eq!(c.radius().map(f64::to_bits), Some(1.75_f64.to_bits()));
     assert!(Geometry::new(c.kind(), 1.0).is_err());

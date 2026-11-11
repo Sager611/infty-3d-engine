@@ -1,6 +1,6 @@
 // RGBA8 linear reflectance + relief. Explicit mip footprints for compute shading.
 struct MaterialLevel {
-  identity: vec4u, // material, array layer, base order, optional atlas columns/rows
+  identity: vec4u, // material, layer, base bit + leaf order<<8, optional atlas columns/rows
   surface: vec4f, // metres/tile, relief metres, colour gain, unresolved roughness
   phase: vec4f,   // f64-origin fractions + exact packed 8-bit XYZ tile identities
   mean: vec4f,    // linear RGB/height mean; fine layers modulate around one
@@ -100,6 +100,7 @@ fn layered_material(material: u32, delta: vec3f, normal: vec3f, footprint: f32, 
   var modulation=vec3f(1.0);
   var gradient=vec3f(0.0);
   var roughness=select(0.26,0.86,material==1u);
+  if(material==2u){roughness=0.5;}
   var variance=roughness*roughness;
   var occlusion=1.0;
   for (var i=0u;i<arrayLength(&material_levels);i++) {
@@ -107,7 +108,7 @@ fn layered_material(material: u32, delta: vec3f, normal: vec3f, footprint: f32, 
     if (level.identity.x!=material) { continue; }
     let extent=level.surface.x;
     let lod=clamp(log2(max(1e-30,footprint)*512.0/extent),0.0,9.0);
-    let base_order=level.identity.z!=0u;
+    let base_order=(level.identity.z&1u)!=0u;
     let visible=1.0-smoothstep(4.0,8.0,lod);
     variance+=level.surface.w*(1.0-visible);
     if (base_order && lod>=9.0) { base=level.mean.rgb;continue; }
@@ -147,7 +148,7 @@ fn layered_material(material: u32, delta: vec3f, normal: vec3f, footprint: f32, 
   let bumped=material_unit(n-tangent/max(1.0,length(tangent)/2.0),n);
   roughness=clamp(sqrt(variance),0.05,0.98);
   return MaterialSurface(clamp(base*modulation,vec3f(0.004),vec3f(0.98)),bumped,
-    roughness,select(1.0,0.0,material==1u),occlusion,weights.z);
+    roughness,select(0.0,1.0,material==0u),occlusion,weights.z);
 }
 
 // Analytic studio lobes/ground, not a photographed environment or area-light integral.

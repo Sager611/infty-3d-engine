@@ -8,7 +8,7 @@ use wgpu::util::DeviceExt;
 
 use crate::api::PreparedScene;
 use crate::device_state::DeviceState;
-use crate::material::gpu::Tiles;
+use crate::material::gpu::resources::{Demand, Resources};
 use crate::scene::packed::pack_prepared;
 use crate::scene::parse_camera;
 use crate::upload::Upload;
@@ -43,7 +43,7 @@ pub struct Renderer {
     objects: wgpu::Buffer,
     upload: Upload,
     output: wgpu::Texture,
-    materials: Tiles,
+    resources: Resources,
     compute_bind_group: wgpu::BindGroup,
     present_bind_group: wgpu::BindGroup,
     width: u16,
@@ -71,7 +71,7 @@ impl Renderer {
         let uniform = create_uniform(&device, width, height);
         let objects = create_objects_buffer(&device, 48);
         let output = create_output(&device, width, height);
-        let materials = Tiles::empty(&device);
+        let resources = Resources::empty(&device);
         let (compute_bind_group, present_bind_group) = create_bind_groups(
             &device,
             &compute_pipeline,
@@ -79,7 +79,7 @@ impl Renderer {
             &output,
             &uniform,
             &objects,
-            &materials,
+            &resources,
         );
 
         Ok(Self {
@@ -94,7 +94,7 @@ impl Renderer {
             objects,
             upload: Upload::default(),
             output,
-            materials,
+            resources,
             compute_bind_group,
             present_bind_group,
             width,
@@ -130,7 +130,7 @@ impl Renderer {
             &self.output,
             &self.uniform,
             &self.objects,
-            &self.materials,
+            &self.resources,
         );
         Ok(())
     }
@@ -167,28 +167,37 @@ impl Renderer {
         self.state.check().map_err(js_error)?;
         let mut params = frame_params(camera, mode, self.width, self.height)?;
         params.screen[3] = upload_scene(self, scene, selected)?;
+        if self
+            .resources
+            .ensure(
+                &self.device,
+                &self.queue,
+                Demand {
+                    geometry: scene.core.has_leaf(),
+                    leaf: scene.core.has_leaf_finish(),
+                    materials: params.screen[2] == 3,
+                },
+            )
+            .map_err(js_error)?
+        {
+            (self.compute_bind_group, self.present_bind_group) = create_bind_groups(
+                &self.device,
+                &self.compute_pipeline,
+                &self.present_pipeline,
+                &self.output,
+                &self.uniform,
+                &self.objects,
+                &self.resources,
+            );
+        }
         if params.screen[2] == 3 {
-            if self
-                .materials
-                .ensure(&self.device, &self.queue)
-                .map_err(js_error)?
-            {
-                (self.compute_bind_group, self.present_bind_group) = create_bind_groups(
-                    &self.device,
-                    &self.compute_pipeline,
-                    &self.present_pipeline,
-                    &self.output,
-                    &self.uniform,
-                    &self.objects,
-                    &self.materials,
-                );
-            }
             let origin = parse_camera(camera)
                 .map_err(|e| js_error(e.to_string()))?
                 .basis()
                 .origin;
-            self.materials
-                .update(&self.queue, origin)
+            self.resources
+                .tiles
+                .update(&self.queue, origin, scene.core.has_leaf_finish())
                 .map_err(js_error)?;
         }
         self.queue
@@ -265,7 +274,7 @@ fn upload_scene(
             &renderer.output,
             &renderer.uniform,
             &renderer.objects,
-            &renderer.materials,
+            &renderer.resources,
         );
     }
     renderer.queue.write_buffer(&renderer.objects, 0, bytes);
@@ -284,24 +293,21 @@ fn frame_params(
         .ok_or_else(|| js_error("render mode must be 0, 1, 2, or 3"))?;
     let camera = parse_camera(camera_packet).map_err(|error| js_error(error.to_string()))?;
     let basis = camera.basis();
+    let (high, low) = crate::math::types::split32(basis.origin)
+        .ok_or_else(|| js_error("camera exceeds GPU coordinates"))?;
     Ok(Params {
-        origin: [
-            f32_value(basis.origin[0]),
-            f32_value(basis.origin[1]),
-            f32_value(basis.origin[2]),
-            0.0,
-        ],
+        origin: [high[0], high[1], high[2], low[0]],
         right: [
             f32_value(basis.right[0]),
             f32_value(basis.right[1]),
             f32_value(basis.right[2]),
-            0.0,
+            low[1],
         ],
         up: [
             f32_value(basis.up[0]),
             f32_value(basis.up[1]),
             f32_value(basis.up[2]),
-            0.0,
+            low[2],
         ],
         forward: [
             f32_value(basis.forward[0]),
@@ -477,10 +483,10 @@ fn create_bind_groups(
     output: &wgpu::Texture,
     uniform: &wgpu::Buffer,
     objects: &wgpu::Buffer,
-    materials: &Tiles,
+    resources: &Resources,
 ) -> (wgpu::BindGroup, wgpu::BindGroup) {
     let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
-    let material_view = materials.view();
+    let material_view = resources.tiles.view();
     let mut entries = vec![
         wgpu::BindGroupEntry {
             binding: 0,
@@ -495,7 +501,11 @@ fn create_bind_groups(
             resource: objects.as_entire_binding(),
         },
     ];
-    entries.extend(materials.bindings(&material_view));
+    entries.push(wgpu::BindGroupEntry {
+        binding: 9,
+        resource: resources.heights.buffer.as_entire_binding(),
+    });
+    entries.extend(resources.tiles.bindings(&material_view));
     let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("draw bindings"),
         layout: &compute_pipeline.get_bind_group_layout(0),

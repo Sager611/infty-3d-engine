@@ -11,7 +11,7 @@ fn crystal_renderer_requests_gaps_and_lights_open_faces() -> Result<(), Box<dyn 
 {
     let mut inputs = Vec::new();
     let mut expected = Vec::new();
-    for kind in 0_u8..=5 {
+    for kind in 0_u8..=6 {
         for display in [false, true] {
             for selected in [false, true] {
                 for sign in [-1.0_f32, 1.0] {
@@ -25,8 +25,12 @@ fn crystal_renderer_requests_gaps_and_lights_open_faces() -> Result<(), Box<dyn 
                         2.0 * sign,
                         0.0,
                     ]);
-                    let gap = matches!(kind, 2 | 4) && (display || selected);
-                    let normal = if kind == 4 { -1.0_f32 } else { sign };
+                    let gap = matches!(kind, 2 | 4 | 5) && (display || selected);
+                    let normal = if matches!(kind, 4 | 5) {
+                        -1.0_f32
+                    } else {
+                        sign
+                    };
                     expected.push((f32::from(u8::from(gap)).to_bits(), normal.to_bits()));
                 }
             }
