@@ -3,17 +3,14 @@ use super::*;
 
 #[test]
 fn leaf_exaggerates_only_its_broadest_geometry_band() -> Result<(), Error> {
-    assert_eq!(
-        AMPLITUDES,
-        [1.0 / 16.0, 1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0]
-    );
+    assert_eq!(AMPLITUDES, [1.0, 1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0]);
     let original = Field::new(
         DATA,
         512,
         [1.0 / 32.0, AMPLITUDES[1], AMPLITUDES[2], AMPLITUDES[3]],
         LEAF.anchor(),
     )?;
-    let added = Field::new(DATA, 512, [1.0 / 32.0, 0.0, 0.0, 0.0], LEAF.anchor())?;
+    let added = Field::new(DATA, 512, [31.0 / 32.0, 0.0, 0.0, 0.0], LEAF.anchor())?;
     let mut changed = false;
     for point in [[0.0; 2], [-0.5, 0.25], [0.75, -0.25], [1.0; 2]] {
         let before = original.sample(point)?;

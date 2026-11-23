@@ -23,7 +23,12 @@ fn leaf_closest_budget_and_valid_witness_bounds_are_explicit() -> Result<(), Err
         },
     )?;
     assert_eq!(q.resolution, Resolution::Unresolved);
-    assert!(q.evaluations <= 1 && q.distance.lower > 0.9 && q.distance.lower <= q.distance.upper);
+    let cap = (AMPLITUDES.iter().map(|a| a.abs()).sum::<f64>() * 128.0 / 255.0).next_up();
+    assert!(
+        q.evaluations <= 1
+            && q.distance.lower >= (p[2] - cap).next_down()
+            && q.distance.lower <= q.distance.upper
+    );
     let w = q.witness.ok_or(Error::Unresolved)?;
     let v = LEAF.sample([w.point[0], w.point[1]])?;
     assert!(v.coverage >= 127.5 && (v.height - w.point[2]).abs() <= w.error);
