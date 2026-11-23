@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+variables=$(git rev-parse --local-env-vars)
+while IFS= read -r variable; do
+  unset "${variable}"
+done <<< "${variables}"
+
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 before=$(git -C "${root}" status --porcelain)
 repo=$(mktemp -d)
 marker=$(mktemp)
 trap 'rm -rf "${repo}" "${marker}"' EXIT
+
+if [[ ${1:-} != isolated ]]; then
+  GIT_INDEX_FILE="${marker}" bash "${BASH_SOURCE[0]}" isolated > /dev/null
+  [[ ! -s ${marker} ]]
+fi
 
 git -C "${repo}" init -q
 git -C "${repo}" config user.email test@example.com

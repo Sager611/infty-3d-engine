@@ -2,6 +2,37 @@
 use super::*;
 
 #[test]
+fn leaf_exaggerates_only_its_broadest_geometry_band() -> Result<(), Error> {
+    assert_eq!(
+        AMPLITUDES,
+        [1.0 / 16.0, 1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0]
+    );
+    let original = Field::new(
+        DATA,
+        512,
+        [1.0 / 32.0, AMPLITUDES[1], AMPLITUDES[2], AMPLITUDES[3]],
+        LEAF.anchor(),
+    )?;
+    let added = Field::new(DATA, 512, [1.0 / 32.0, 0.0, 0.0, 0.0], LEAF.anchor())?;
+    let mut changed = false;
+    for point in [[0.0; 2], [-0.5, 0.25], [0.75, -0.25], [1.0; 2]] {
+        let before = original.sample(point)?;
+        let after = LEAF.sample(point)?;
+        let broad = added.sample(point)?;
+        assert!((after.height - before.height - broad.height).abs() < 1e-15);
+        for axis in 0..2 {
+            assert!(
+                (after.gradient[axis] - before.gradient[axis] - broad.gradient[axis]).abs() < 1e-12
+            );
+        }
+        assert_eq!(after.coverage, before.coverage);
+        changed |= broad.height.abs() > 1e-6;
+    }
+    assert!(changed);
+    Ok(())
+}
+
+#[test]
 fn checked_fields_require_a_layout_and_a_covered_anchor() -> Result<(), Error> {
     let field = Field::new(DATA, 512, AMPLITUDES, [0.0; 2])?;
     assert_eq!(

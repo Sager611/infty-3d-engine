@@ -7,6 +7,7 @@
 - Intuitive web controls to add and delete geometry instances.
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
 - Free-camera WASD movement and drag look; wheel changes travel speed. Only straight W approaches to nearby center-ray hits ease down to a minimum speed; reverse, strafe and diagonal movement retain normal speed. Minimum travel speed and the approach floor are0.000001 units/s for close inspection.
+- Leaf: broadest height gain1/16; finer gains and cutout unchanged.
 
 ## Changelog
 | When | Who | What | Why |
@@ -19,3 +20,4 @@
 | 2026-11-09 | User | Required a directly addressed multiscale crystalline cluster | Add geometric detail without iterative kernels |
 | 2026-11-09 | User | Required layered steel/brick materials and microscopic visual checks | Reveal physical surface detail across scales |
 | 2026-11-09 | Assistant | Clarified reference-grounded, appearance-only materials | Preserve geometry/query/navigation behavior |
+| 2026-11-23 | User | Doubled broadest Leaf height | Exaggerate largest-scale geometry |
