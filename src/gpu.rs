@@ -382,7 +382,7 @@ async fn create_pipelines(
     let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("scene shader"),
-        source: wgpu::ShaderSource::Wgsl(crate::shader::SOURCE.into()),
+        source: wgpu::ShaderSource::Wgsl(crate::shader::source().into()),
     });
     let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("draw"),

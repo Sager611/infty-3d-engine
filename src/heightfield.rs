@@ -17,14 +17,12 @@ pub struct Field<'a> {
     edge: u32,
     amplitudes: [f64; 4],
     anchor: [f64; 2],
-    cup: bool,
 }
 pub static LEAF: Field<'static> = Field {
     data: DATA,
     edge: 512,
     amplitudes: AMPLITUDES,
     anchor: [0.0; 2],
-    cup: true,
 };
 #[derive(Clone, Copy, Default)]
 pub struct Node {
@@ -119,7 +117,6 @@ impl<'a> Field<'a> {
             edge,
             amplitudes,
             anchor,
-            cup: false,
         };
         let stride = field.stride()?;
         if data.len() != 5 * stride || amplitudes.iter().any(|value| !value.is_finite()) {
@@ -130,17 +127,20 @@ impl<'a> Field<'a> {
         }
         Ok(field)
     }
-    /// Pack only the sampled planes; GPU gains must be exact normal f32s or zero.
+    /// Pack immutable planes/pyramids; GPU gains must be exact normal f32s or zero.
     #[expect(
         clippy::cast_possible_truncation,
         reason = "Reject every non-exact conversion"
     )]
     pub fn gpu_bytes(self) -> Result<Vec<u8>, Error> {
         let field = Self::new(self.data, self.edge, self.amplitudes, self.anchor)?;
-        let plane = field.edge * field.edge;
-        let count = usize::try_from(plane).map_err(|_| Error::Numeric)?;
-        let mut bytes = Vec::with_capacity(32 + 5 * count);
-        for value in [field.edge, plane, field.resolution()?, u32::from(self.cup)] {
+        let mut bytes = Vec::with_capacity(32 + field.data.len());
+        for value in [
+            field.edge,
+            u32::try_from(field.stride()?).map_err(|_| Error::Numeric)?,
+            field.resolution()?,
+            0,
+        ] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         for amplitude in field.amplitudes {
@@ -153,9 +153,7 @@ impl<'a> Field<'a> {
             }
             bytes.extend_from_slice(&value.to_le_bytes());
         }
-        for band in field.data.chunks_exact(field.stride()?) {
-            bytes.extend_from_slice(&band[..count]);
-        }
+        bytes.extend_from_slice(field.data);
         Ok(bytes)
     }
 

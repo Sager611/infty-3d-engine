@@ -3,8 +3,6 @@ use std::{borrow::Cow, error::Error, sync::mpsc, time::Duration};
 use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
-pub(super) const SHADER: &str = crate::shader::SOURCE;
-
 pub(super) fn run(
     entry: &str,
     rays: &[[f32; 8]],
@@ -58,7 +56,7 @@ pub(super) fn run_field(
 pub(super) fn used_bindings(
     entry: &str,
 ) -> Result<std::collections::BTreeSet<u32>, Box<dyn Error>> {
-    let module = naga::front::wgsl::parse_str(SHADER)?;
+    let module = naga::front::wgsl::parse_str(&crate::shader::source())?;
     let info = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::all(),
@@ -94,13 +92,14 @@ fn material_tiles(
         "verify_material"
             | "verify_material_mapping"
             | "verify_leaf_material"
-            | "verify_brick_contact"
+            | "verify_material_hit"
+            | "verify_material_color"
     ) {
         return Ok(None);
     }
     let mut tiles = crate::material::gpu::Tiles::empty(device);
     assert!(!tiles.ready());
-    let leaf = entry == "verify_leaf_material";
+    let leaf = matches!(entry, "verify_leaf_material" | "verify_material_color");
     assert!(tiles.ensure(device, queue, leaf)?);
     assert!(!tiles.ensure(device, queue, leaf)?);
     tiles.update(queue, [0.0; 3], leaf)?;
@@ -152,7 +151,7 @@ async fn run_async(
     });
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SHADER)),
+        source: wgpu::ShaderSource::Wgsl(Cow::Owned(crate::shader::source())),
     });
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: None,

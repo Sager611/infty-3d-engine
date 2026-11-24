@@ -2,7 +2,7 @@
 
 Try Scene controls → Scene → Leaf · relief; Add → Finite plane reuses the carrier.
 Axis0/1/2 means normalZ/X/Y. Kind5 is a double-sided square with a Leaf cutout.
-Leaf relief can be applied to any geometry; brick has separate render-only recesses.
+Leaf and brick share direct material-hit math; geometry supplies carrier-frame mapping.
 At reference half-size70mm, four vertex-aligned512² height fields span140/14/1.4/0.14mm.
 The macro field clamps; finer fields repeat. Raw bytes are centered at128, divided by255,
 and multiplied by gains2^-3/2^-10/2^-13/2^-15 before summation.
@@ -11,10 +11,10 @@ Uniform instance size scales the entire surface; peers still share their carrier
 
 ## Geometry and rendering
 
-Other carriers keep their hits; a miss is promoted only if the signed bilinear height at its witness reaches the ray.
-A quadratic fit to macro depth shares its gain and seeds up to two UVs. One bilinear height sum per candidate corrects ray depth; projected cutouts can fall through to the second root.
-Filtered macro slopes blend into the cup normal. Colors are unchanged; Leaf skips self-shadowing.
-Fine relief away from the witness is not searched. Grazing corrections are bounded; this is not an exact heightfield intersection.
+Carrier queries and picking stay on the base surface, with the Leaf cutout. The existing signed-height miss rule is unchanged; no new gap solver is provided.
+Rendered hits use one carrier-height evaluation and the direct local offset h·c/max(c²,0.0025), where c=N·ray. Below |c|=0.05, relief fades instead of producing an unbounded grazing slide. Shifted UV supplies RGB/cutout; four fixed neighboring height evaluations supply normals. Carrier frame and footprint stay frozen.
+All four bilinear bands, RGB, cutout, carrier cast shadows and the Leaf self-shadow exception remain. No asset is rebaked. Shader compilation expands level metadata into straight-line sample calls; displacement/shading have no loops, recursion or search.
+This deliberately favors speed over accuracy: no exact first crossing, normal-chart inversion, displaced silhouette or certified relief error. Strong slopes, grazing views and close-ups can distort or miss relief; an uncovered/backward candidate is discarded without searching again.
 Point queries still use the height pyramid and covered witnesses independently.
 Amber hatching marks unresolved ray or shadow work.
 The finest reference texel is273.4375nm; below this there is bilinear interpolation, not new evidence.
@@ -46,14 +46,15 @@ Run `uv run --no-project tools/bake_leaf.py /path/to/references /path/to/checkou
 Dependencies are pinned in the script; references/previews stay outside the repository.
 Outputs: four linear RGB8/height-alpha zlib tiles and `leaf.bin` (2,184,540 bytes).
 Each scalar field has262,144 samples, nine interleaved min/max levels, and padding:436,908 bytes.
-GPU upload omits pyramids: 32-byte header plus five raw planes.
+GPU upload: 32-byte header plus all five raw planes and min/max pyramids.
 Layout, covered positive-zero anchor, and exact finite f32 gains are checked; no upload resampling.
-The macro field uses source depth except near the cutout, where it blends to the fit to suppress matte halos.
+The retained macro asset blends source depth into offline polynomial matte padding near the cutout to suppress halos. This is baked map data, not an intersection model; this resolver change does not rebake any asset.
 
 ## Changelog
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-24 | Assistant | Document shared direct approximation, fixed samples and unchanged assets | Favor speed over iterative displacement accuracy |
 | 2026-11-11 | Assistant | Documented Leaf usage, fixed surface, source derivatives and bake | Make geometry, limits and attribution explicit |
 | 2026-11-24 | Assistant | Documented texh ray approximation | Separate ray, point, and shading rules |
 | 2026-11-24 | Assistant | Documented cupped heights and color-only hits | Keep height out of the hit path |

@@ -11,12 +11,13 @@ mod material;
 mod render;
 mod scene;
 mod support;
+mod texh;
 
 const TOLERANCE: f64 = 2.0e-4;
 
 #[test]
 fn scene_shader_parses_and_validates() -> Result<(), Box<dyn Error>> {
-    let module = naga::front::wgsl::parse_str(support::SHADER)?;
+    let module = naga::front::wgsl::parse_str(&crate::shader::source())?;
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::empty(),

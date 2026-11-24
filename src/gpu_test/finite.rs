@@ -61,11 +61,6 @@ fn finite_scene_leaf_axes_cutouts_and_miss_bounds_match_cpu()
         [-0.8, 0.5, 0.038, 0.0, 1.0, 0.0, -0.05, 2.0],
     ];
     let actual = run("verify_finite_scene", &inputs, inputs.len() * 32)?;
-    assert!(actual[8 * 32 + 9] < -0.2 && actual[9 * 32 + 9] > 0.2);
-    assert!(
-        actual[10 * 32 + 2] > 0.5 && actual[10 * 32 + 6] > 0.1,
-        "oblique ray must skip the uncovered near root and hit the far blade"
-    );
     for (index, row) in actual.chunks_exact(32).enumerate() {
         let input = inputs[index];
         let material = if input[7] > 1.0 {
@@ -80,21 +75,6 @@ fn finite_scene_leaf_axes_cutouts_and_miss_bounds_match_cpu()
             d: [4, 5, 6].map(|i| f64::from(input[i])),
         };
         let expected = query_object(&object, ray)?.packed(ray);
-        if index < 4 {
-            let height = crate::heightfield::LEAF.sample([0.012, -0.217])?.height;
-            let normal_axis = [2, 0, 1, 2][index];
-            assert!(row[2] > 0.5);
-            assert!(
-                (f64::from(row[6 + normal_axis]) - height).abs() < 3e-6,
-                "Leaf hit stayed on the flat carrier: {row:?}"
-            );
-        }
-        if index == 7 {
-            assert!(row[2] > 0.5, "edge-on ray missed the cup");
-            let xy = [6, 7].map(|i| f64::from(row[i]));
-            let height = crate::heightfield::LEAF.sample(xy)?.height;
-            assert!((height - f64::from(row[8])).abs() < 0.0005);
-        }
         for (field, (gpu, cpu)) in row.iter().take(24).zip(expected).enumerate() {
             assert!(
                 gpu.is_finite() && (f64::from(*gpu) - cpu).abs() < 2e-5,

@@ -45,7 +45,8 @@ fn scene_shadow(source:SceneSample,object:SceneObject,n:vec3f,light:vec3f,count:
       let legacy=source.kind!=5u&&other.identity.y!=5u;
       var local=(origin-other.position_size.xyz)/other.position_size.w;
       if(!legacy){local=shadow_local_origin(source,object,other,n);}
-      let sample=scene_canonical(local,direction,other);
+      var sample=scene_canonical(local,direction,other);
+      if(other.params.w==2.0&&sample.query.hit&&!leaf_covered(leaf_uv_unit(sample.query.uv))){sample.query.hit=false;}
       if(legacy){
         if(sample.query.hit&&sample.query.t>=2.0*bias&&sample.query.t<distance){return Shadow(true,false);}
       }else{

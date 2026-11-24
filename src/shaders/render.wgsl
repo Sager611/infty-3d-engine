@@ -4,7 +4,7 @@
 fn empty_sample() -> SceneSample {
   return SceneSample(
     Query(false, 0.0, 0.0, vec3f(0.0), vec3f(0.0, 1.0, 0.0), vec2f(0.0)),
-    vec3f(0.0), 0u, 0u, 0.0, 0.0, 2u,Pending(0.0,false),0.0
+    vec3f(0.0), 0u, 0u, 0.0, 0.0, 2u,Pending(0.0,false),0.0,false
   );
 }
 
@@ -30,26 +30,6 @@ fn branch_intersects(node: SceneObject, o: vec3f, d: vec3f, padding: f32) -> boo
   return !bounded||near<=far;
 }
 
-fn render_goursat_residual(p: vec3f, parameter: f32) -> f32 {
-  let a=fma(p,p,vec3f(-1.0));
-  return fma(a.x,a.x,fma(a.y,a.y,fma(a.z,a.z,-parameter)));
-}
-fn render_material_distance(sample: SceneSample, ray: vec3f, size: f32, parameter: f32) -> f32 {
-  let original=sample.query.t;
-  if (sample.kind!=2u || !sample.query.hit) { return original; }
-  let p=sample.local;let gradient=goursat_gradient(p);
-  let slope=dot(gradient,ray);
-  if (abs(slope)<=1e-6*length(gradient)) { return original; }
-  let residual=render_goursat_residual(p,parameter);
-  let step=-residual/slope;
-  let candidate=original+step*size;
-  // Appearance-only tangent projection: never change hits, proofs, or silhouettes.
-  if (abs(step)<=1e-3 && candidate>0.0 &&
-      abs(render_goursat_residual(fma(vec3f(step),ray,p),parameter))<abs(residual)) {
-    return candidate;
-  }
-  return original;
-}
 
 fn branch_padding(node: SceneObject, origin: vec3f, height: f32, display_gap: bool) -> f32 {
   let extent = max(abs(node.position_size.xyz - origin), abs(node.params.xyz - origin));
@@ -94,8 +74,6 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   var nearest_object=SceneObject(vec4u(0u),vec4f(0.0),vec4f(0.0));
   var pending=Pending(0.0,false);
   var nearest_size = 1.0;
-  var nearest_parameter = 0.0;
-  var nearest_material = 0u;
   var nearest_carrier = empty_sample();
   var outline_uv = vec2f(0.0);
   var halo_uv = vec2f(0.0);
@@ -121,15 +99,13 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
 
       let carrier = scene_object_precise(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w), direction, object);
       var sample=carrier;
-      if(material_view&&object.params.w==1.0){sample=brick_contact(carrier,direction,object,vec3f(0.0),pixel_span);}
+      if(material_view||object.params.w==2.0){sample=material_texh(carrier,direction,object,vec3f(0.0),pixel_span);}
       pending=pending_min(pending,sample.pending);
       if (sample.query.hit && (!nearest_hit || sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
         nearest = sample;
         nearest_object=object;
         nearest_t = sample.query.t;
         nearest_size = object.position_size.w;
-        nearest_parameter = object.params.x;
-        nearest_material = u32(object.params.w);
         nearest_carrier = carrier;
         nearest_hit = true;
       }
@@ -160,14 +136,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     let visibility=scene_shadow(nearest_carrier,nearest_object,normal,light,count);
     let shadow=shadow_value(visibility);shadow_unknown=visibility.uncertain;
     if (material_view) {
-      var material_t=nearest_t;
-      if(nearest_t==nearest_carrier.query.t){
-        material_t=render_material_distance(nearest,direction,nearest_size,nearest_parameter);
-      }
-      let footprint=max(1e-30,pixel_span*material_t/max(0.05,abs(dot(normal,direction))));
-      var material:MaterialSurface;
-      if(nearest_material==2u){material=leaf_material(nearest.query.uv,normal,nearest_size,footprint);}
-      else{material=layered_material(nearest_material,direction*material_t,normal,footprint,nearest_object.position_size.xyz);}
+      let material=texh_surface(nearest,nearest_carrier,direction,nearest_object,vec3f(0.0),pixel_span);
       color=material_shade(material,nearest.query.p,direction,light,shadow);
     } else {
       color = surface_shade(nearest.query, nearest.local, nearest.kind,

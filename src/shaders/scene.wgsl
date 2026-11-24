@@ -2,7 +2,7 @@
 struct SceneObject {identity:vec4u,position_size:vec4f,params:vec4f};
 struct SceneSample {
   query:Query,local:vec3f,id:u32,kind:u32,gap_lower:f32,error:f32,status:u32,
-  pending:Pending,local_error:f32,
+  pending:Pending,local_error:f32,base_hit:bool,
 };
 fn scene_axis(object:SceneObject)->u32 {return (object.identity.z>>8u)&3u;}
 fn scene_selected(object:SceneObject)->bool {return (object.identity.z&1u)!=0u;}
@@ -28,14 +28,15 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
     query=canonical.query;gap_lower=canonical.gap_lower;error=canonical.error;status=canonical.status;
   }else if(kind==5u){
     var canonical:GeometryQuery;
-    if(obj.params.w==2.0){canonical=finite_leaf(local_o,d,scene_axis(obj));}
-    else{canonical=finite_plane(local_o,d,scene_axis(obj));}
+    canonical=finite_plane(local_o,d,scene_axis(obj));
     pending=Pending(0.0,canonical.status==1u||canonical.status==3u);
     query=canonical.query;gap_lower=canonical.gap_lower;error=canonical.error;status=canonical.status;
   }else if(kind==3u){query=plane(local_o,d);gap_lower=query.gap;status=0u;}
+  let base_hit=query.hit;
+  if(obj.params.w==2.0&&kind==5u&&base_hit){query.hit=leaf_covered(query.uv);}
   let local_error=error;let local=query.p;let canonical_gap=query.gap;let canonical_lower=gap_lower;
-  if(obj.params.w==2.0&&kind!=5u&&!query.hit&&status==0u){
-    query=texh(local_o,d,query,gap_lower,false);
+  if(obj.params.w==2.0&&!base_hit&&status==0u){
+    query=texh(local_o,d,query,gap_lower,kind==5u);
     if(query.hit){gap_lower=0.0;}
   }
   query.p=position+size*query.p;query.t*=size;query.gap*=size;gap_lower*=size;error*=size;
@@ -56,7 +57,7 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
       else{status=3u;gap_lower=0.0;query.gap=0.0;}
     }
   }
-  return SceneSample(query,local,id,kind,gap_lower,error,status,pending,local_error);
+  return SceneSample(query,local,id,kind,gap_lower,error,status,pending,local_error,base_hit);
 }
 
 fn pending_min(a:Pending,b:Pending)->Pending {

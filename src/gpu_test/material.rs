@@ -53,83 +53,36 @@ fn stochastic_variance_preserves_relief_instead_of_clipping_flat_pore_floors()
 }
 
 #[test]
-fn microscopic_goursat_material_contacts_do_not_collapse_to_the_camera()
--> Result<(), Box<dyn std::error::Error>> {
-    let origin = [0.109_994_66, 0.869_989_63, 1.296_915_4];
-    let forward = [0.118_670_87, 0.230_963_14, -0.965_698_3];
-    let horizontal = f32::hypot(forward[0], forward[2]);
-    let right = [-forward[2] / horizontal, 0.0, forward[0] / horizontal];
-    let up = [
-        -right[2] * forward[1],
-        right[2].mul_add(forward[0], -right[0] * forward[2]),
-        right[0] * forward[1],
-    ];
-    let mut inputs = Vec::new();
-    for iy in 0_u16..21 {
-        let y = (f32::from(iy) - 10.0) * 0.1;
-        for ix in 0_u16..33 {
-            let x = (f32::from(ix) - 16.0) * 0.1;
-            let d = std::array::from_fn::<_, 3, _>(|i| {
-                up[i].mul_add(y, right[i].mul_add(x, forward[i] * 1.8))
-            });
-            let length = d.iter().map(|v| v * v).sum::<f32>().sqrt();
-            inputs.push([
-                origin[0],
-                origin[1],
-                origin[2],
-                1.5,
-                d[0] / length,
-                d[1] / length,
-                d[2] / length,
-                2.0,
-            ]);
-        }
-    }
-    let q = run("verify_material_contact", &inputs, inputs.len() * 16)?;
-    let p = [0.11_f64, 0.87, 1.296_871_931_632_168_2];
-    let gradient = p.map(|v| 4.0 * v * v.mul_add(v, -1.0));
-    let numerator = (0..3)
-        .map(|i| (p[i] - f64::from(origin[i])) * gradient[i])
-        .sum::<f64>();
-    for (ray, sample) in inputs.iter().zip(q.chunks_exact(16)) {
-        let slope = (0..3)
-            .map(|i| f64::from(ray[4 + i]) * gradient[i])
-            .sum::<f64>();
-        let expected = numerator / slope;
-        assert!(
-            (f64::from(sample[0]) - expected).abs() < 5e-7,
-            "material contact collapsed or escaped its local surface: {:?}, expected {expected}",
-            &sample[..4]
-        );
-    }
-    Ok(())
-}
-
-#[test]
 fn brick_ray_hits_recess_mortar_below_faces_without_inventing_hits()
 -> Result<(), Box<dyn std::error::Error>> {
     let inputs = [
         [0.105, 0.035, 0.1, 1.0, 0.0, 0.0, -1.0, 5.0], // brick face
         [0.105, 0.0, 0.1, 1.0, 0.0, 0.0, -1.0, 5.0],   // mortar
-        [0.105, 0.0, 0.1, 0.0, 0.0, 0.0, -1.0, 5.0],   // untextured carrier
+        [0.105, 0.0, 0.1, 0.0, 0.0, 0.0, -1.0, 5.0],   // steel height uses the same resolver
         [1.1, 0.0, 0.1, 1.0, 0.0, 0.0, -1.0, 5.0],     // finite miss
         [0.0, 0.1, 0.02, 1.0, 0.6, 0.0, -0.8, 5.0],    // oblique
         [0.105, 0.0, -0.1, 1.0, 0.0, 0.0, 1.0, 5.0],   // reverse
         [0.0, 0.0, 1.1, 1.0, 0.0, 0.0, -1.0, 1.0],     // curved
         [-0.8, 0.0, 0.01, 1.0, 1.0, 0.0, -0.015, 5.0], // grazing
     ];
-    let rows = run("verify_brick_contact", &inputs, inputs.len() * 16)?;
+    let rows = run("verify_material_hit", &inputs, inputs.len() * 16)?;
     let row = |i: usize| &rows[16 * i..16 * (i + 1)];
     assert!(row(0)[0] > 0.5 && row(0)[1] > row(0)[2]);
     assert!(row(1)[1] > row(0)[1] + 0.0025, "mortared joint stayed flat");
-    assert_eq!(row(2)[1].to_bits(), row(2)[2].to_bits());
+    assert!(row(2)[0] > 0.5 && (row(2)[1] - row(2)[2]).abs() < 0.0001);
     assert!(
         row(3)[0] < 0.5,
         "displacement invented a hit outside the panel"
     );
     assert!((row(1)[1] + row(5)[1] - 0.2).abs() < 2e-6);
-    assert!(row(6)[0] > 0.5 && row(6)[1] > row(6)[2]);
-    assert_eq!(row(7)[1].to_bits(), row(7)[2].to_bits());
+    assert!(
+        row(6)[0] > 0.5 && row(6)[1] > row(6)[2],
+        "curved texh {rows:?}"
+    );
+    assert!(
+        row(7)[0] < 0.5 || (row(7)[1] - row(7)[2]).abs() > 1e-4,
+        "grazing rays silently fell back to the flat carrier"
+    );
     for i in [0, 1, 4, 5, 6] {
         let input = inputs[i];
         let result = row(i);
@@ -144,49 +97,6 @@ fn brick_ray_hits_recess_mortar_below_faces_without_inventing_hits()
     Ok(())
 }
 
-#[test]
-fn material_contact_projection_preserves_other_geometry_misses_and_singularities()
--> Result<(), Box<dyn std::error::Error>> {
-    let inputs = [
-        [
-            0.109_994_66,
-            0.869_989_63,
-            1.296_915_4,
-            1.5,
-            0.118_670_87,
-            0.230_963_14,
-            -0.965_698_3,
-            1.0,
-        ],
-        [
-            0.109_994_66,
-            0.869_989_63,
-            1.296_915_4,
-            1.5,
-            0.118_670_87,
-            0.230_963_14,
-            -0.965_698_3,
-            3.0,
-        ],
-        [
-            0.109_994_66,
-            0.869_989_63,
-            1.296_915_4,
-            1.5,
-            0.118_670_87,
-            0.230_963_14,
-            -0.965_698_3,
-            4.0,
-        ],
-        [10.0, 10.0, 10.0, 1.5, 1.0, 0.0, 0.0, 2.0],
-        [1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 2.0],
-    ];
-    let q = run("verify_material_contact", &inputs, inputs.len() * 16)?;
-    for sample in q.chunks_exact(16) {
-        assert_eq!(sample[0].to_bits(), sample[1].to_bits());
-    }
-    Ok(())
-}
 #[test]
 fn material_display_encodes_linear_light_for_the_unorm_srgb_canvas()
 -> Result<(), Box<dyn std::error::Error>> {

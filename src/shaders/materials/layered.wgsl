@@ -56,25 +56,35 @@ fn material_noise(p: vec2f, seed: u32) -> f32 {
   return mix(mix(material_random(cell,seed),material_random(cell+vec2f(4.0,0.0),seed),t.x),
     mix(material_random(cell+vec2f(0.0,4.0),seed),material_random(cell+vec2f(4.0),seed),t.x),t.y);
 }
-fn material_mirrored(uv: vec2f, origin: vec2f, layer: i32, lod: f32) -> vec4f {
+fn material_sample(uv:vec2f,layer:i32,level:f32)->vec4f {
+  return textureSampleLevel(material_tiles,material_sampler,uv,layer,clamp(level,0.0,9.0));
+}
+fn material_mirror_uv(uv:vec2f,origin:vec2f)->vec2f {
   // Keep precise fractions separate from cell identity; address mode supplies reflection.
-  let mapped=fract(uv)+2.0*fract((floor(uv)+origin)*0.5);
-  return textureSampleLevel(material_tiles,material_sampler,mapped,layer,lod);
+  return fract(uv)+2.0*fract((floor(uv)+origin)*0.5);
+}
+fn material_mirrored(uv: vec2f, origin: vec2f, layer: i32, lod: f32) -> vec4f {
+  return material_sample(material_mirror_uv(uv,origin),layer,lod);
+}
+struct MaterialAtlas {uv:vec2f,local:vec2f,grid:vec2f,cell:vec2f};
+fn material_atlas(uv:vec2f,origin:vec2f,level:MaterialLevel)->MaterialAtlas {
+  let grid=vec2f(f32(level.identity.w&65535u),f32(level.identity.w>>16u));
+  let world=(uv+origin)*grid;let row=floor(world.y);
+  let bond=vec2f(world.x+fract(row*0.5),world.y);
+  let cell=floor(bond);let local=fract(bond);
+  let seed=material_hash(cell,level.identity.y+571u);
+  let chosen=seed%u32(grid.x*grid.y);
+  let face=vec2f(f32(chosen%u32(grid.x)),f32(chosen/u32(grid.x)));
+  let mirrored=select(local,1.0-local,vec2<bool>((seed&256u)!=0u,(seed&512u)!=0u));
+  return MaterialAtlas((face+mirrored)/grid,local,grid,cell);
 }
 fn material_value(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32) -> vec4f {
   let layer=i32(level.identity.y);
   if (level.identity.w!=0u) {
-    let grid=vec2f(f32(level.identity.w&65535u),f32(level.identity.w>>16u));
-    let world=(uv+origin)*grid;let row=floor(world.y);
-    let bond=vec2f(world.x+fract(row*0.5),world.y);
-    let cell=floor(bond);let local=fract(bond);
-    let seed=material_hash(cell,level.identity.y+571u);
-    let chosen=seed%u32(grid.x*grid.y);
-    let face=vec2f(f32(chosen%u32(grid.x)),f32(chosen/u32(grid.x)));
-    let mirrored=select(local,1.0-local,vec2<bool>((seed&256u)!=0u,(seed&512u)!=0u));
-    var value=textureSampleLevel(material_tiles,material_sampler,(face+mirrored)/grid,layer,lod);
-    value=vec4f(value.rgb*(1.0+(material_random(cell,91u)-0.5)*0.24*smoothstep(0.2,0.6,value.a)),value.a);
-    let distance=min(local,1.0-local)/(exp2(lod)*grid/512.0);
+    let mapped=material_atlas(uv,origin,level);
+    var value=material_sample(mapped.uv,layer,lod);
+    value=vec4f(value.rgb*(1.0+(material_random(mapped.cell,91u)-0.5)*0.24*smoothstep(0.2,0.6,value.a)),value.a);
+    let distance=min(mapped.local,1.0-mapped.local)/(exp2(lod)*mapped.grid/512.0);
     value=mix(level.border,value,smoothstep(0.0,1.0,min(distance.x,distance.y)));
     return mix(value,level.mean,smoothstep(4.0,8.0,lod));
   }
@@ -109,58 +119,45 @@ fn material_lod(footprint:f32,extent:f32)->f32 {
   return clamp(log2(max(1e-30,footprint)*512.0/extent),0.0,9.0);
 }
 fn material_visible(lod:f32)->f32 {return 1.0-smoothstep(4.0,8.0,lod);}
-fn layered_material(material: u32, delta: vec3f, normal: vec3f, footprint: f32, anchor: vec3f) -> MaterialSurface {
-  let n=material_unit(normal,vec3f(0.0,1.0,0.0));
-  let weights=material_weights(n);
-  var base=vec3f(0.5);
-  var modulation=vec3f(1.0);
-  var gradient=vec3f(0.0);
-  var roughness=select(0.26,0.86,material==1u);
-  var variance=roughness*roughness;
-  var occlusion=1.0;
-  for (var i=0u;i<arrayLength(&material_levels);i++) {
-    let level=material_levels[i];
-    if (level.identity.x!=material) { continue; }
-    let extent=level.surface.x;
-    let lod=material_lod(footprint,extent);
-    let base_order=(level.identity.z&1u)!=0u;
-    let visible=material_visible(lod);
-    variance+=level.surface.w*(1.0-visible);
-    if (base_order && lod>=9.0) { base=level.mean.rgb;continue; }
-    if (!base_order && visible==0.0) { continue; }
-    let coords=material_coords(level,delta,anchor);
-    let p=coords.uv;let cells=coords.cells;
-    var color=vec3f(0.0);
-    var height=0.0;
-    var slope=vec3f(0.0);
-    if (weights.x>0.0001) {
-      let q=material_tile(p.yz,cells.yz,level,lod);
-      color+=q.color*weights.x; height+=q.height*weights.x;
-      slope+=vec3f(0.0,q.gradient)*weights.x;
-    }
-    if (weights.y>0.0001) {
-      let q=material_tile(p.xz,cells.xz,level,lod);
-      color+=q.color*weights.y; height+=q.height*weights.y;
-      slope+=vec3f(q.gradient.x,0.0,q.gradient.y)*weights.y;
-    }
-    if (weights.z>0.0001) {
-      let q=material_tile(p.xy,cells.xy,level,lod);
-      color+=q.color*weights.z; height+=q.height*weights.z;
-      slope+=vec3f(q.gradient,0.0)*weights.z;
-    }
-    if (base_order) {
-      base=color;
-    } else {
-      modulation*=mix(vec3f(1.0),color/max(level.mean.rgb,vec3f(1.0/255.0)),level.surface.z*visible);
-    }
-    gradient+=slope*(level.surface.y/extent)*visible;
-    if (material==1u && !base_order) { occlusion*=mix(1.0,0.08+0.92*smoothstep(0.12,0.56,height),visible); }
+struct MaterialLayers {base:vec3f,modulation:vec3f,gradient:vec3f,variance:f32,occlusion:f32};
+fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weights:vec3f,footprint:f32,anchor:vec3f)->MaterialLayers {
+  var state=input;
+  if(index>=arrayLength(&material_levels)){return state;}
+  let level=material_levels[index];if(level.identity.x!=material){return state;}
+  let extent=level.surface.x;let lod=material_lod(footprint,extent);
+  let base_order=(level.identity.z&1u)!=0u;let visible=material_visible(lod);
+  state.variance+=level.surface.w*(1.0-visible);
+  if(base_order&&lod>=9.0){state.base=level.mean.rgb;return state;}
+  if(!base_order&&visible==0.0){return state;}
+  let coords=material_coords(level,delta,anchor);let p=coords.uv;let cells=coords.cells;
+  var color=vec3f(0.0);var height=0.0;var slope=vec3f(0.0);
+  if(weights.x>0.0){
+    let q=material_tile(p.yz,cells.yz,level,lod);
+    color+=q.color*weights.x;height+=q.height*weights.x;slope+=vec3f(0.0,q.gradient)*weights.x;
   }
-  let tangent=gradient-n*dot(n,gradient);
+  if(weights.y>0.0){
+    let q=material_tile(p.xz,cells.xz,level,lod);
+    color+=q.color*weights.y;height+=q.height*weights.y;slope+=vec3f(q.gradient.x,0.0,q.gradient.y)*weights.y;
+  }
+  if(weights.z>0.0){
+    let q=material_tile(p.xy,cells.xy,level,lod);
+    color+=q.color*weights.z;height+=q.height*weights.z;slope+=vec3f(q.gradient,0.0)*weights.z;
+  }
+  if(base_order){state.base=color;}
+  else{state.modulation*=mix(vec3f(1.0),color/max(level.mean.rgb,vec3f(1.0/255.0)),level.surface.z*visible);}
+  state.gradient+=slope*(level.surface.y/extent)*visible;
+  if(material==1u&&!base_order){state.occlusion*=mix(1.0,0.08+0.92*smoothstep(0.12,0.56,height),visible);}
+  return state;
+}
+fn layered_material(material:u32,delta:vec3f,normal:vec3f,footprint:f32,anchor:vec3f)->MaterialSurface {
+  let n=material_unit(normal,vec3f(0.0,1.0,0.0));let weights=material_weights(n);
+  let roughness=select(0.26,0.86,material==1u);
+  var state=MaterialLayers(vec3f(0.5),vec3f(1.0),vec3f(0.0),roughness*roughness,1.0);
+  // @material-levels
+  let tangent=state.gradient-n*dot(n,state.gradient);
   let bumped=material_unit(n-tangent/max(1.0,length(tangent)/2.0),n);
-  roughness=clamp(sqrt(variance),0.05,0.98);
-  return MaterialSurface(clamp(base*modulation,vec3f(0.004),vec3f(0.98)),bumped,
-    roughness,select(0.0,1.0,material==0u),occlusion,weights.z);
+  return MaterialSurface(clamp(state.base*state.modulation,vec3f(0.004),vec3f(0.98)),bumped,
+    clamp(sqrt(state.variance),0.05,0.98),select(0.0,1.0,material==0u),state.occlusion,weights.z);
 }
 
 // Analytic studio lobes/ground, not a photographed environment or area-light integral.

@@ -12,7 +12,7 @@ use crate::{
     scene::{
         model::{Object, parse_objects},
         prepared::Prepared,
-        query::{QueryMode, closest_prepared, query_objects, query_prepared},
+        query::{QueryMode, closest_prepared, query_prepared},
     },
 };
 
@@ -190,7 +190,7 @@ fn finite_plane_closest_is_a_unique_bounded_projection() -> Result<(), Error> {
 }
 
 #[test]
-fn leaf_collision_and_cutout_belong_to_the_instance_not_the_view()
+fn leaf_picking_keeps_the_carrier_cutout_and_independent_point_surface()
 -> Result<(), Box<dyn std::error::Error>> {
     let flat = leaf_scene(0.0)?;
     let leaf = leaf_scene(2.0)?;
@@ -207,8 +207,8 @@ fn leaf_collision_and_cutout_belong_to_the_instance_not_the_view()
         (-0.0016..-0.0009).contains(&height),
         "center hit height {height}"
     );
-    assert!((b[0].sample.p[2] - height).abs() < 1e-10);
-    assert!((b[0].sample.t - (a[0].sample.t - height)).abs() < 1e-10);
+    assert_eq!(a[0].sample.p, b[0].sample.p);
+    assert_eq!(a[0].sample.t.to_bits(), b[0].sample.t.to_bits());
     for (ratio, hit) in [(0.5, true), (2.0, false), (-0.5, false)] {
         let ray = Ray {
             o: [0.0, 0.0, height * ratio],
@@ -250,7 +250,7 @@ fn leaf_collision_and_cutout_belong_to_the_instance_not_the_view()
 }
 
 #[test]
-fn leaf_finish_does_not_displace_existing_geometry() -> Result<(), Box<dyn std::error::Error>> {
+fn material_does_not_change_the_base_geometry_query() -> Result<(), Box<dyn std::error::Error>> {
     let leaf = Material::from_tag(2).ok_or("missing leaf material")?;
     let ray = Ray {
         o: [0.2, 0.3, 4.0],
@@ -261,12 +261,12 @@ fn leaf_finish_does_not_displace_existing_geometry() -> Result<(), Box<dyn std::
         let object = Object::new(1, kind, [0.0; 3], 1.0, if tag == 2 { 1.5 } else { 0.0 })?;
         let painted = Prepared::new(&[object.with_material(leaf)])?;
         assert!(painted.has_leaf_finish());
-        let a = query_objects(&[object], ray, QueryMode::Inspect)?;
-        let b = query_objects(&[object.with_material(leaf)], ray, QueryMode::Inspect)?;
-        assert_eq!(
-            a[0].packed(ray).map(f64::to_bits),
-            b[0].packed(ray).map(f64::to_bits)
-        );
+        let geometry = Geometry::new(kind, if tag == 2 { 1.5 } else { 0.0 })?;
+        let a = geometry.query(ray)?;
+        let b = geometry.with_leaf_surface(true).query(ray)?;
+        assert_eq!(a.sample.t.to_bits(), b.sample.t.to_bits());
+        assert_eq!(a.sample.hit, b.sample.hit);
+        assert_eq!(a.sample.p.map(f64::to_bits), b.sample.p.map(f64::to_bits));
     }
     let prepared = Prepared::new(&parse_objects(&[
         1.0, 5.0, 0.0, 0.0, 0.0, 0.07, 0.0, 0.0, 2.0, 5.0, 0.5, 0.0, 0.0, 0.07, 0.0, 2.0,

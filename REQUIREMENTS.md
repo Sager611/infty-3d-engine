@@ -8,14 +8,15 @@
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
 - Free-camera WASD movement and drag look; wheel changes travel speed. Only straight W approaches to nearby center-ray hits ease down to a minimum speed; reverse, strafe and diagonal movement retain normal speed. Minimum travel speed and the approach floor are0.000001 units/s for close inspection.
 - Base ray queries always return a gap and matching surface witness with UV/normal; preserve explicit uncertainty and independent point queries.
-- Texh: on a base miss, bilinearly sample height once at the witness UV. Accept if signed height reaches the gap toward the ray. Preserve unmodified base hits and cutouts. Expand culling by texture reach; no displaced-ray traversal.
-- Scene → Leaf · relief: matched color, cutout and source displacement, with four height bands. Solve a fitted quadratic analytically, apply one branchless bilinear height correction per candidate, then clip at the projected UV. Point queries stay independent.
-- Scene → Red brick · relief: in Materials view, recess rendered hits using the weighted height bands from the existing phase-aligned brick textures. Preserve carrier picking, silhouettes and cast shadows. Both previews target60 warm FPS at1265×791.
+- Texh rendered hits: one shared, geometry-independent direct calculation. NO LOOPS or recursion; always prefer fast approximation over accurate displacement. No root search, traversal, ray marching or fitted geometry. Sample carrier height once for depth; update UV/RGB and finite-difference normals with a frozen carrier footprint/frame. Bound grazing offsets. No exact first-crossing or displaced-silhouette guarantee.
+- Preserve carrier queries/picking, independent point queries and the existing miss rule: one bilinear height sample at the witness accepts signed height reaching the gap. No new gap solver.
+- Scene → Leaf · relief and Red brick · relief: share texh, preserve matching source assets, cutouts, all four height bands and carrier cast-shadow behavior. Both localhost previews target60 warm FPS at1265×791; report measured limits.
 
 ## Changelog
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-24 | User | Require shared direct, loop-free/nonrecursive displacement; speed over accuracy | Replace iterative search without changing carrier queries, gaps or assets |
 | 2026-11-08 | Assistant | Recorded the complete two-item requirements | Keep project scope explicit |
 | 2026-11-08 | User | Required intuitive add/delete controls | Create and remove instances in the visualization |
 | 2026-11-08 | User | Required modular geometry queries and free-camera surface inspection | Keep implementation scope explicit |

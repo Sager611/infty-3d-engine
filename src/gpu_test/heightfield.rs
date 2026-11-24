@@ -140,7 +140,10 @@ fn leaf_gpu_resources_are_lazy_and_growth_never_reverts() -> Result<(), Box<dyn 
     assert!(!heights.ensure(&device, false)?);
     assert!(heights.ensure(&device, true)?);
     assert!(heights.ready());
-    assert_eq!(heights.buffer.size(), 5 * 512 * 512 + 32);
+    assert_eq!(
+        heights.buffer.size(),
+        u64::try_from(crate::heightfield::DATA.len())? + 32
+    );
     assert!(!heights.ensure(&device, true)?);
     assert!(!heights.ensure(&device, false)?);
     let mut tiles = crate::material::gpu::Tiles::empty(&device);

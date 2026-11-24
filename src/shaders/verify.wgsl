@@ -56,22 +56,35 @@ fn verify_material_variance(@builtin(global_invocation_id) id: vec3u) {
   results[id.x]=ProbeResult(q,vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)
-fn verify_material_contact(@builtin(global_invocation_id) id: vec3u) {
-  if (id.x>=arrayLength(&rays)) { return; }
-  let r=rays[id.x];let q=goursat(r.o.xyz,r.d.xyz,r.o.w);
-  let s=SceneSample(q.query,q.query.p,1u,u32(r.d.w),q.gap_lower,q.error,q.status,Pending(0.0,false),q.error);
-  let t=render_material_distance(s,r.d.xyz,1.0,r.o.w);
-  results[id.x]=ProbeResult(vec4f(t,q.query.t,q.error,f32(q.status)),vec4f(q.query.p,1.0),vec4f(0.0),vec4f(0.0));
-}
-@compute @workgroup_size(1)
-fn verify_brick_contact(@builtin(global_invocation_id) id: vec3u) {
+fn verify_material_hit(@builtin(global_invocation_id) id: vec3u) {
   if (id.x>=arrayLength(&rays)) { return; }
   let r=rays[id.x];let d=normalize(r.d.xyz);
-  let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w));
+  var parameter=0.0;
+  if(u32(r.d.w)==2u){parameter=select(1.5,16.0*fract(r.d.w),fract(r.d.w)>0.0);}
+  let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(parameter,0.0,0.0,r.o.w));
   let base=scene_object(r.o.xyz,d,object);
-  let q=brick_contact(base,d,object,r.o.xyz,0.0).query;
-  results[id.x]=ProbeResult(vec4f(f32(q.hit),q.t,base.query.t,0.0),vec4f(q.p,0.0),
-    vec4f(q.uv,0.0,0.0),vec4f(0.0));
+  let sample=material_texh(base,d,object,r.o.xyz,0.001);let q=sample.query;
+  let footprint=texh_footprint(base,d,0.001);
+  let context=TexhContext(base,object,r.o.xyz+d*base.query.t,footprint);
+  let height=texh_height(geometry_surface(base.local,base,object),context);
+  results[id.x]=ProbeResult(vec4f(f32(q.hit),q.t,base.query.t,f32(sample.status)),vec4f(q.p,sample.error),
+    vec4f(q.uv,height,f32(base.base_hit)),vec4f(q.n,f32(base.query.hit)));
+}
+@compute @workgroup_size(1)
+fn verify_material_color(@builtin(global_invocation_id) id: vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}
+  let r=rays[id.x];let d=normalize(r.d.xyz);
+  let object=SceneObject(vec4u(1u,5u,0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w));
+  let base=scene_object(r.o.xyz,d,object);let sample=material_texh(base,d,object,r.o.xyz,0.001);
+  let material=texh_surface(sample,base,d,object,r.o.xyz,0.001);let footprint=texh_footprint(base,d,0.001);
+  var expected=layered_material(u32(r.o.w),vec3f(sample.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint,vec3f(0.0));
+  var original=layered_material(u32(r.o.w),vec3f(base.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint,vec3f(0.0));
+  if(r.o.w==2.0){
+    expected=leaf_material(sample.query.uv,material.normal,1.0,footprint);
+    original=leaf_material(base.query.uv,material.normal,1.0,footprint);
+  }
+  results[id.x]=ProbeResult(vec4f(material.albedo,f32(sample.query.hit)),vec4f(expected.albedo,sample.query.t),
+    vec4f(original.albedo,0.0),vec4f(sample.query.uv,base.query.uv));
 }
 @compute @workgroup_size(1)
 fn verify_material_display(@builtin(global_invocation_id) id: vec3u) {
@@ -168,7 +181,7 @@ fn verify_outline(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let ray = rays[id.x];
   let q = Query(ray.d.x != 0.0, 2.0, ray.o.x, vec3f(0.0), vec3f(0.0, 1.0, 0.0), vec2f(0.0));
-  let sample = SceneSample(q, vec3f(0.0), 7u, u32(ray.o.w), ray.o.y, ray.o.z, u32(ray.d.w),Pending(0.0,false),ray.o.z);
+  let sample = SceneSample(q, vec3f(0.0), 7u, u32(ray.o.w), ray.o.y, ray.o.z, u32(ray.d.w),Pending(0.0,false),ray.o.z,q.hit);
   let eligible = outline_eligible(sample, ray.d.y != 0.0, ray.d.z);
   results[id.x] = ProbeResult(vec4f(select(0.0, 1.0, eligible), 0.0, 0.0, 0.0),
     vec4f(0.0), vec4f(0.0), vec4f(0.0));
