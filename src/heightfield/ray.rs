@@ -9,17 +9,21 @@ use crate::{
     },
 };
 
-const CUP_X: f64 = 4.375;
-const CUP_Y: f64 = 0.0625;
-const STEM: f64 = 0.09375;
-const FLOOR: f64 = 0.15;
+// Quadratic fit to the macro displacement before gain; see the bake.
+const TILT: [f64; 3] = [0.245, -0.21, 0.0];
+const OFFSET: f64 = -0.15;
+
+fn bend([x, y, _]: [f64; 3]) -> [f64; 3] {
+    [
+        2.5_f64.mul_add(x, 0.215 * y),
+        0.37_f64.mul_add(y, 0.215 * x),
+        0.0,
+    ]
+}
 
 fn gradient(point: [f64; 3], gain: f64) -> [f64; 3] {
-    [
-        -2.0 * CUP_X * gain * (point[0] + STEM),
-        -2.0 * CUP_Y * gain * point[1],
-        1.0,
-    ]
+    let [x, y, _] = madd(TILT, bend(point), 2.0);
+    [-gain * x, -gain * y, 1.0]
 }
 
 fn roots(a: f64, b: f64, c: f64) -> [f64; 2] {
@@ -36,17 +40,13 @@ fn roots(a: f64, b: f64, c: f64) -> [f64; 2] {
 }
 
 fn seeds(ray: Ray, gain: f64) -> [Sample; 2] {
-    let (scale_x, scale_y) = (CUP_X * gain, CUP_Y * gain);
     let shift = (-dot(ray.o, ray.d)).max(0.0);
     let origin = madd(ray.o, ray.d, shift);
-    let ox = origin[0] + STEM;
-    let oy = origin[1];
-    let [dx, dy, dz] = ray.d;
-    let a = scale_x.mul_add(dx * dx, scale_y * dy * dy);
-    let b = (2.0 * scale_x * ox).mul_add(dx, (2.0 * scale_y * oy).mul_add(dy, -dz));
-    let c = scale_x.mul_add(
-        ox * ox,
-        scale_y.mul_add(oy * oy, (-FLOOR).mul_add(gain, -origin[2])),
+    let a = gain * dot(bend(ray.d), ray.d);
+    let b = -dot(gradient(origin, gain), ray.d);
+    let c = gain.mul_add(
+        dot(madd(TILT, bend(origin), 1.0), origin) + OFFSET,
+        -origin[2],
     );
     roots(a, b, c).map(|root| finite::sample(madd(origin, ray.d, root), shift + root, true))
 }

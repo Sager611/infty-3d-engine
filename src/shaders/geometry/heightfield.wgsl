@@ -2,9 +2,9 @@
 struct HeightData {info:vec4u,amplitudes:vec4f,words:array<u32>};
 @group(0) @binding(9) var<storage,read> height_data:HeightData;
 const LEAF_REPEATS=vec4f(1.0,10.0,100.0,1000.0);
-const CUP_SCALE=vec2f(4.375,0.0625);
-const CUP_STEM=vec2f(0.09375,0.0);
-const CUP_FLOOR=0.15;
+const LEAF_BEND=mat2x2f(2.5,0.215,0.215,0.37);
+const LEAF_TILT=vec2f(0.245,-0.21);
+const LEAF_OFFSET=-0.15;
 fn hf_read(order:u32,input:vec2u)->f32 {
   let edge=height_data.info.x;let last=vec2u(edge-1u);
   let ij=select(input&last,min(input,last),(order&3u)==0u);
@@ -40,11 +40,10 @@ fn leaf_domain(p:vec3f,t:f32)->bool {
 }
 struct LeafRoots {times:vec2f,count:u32};
 fn leaf_roots(o:vec3f,d:vec3f)->LeafRoots {
-  let delta=o.xy+CUP_STEM;
-  let gain=height_data.amplitudes.x;let scale=CUP_SCALE*gain;
-  let a=dot(scale,d.xy*d.xy);
-  let b=fma(2.0*scale.x*delta.x,d.x,fma(2.0*scale.y*delta.y,d.y,-d.z));
-  let c=fma(scale.x,delta.x*delta.x,fma(scale.y,delta.y*delta.y,-CUP_FLOOR*gain-o.z));
+  let bend=LEAF_BEND*o.xy;let gain=height_data.amplitudes.x;
+  let a=gain*dot(LEAF_BEND*d.xy,d.xy);
+  let b=fma(gain,dot(2.0*bend+LEAF_TILT,d.xy),-d.z);
+  let c=fma(gain,dot(bend+LEAF_TILT,o.xy)+LEAF_OFFSET,-o.z);
   if(a==0.0){return LeafRoots(vec2f(-c/b),1u);}
   let disc=fma(b,b,-4.0*a*c);
   if(disc<0.0){return LeafRoots(vec2f(0.0),0u);}
@@ -52,7 +51,7 @@ fn leaf_roots(o:vec3f,d:vec3f)->LeafRoots {
   if(q==0.0){return LeafRoots(vec2f(-b/(2.0*a)),1u);}
   return LeafRoots(vec2f(min(q/a,c/q),max(q/a,c/q)),2u);
 }
-fn leaf_slope(p:vec2f)->vec2f {return -2.0*CUP_SCALE*height_data.amplitudes.x*(p+CUP_STEM);}
+fn leaf_slope(p:vec2f)->vec2f {return -height_data.amplitudes.x*(2.0*(LEAF_BEND*p)+LEAF_TILT);}
 fn blade_normal(p:vec2f,uv:vec2f)->vec3f {
   // A wider derivative suppresses 8-bit height terraces without flattening veins.
   let step=3.0/f32(height_data.info.x);

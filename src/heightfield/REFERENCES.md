@@ -12,7 +12,7 @@ Uniform instance size scales the entire surface; peers still share their carrier
 ## Geometry and rendering
 
 Other carriers keep their hits; a miss is promoted only if the signed bilinear height at its witness reaches the ray.
-For finite Leaf, the analytic cup shares the macro gain and seeds up to two UVs. One bilinear height sum per candidate corrects ray depth; projected cutouts can fall through to the second root.
+A quadratic fit to macro depth shares its gain and seeds up to two UVs. One bilinear height sum per candidate corrects ray depth; projected cutouts can fall through to the second root.
 Filtered macro slopes blend into the cup normal. Colors are unchanged; Leaf skips self-shadowing.
 Fine relief away from the witness is not searched. Grazing corrections are bounded; this is not an exact heightfield intersection.
 Point queries still use the height pyramid and covered witnesses independently.
@@ -25,8 +25,8 @@ The leaf is an authored opaque sheet, not measured anatomy, transmission, thickn
 
 - [ambientCG LeafSet001](https://ambientcg.com/a/LeafSet001):
   colour/displacement/opacity8K-JPG, [CC0](https://docs.ambientcg.com/license/).
-  Optical RGB is cropped, resized, flipped, and converted to linear light. The macro shape is authored.
-  Macro crop(256,128,2560,3936); middle crop(1282,1666,1663,2047).
+  RGB and the [matching 16-bit displacement](https://commons.wikimedia.org/wiki/File:LeafSet001_8K_Displacement.png) share crop(256,128,2560,3936), resampling and flip. RGB uses linear light; depth uses (sample−18500)/45000 before gain. This is relative displacement, not a metrically calibrated scan.
+  Middle crop(1282,1666,1663,2047).
 - William J. Matthaeus, Jonathan Schmidt, Joseph D. White, Bernd Zechmann (2020),
   [Novel perspectives on stomatal impressions: Rapid and non-invasive surface characterization
   of plant leaves by scanning electron microscopy](https://doi.org/10.1371/journal.pone.0238589),
@@ -41,15 +41,14 @@ The leaf is an authored opaque sheet, not measured anatomy, transmission, thickn
 
 ## Reproduction
 
-Download/extract `LeafSet001_8K-JPG.zip` under `references/LeafSet001-8K/`;
-save the cited full-resolution figure as `references/pone.0238589.g002.png`.
+Extract `LeafSet001_8K-JPG.zip` under `references/LeafSet001-8K/`; save the full-resolution displacement and SEM figure as `references/LeafSet001_8K_Displacement.png` and `references/pone.0238589.g002.png`.
 Run `uv run --no-project tools/bake_leaf.py /path/to/references /path/to/checkout`.
 Dependencies are pinned in the script; references/previews stay outside the repository.
 Outputs: four linear RGB8/height-alpha zlib tiles and `leaf.bin` (2,184,540 bytes).
 Each scalar field has262,144 samples, nine interleaved min/max levels, and padding:436,908 bytes.
 GPU upload omits pyramids: 32-byte header plus five raw planes.
 Layout, covered positive-zero anchor, and exact finite f32 gains are checked; no upload resampling.
-The macro field adds asymmetric folds, a tapered midrib and traced side veins to the seed cup; extra relief tapers near the cutout.
+The macro field uses source depth except near the cutout, where it blends to the fit to suppress matte halos.
 
 ## Changelog
 
@@ -61,3 +60,4 @@ The macro field adds asymmetric folds, a tapered midrib and traced side veins to
 | 2026-11-24 | Assistant | Documented analytic seed and height-corrected hits | Render depth without traversal |
 | 2026-11-25 | Assistant | Described blade relief and alternate roots | Preserve oblique cutouts and light the veins |
 | 2026-11-24 | Assistant | Scale guide and macro heights together | Keep the curl shallow |
+| 2026-11-24 | Assistant | Use matched 16-bit displacement and fit the seed | Replace synthetic folds with the source profile |

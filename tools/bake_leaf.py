@@ -17,7 +17,7 @@ EDGE = 512
 
 def crop(source: Path, box: tuple[int, int, int, int], mode: str) -> Image.Image:
     with Image.open(source) as image:
-        return image.convert(mode).crop(box)
+        return image.crop(box).convert(mode)
 
 
 def scalar(image: Image.Image) -> Array:
@@ -77,38 +77,18 @@ def pyramid(value: NDArray[np.uint8]) -> bytes:
     return bytes(data)
 
 
-def cup(mask: NDArray[np.uint8]) -> Array:
-    """Warp the analytic cup and trace the photographed blade's vein layout."""
-    row, col = np.mgrid[:EDGE, :EDGE]
-    y, across = row / 256 - 1, col / 256 - 1 + 0.09375
-    carrier = 4.375 * across ** 2 + 0.0625 * y ** 2 - 0.15
-    relief = 0.009 * np.sin(5 * y) + across * (
-        0.035 * np.sin(4 * y + 0.8) + 0.063 * across * np.sin(13 * y + 14 * across)
-    )
-    spine = np.interp(row, (95, 152, 214, 280, 346, 410, 475),
-                      (229, 229, 227, 228, 230, 232, 230))
-    offset = col - spine
-    blade = np.clip((row - 95) / 380, 0, 1)
-    relief += 0.045 * np.sin(np.pi * blade) * (1 - 0.45 * blade) * np.exp(
-        -(offset / (4.8 - 2.3 * blade)) ** 2
-    )
-    # Root, signed span, rise in source pixels; left and right veins do not pair.
-    for root, span, rise in (
-        (125, -48, 56), (156, 72, 61), (167, -65, 62), (199, 89, 68),
-        (207, -74, 75), (234, 94, 70), (246, -88, 74), (280, 92, 67),
-        (287, -83, 75), (313, 81, 63), (325, -69, 73), (350, 65, 57),
-        (366, -57, 69), (392, 46, 58), (403, -39, 53), (430, 31, 39),
-    ):
-        along = np.clip(offset / span, 0, 1)
-        curve = root + rise * along * (0.65 + 0.35 * along)
-        width = 3.0 - 1.35 * along
-        ridge = 0.026 * np.sin(np.pi * along) * np.exp(-((row - curve) / width) ** 2)
-        relief += ridge * (1 - 0.45 * along)
-    outline = Image.fromarray(mask)
-    # Let the ray seed set the delicate silhouette, not high-gradient veins.
-    interior = np.clip((scalar(outline.filter(ImageFilter.GaussianBlur(4))) - 0.66) / 0.30, 0, 1)
+def macro_depth(source: Path, box: tuple[int, int, int, int], mask: NDArray[np.uint8]) -> Array:
+    """Align the 16-bit displacement with RGB; taper the image matte to the ray seed."""
+    depth = crop(source, box, "F").resize((310, EDGE), Image.Resampling.LANCZOS)
+    raw = np.zeros((EDGE, EDGE), dtype=np.float64)
+    raw[:, 101:411] = np.asarray(depth)[::-1]
+    sampled = (raw - 18500) / 45000
+    y, x = np.mgrid[:EDGE, :EDGE] / 256 - 1
+    guide = x * (2.5 * x + 0.43 * y + 0.245) + y * (0.37 * y - 0.21) - 0.15
+    outline = Image.fromarray((mask >= 128).astype(np.uint8) * 255)
+    interior = np.clip((scalar(outline.filter(ImageFilter.GaussianBlur(2))) - 0.70) / 0.27, 0, 1)
     covered = np.asarray(outline.filter(ImageFilter.MaxFilter(9))) >= 128
-    return np.clip(np.where(covered, carrier + interior * relief, 0) + 128 / 255, 0, 1)
+    return np.clip(np.where(covered, guide + interior * (sampled - guide), 0) + 128 / 255, 0, 1)
 
 
 def bake(references: Path, root: Path) -> None:
@@ -141,7 +121,8 @@ def bake(references: Path, root: Path) -> None:
     micro_h = np.clip(0.5 + 0.13 * standardized(periodic(scalar(sem))), 0.05, 0.95)
     mean = base_rgb[visible].mean(axis=0)
     tone = np.sin(2 * np.pi * (3 * x + 2 * y)) * np.sin(2 * np.pi * (y - x))
-    heights = (cup(mask), middle_h, fine_h, micro_h)
+    macro_h = macro_depth(references / "LeafSet001_8K_Displacement.png", macro_box, mask)
+    heights = (macro_h, middle_h, fine_h, micro_h)
     colors = (base_rgb, periodic(mid_rgb[::-1]), mean * (1 + 0.035 * network[..., None]),
               mean * (1 + 0.018 * tone[..., None]))
     tiles = root / "src/material/tiles"

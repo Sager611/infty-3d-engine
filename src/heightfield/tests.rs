@@ -8,44 +8,20 @@ fn leaf_preserves_fine_height_gains() {
 const HALF_SIZE_MM: f64 = 70.0;
 
 #[test]
-fn blade_rises_gently_from_spine_to_either_edge() -> Result<(), Error> {
-    for (y, stem, edges) in [
-        (168.0, 237.0, [172.0_f64, 302.0]),
-        (256.0, 234.0, [146.0, 322.0]),
-        (384.0, 232.0, [169.0, 295.0]),
+fn leaf_depth_tracks_the_source_tip_blade_and_veins() -> Result<(), Error> {
+    for (pixel, height_mm) in [
+        ([230.0, 94.0], 1.53),
+        ([229.0, 330.0], -3.40),
+        ([190.0, 370.0], -1.37),
+        ([210.0, 370.0], -2.78),
+        ([253.0, 370.0], -1.34),
+        ([272.0, 370.0], -2.13),
     ] {
-        let at = |x: f64| LEAF.sample([x.mul_add(1.0 / 256.0, -1.0), y / 256.0 - 1.0]);
-        let spine = at(stem)?.height;
-        let spine_mm = spine * HALF_SIZE_MM;
-        assert!((-1.5..-0.7).contains(&spine_mm), "spine {spine_mm} mm");
-        for edge in edges {
-            let mid = (edge - stem).mul_add(0.5, stem);
-            let outer = (edge - stem).mul_add(0.85, stem);
-            let inner = at(mid)?;
-            let blade = at(outer)?;
-            assert!(blade.coverage >= 127.5 && inner.coverage >= 127.5);
-            assert!(inner.height > spine && blade.height > inner.height);
-            let rise_mm = (blade.height - spine) * HALF_SIZE_MM;
-            assert!((1.3..3.7).contains(&rise_mm), "edge rise {rise_mm} mm");
-        }
+        let sample = LEAF.sample(pixel.map(|p| p / 256.0 - 1.0))?;
+        assert!(sample.coverage >= 127.5);
+        let actual = sample.height * HALF_SIZE_MM;
+        assert!((actual - height_mm).abs() < 0.12, "{pixel:?}: {actual} mm");
     }
-    Ok(())
-}
-
-#[test]
-fn photographed_leaf_has_midrib_and_secondary_vein_relief() -> Result<(), Error> {
-    let height = |x: f64, y: f64| {
-        LEAF.sample([x / 256.0 - 1.0, y / 256.0 - 1.0])
-            .map(|value| value.height)
-    };
-    let midrib =
-        height(228.0, 280.0)? - f64::midpoint(height(219.0, 280.0)?, height(237.0, 280.0)?);
-    let vein = height(269.0, 304.0)? - f64::midpoint(height(269.0, 299.0)?, height(269.0, 309.0)?);
-    assert!(
-        (0.18..0.34).contains(&(midrib * HALF_SIZE_MM)),
-        "midrib {midrib}"
-    );
-    assert!((0.09..0.20).contains(&(vein * HALF_SIZE_MM)), "vein {vein}");
     Ok(())
 }
 
