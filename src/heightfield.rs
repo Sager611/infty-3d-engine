@@ -1,9 +1,16 @@
 //! Immutable vertex-aligned bilinear heights; five independently bounded scalar maps.
-use crate::{geometry::Error, math::interval::Interval as I};
+use crate::{
+    geometry::Error,
+    math::{
+        Ray,
+        interval::Interval as I,
+        types::GeometrySample,
+        vector::{dot, madd, sub},
+    },
+};
 pub mod gpu;
 
 pub const STEPS: usize = 64;
-pub const DEPTH: u32 = 19;
 pub const AMPLITUDES: [f64; 4] = [
     1.0,
     0.000_976_562_5,
@@ -62,21 +69,14 @@ pub struct Bounds {
     pub lo: [f64; 3],
     pub hi: [f64; 3],
 }
-#[derive(Clone, Copy)]
-pub struct Piece {
-    pub ij: [u32; 2],
-    pub resolution: u32,
-    pub height: [I; 4],
-    pub mask: [I; 4],
-}
 pub mod point;
-pub mod ray;
 #[derive(Clone, Copy)]
 pub struct Value {
     pub height: f64,
     pub gradient: [f64; 2],
     pub coverage: f64,
 }
+#[cfg(test)]
 impl Value {
     pub fn normal(self) -> [f64; 3] {
         let scale = self.gradient[0].abs().max(self.gradient[1].abs()).max(1.0);
@@ -139,33 +139,32 @@ impl<'a> Field<'a> {
         }
         Ok(field)
     }
-    /// Version1 fixes the GPU witness anchor at the origin and requires exact f32 amplitudes.
+    /// Pack only the sampled planes; GPU gains must be exact normal f32s or zero.
     #[expect(
         clippy::cast_possible_truncation,
         reason = "Reject every non-exact conversion"
     )]
     pub fn gpu_bytes(self) -> Result<Vec<u8>, Error> {
         let field = Self::new(self.data, self.edge, self.amplitudes, self.anchor)?;
-        if field
-            .anchor
-            .iter()
-            .any(|v| v.to_bits() != 0.0_f64.to_bits())
-        {
-            return Err(Error::InvalidParameter);
-        }
-        let stride = u32::try_from(field.stride()?).map_err(|_| Error::Numeric)?;
-        let mut bytes = Vec::with_capacity(32 + field.data.len());
-        for value in [field.edge, stride, field.resolution()?, 1] {
+        let plane = field.edge * field.edge;
+        let count = usize::try_from(plane).map_err(|_| Error::Numeric)?;
+        let mut bytes = Vec::with_capacity(32 + 5 * count);
+        for value in [field.edge, plane, field.resolution()?, 1] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         for amplitude in field.amplitudes {
             let value = amplitude as f32;
-            if !value.is_finite() || f64::from(value).to_bits() != amplitude.to_bits() {
+            if value.abs() > 1.0
+                || value.is_subnormal()
+                || f64::from(value).to_bits() != amplitude.to_bits()
+            {
                 return Err(Error::Numeric);
             }
             bytes.extend_from_slice(&value.to_le_bytes());
         }
-        bytes.extend_from_slice(field.data);
+        for band in field.data.chunks_exact(field.stride()?) {
+            bytes.extend_from_slice(&band[..count]);
+        }
         Ok(bytes)
     }
 
@@ -263,6 +262,46 @@ impl<'a> Field<'a> {
         }
         Ok(value)
     }
+    pub fn reach(self) -> f64 {
+        (self.amplitudes.into_iter().map(f64::abs).sum::<f64>() * (128.0 / 255.0)).next_up()
+    }
+
+    pub fn texh(
+        self,
+        ray: Ray,
+        mut base: GeometrySample,
+        cutout: bool,
+    ) -> Result<GeometrySample, Error> {
+        if (base.sample.hit && !cutout)
+            || (!base.sample.hit && (base.uncertain || base.gap_lower > self.reach()))
+        {
+            return Ok(base);
+        }
+        let xy = base.sample.uv.map(|u| {
+            let u = if (0.0..=1.0).contains(&u) {
+                u
+            } else {
+                u.rem_euclid(1.0)
+            };
+            2.0_f64.mul_add(u, -1.0)
+        });
+        let value = self.sample(xy)?;
+        if cutout && value.coverage < 127.5 {
+            base.sample.hit = false;
+        } else if !base.sample.hit {
+            let point = madd(ray.o, ray.d, base.sample.t);
+            let side = dot(sub(point, base.sample.p), base.sample.n);
+            let gap = base.sample.gap;
+            if (side > 0.0 && value.height >= gap) || (side < 0.0 && -value.height >= gap) {
+                base.sample.hit = true;
+                base.sample.p = point;
+                base.sample.gap = 0.0;
+                base.gap_lower = 0.0;
+            }
+        }
+        Ok(base)
+    }
+
     fn alpha_range(self, order: usize, node: Node) -> Result<I, Error> {
         let side = 1_u32 << node.depth;
         let scale = u64::from(self.edge * repeat(order));
@@ -358,52 +397,6 @@ impl<'a> Field<'a> {
     }
     pub const fn anchor(self) -> [f64; 2] {
         self.anchor
-    }
-    pub fn piece(self, ij: [u32; 2]) -> Result<Piece, Error> {
-        let resolution = self.resolution()?;
-        if ij[0] >= resolution || ij[1] >= resolution {
-            return Err(Error::InvalidPoint);
-        }
-        let highest = resolution / self.edge;
-        let mut height = [I::ZERO; 4];
-        let mut mask = [I::ZERO; 4];
-        for order in 0..5 {
-            if order < 4 && self.amplitudes[order] == 0.0 {
-                continue;
-            }
-            let factor = highest / repeat(order);
-            let c = self.coefficients(order, ij.map(|v| v / factor))?;
-            let denominator = f64::from(factor);
-            let x = I::point(f64::from(ij[0] % factor))?.divide(denominator)?;
-            let y = I::point(f64::from(ij[1] % factor))?.divide(denominator)?;
-            let centered = if order < 4 { c[0] - 128.0 } else { c[0] };
-            let coefficients = [
-                I::point(centered)?
-                    .add(x.scale(c[1])?)?
-                    .add(y.scale(c[2])?)?
-                    .add(x.mul(y)?.scale(c[3])?)?,
-                I::point(c[1])?.add(y.scale(c[3])?)?.divide(denominator)?,
-                I::point(c[2])?.add(x.scale(c[3])?)?.divide(denominator)?,
-                I::point(c[3])?.divide(denominator)?.divide(denominator)?,
-            ];
-            if order == 4 {
-                mask = coefficients;
-            } else {
-                for i in 0..4 {
-                    height[i] = height[i].add(
-                        coefficients[i]
-                            .scale(self.amplitudes[order])?
-                            .divide(255.0)?,
-                    )?;
-                }
-            }
-        }
-        Ok(Piece {
-            ij,
-            resolution,
-            height,
-            mask,
-        })
     }
     pub fn bounds(self, node: Node) -> Result<Option<Bounds>, Error> {
         let [lo, hi] = node.domain()?;

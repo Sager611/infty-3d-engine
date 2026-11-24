@@ -19,9 +19,8 @@ fn verify_crystal_render(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let input = rays[id.x];
   let kind = u32(input.o.x);
-  let gap = scene_needs_gap(kind, input.o.y > 0.0, input.o.z > 0.0);
   let normal = surface_normal(input.d.xyz, vec3f(0.0, 0.0, 1.0), kind);
-  results[id.x] = ProbeResult(vec4f(select(0.0, 1.0, gap), normal),
+  results[id.x] = ProbeResult(vec4f(0.0, normal),
     vec4f(0.0), vec4f(0.0), vec4f(0.0));
 }
 
@@ -59,8 +58,8 @@ fn verify_material_variance(@builtin(global_invocation_id) id: vec3u) {
 @compute @workgroup_size(1)
 fn verify_material_contact(@builtin(global_invocation_id) id: vec3u) {
   if (id.x>=arrayLength(&rays)) { return; }
-  let r=rays[id.x];let q=goursat(r.o.xyz,r.d.xyz,r.o.w,false);
-  let s=SceneSample(q.query,q.query.p,1u,u32(r.d.w),q.gap_lower,q.error,q.status,Pending(0.0,false),q.error,q.status<2u);
+  let r=rays[id.x];let q=goursat(r.o.xyz,r.d.xyz,r.o.w);
+  let s=SceneSample(q.query,q.query.p,1u,u32(r.d.w),q.gap_lower,q.error,q.status,Pending(0.0,false),q.error);
   let t=render_material_distance(s,r.d.xyz,1.0,r.o.w);
   results[id.x]=ProbeResult(vec4f(t,q.query.t,q.error,f32(q.status)),vec4f(q.query.p,1.0),vec4f(0.0),vec4f(0.0));
 }
@@ -105,7 +104,7 @@ fn result(q: Query, o: vec3f, d: vec3f, rho: f32) -> ProbeResult {
 fn verify_goursat(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let ray = rays[id.x];
-  let query = goursat(ray.o.xyz, ray.d.xyz, ray.o.w, ray.d.w != 0.0);
+  let query = goursat(ray.o.xyz, ray.d.xyz, ray.o.w);
   let hit = select(0.0, 1.0, query.query.hit);
   results[id.x] = ProbeResult(
     vec4f(hit, query.query.t, query.query.gap, query.query.uv.x),
@@ -125,7 +124,7 @@ fn verify_scene(@builtin(global_invocation_id) id: vec3u) {
     vec4f(0.0, 1.0, 0.0, ray.d.w),
     vec4f(select(0.0, 1.5, kind == 2u), 0.0, 0.0, 0.0));
   let direction = normalize(ray.d.xyz);
-  let sample = scene_object(ray.o.xyz, direction, object, true);
+  let sample = scene_object(ray.o.xyz, direction, object);
   let q = sample.query;
   let ray_point = ray.o.xyz + q.t * direction;
   results[2u * id.x] = ProbeResult(
@@ -159,7 +158,7 @@ fn verify_outline(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let ray = rays[id.x];
   let q = Query(ray.d.x != 0.0, 2.0, ray.o.x, vec3f(0.0), vec3f(0.0, 1.0, 0.0), vec2f(0.0));
-  let sample = SceneSample(q, vec3f(0.0), 7u, u32(ray.o.w), ray.o.y, ray.o.z, u32(ray.d.w),Pending(0.0,false),ray.o.z,ray.d.w<2.0);
+  let sample = SceneSample(q, vec3f(0.0), 7u, u32(ray.o.w), ray.o.y, ray.o.z, u32(ray.d.w),Pending(0.0,false),ray.o.z);
   let eligible = outline_eligible(sample, ray.d.y != 0.0, ray.d.z);
   results[id.x] = ProbeResult(vec4f(select(0.0, 1.0, eligible), 0.0, 0.0, 0.0),
     vec4f(0.0), vec4f(0.0), vec4f(0.0));
@@ -210,7 +209,7 @@ fn verify_spatial(@builtin(global_invocation_id) id: vec3u) {
       }
     } else {
       visits++;
-      let sample = scene_object(ray.o.xyz, direction, resolved_object(i), false);
+      let sample = scene_object(ray.o.xyz, direction, resolved_object(i));
       if (sample.query.hit && (!nearest.query.hit || sample.query.t < nearest.query.t ||
           (sample.query.t == nearest.query.t && sample.id < nearest.id))) { nearest = sample; }
     }
@@ -235,7 +234,7 @@ fn verify_spatial_gaps(@builtin(global_invocation_id) id: vec3u) {
         continue;
       }
     } else {
-      let sample = scene_object(ray.o.xyz, ray.d.xyz, resolved_object(i), true);
+      let sample = scene_object(ray.o.xyz, ray.d.xyz, resolved_object(i));
       if (!sample.query.hit && sample.kind != 3u && sample.status < 2u) {
         gap = min(gap, sample.query.gap);
       }
@@ -251,7 +250,7 @@ fn verify_spatial_gaps(@builtin(global_invocation_id) id: vec3u) {
 fn verify_crystal(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let ray = rays[id.x];
-  let q = crystal(ray.o.xyz, ray.d.xyz, ray.d.w != 0.0);
+  let q = crystal(ray.o.xyz, ray.d.xyz);
   results[id.x] = ProbeResult(
     vec4f(select(0.0, 1.0, q.query.hit), q.query.t, q.query.gap, q.query.uv.x),
     vec4f(q.query.uv.y, q.query.p), vec4f(q.query.n, q.gap_lower),

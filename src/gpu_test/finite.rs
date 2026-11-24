@@ -30,7 +30,6 @@ fn finite_gpu_keeps_camera_and_instance_low_parts_at_metre_offsets()
                 o: origin,
                 d: direction,
             },
-            true,
         )?;
         assert!(actual[0] > 0.5);
         assert!(
@@ -71,7 +70,7 @@ fn finite_scene_leaf_axes_cutouts_and_miss_bounds_match_cpu()
             o: [0, 1, 2].map(|i| f64::from(input[i])),
             d: [4, 5, 6].map(|i| f64::from(input[i])),
         };
-        let expected = query_object(&object, ray, true)?.packed(ray);
+        let expected = query_object(&object, ray)?.packed(ray);
         for (field, (gpu, cpu)) in row.iter().take(24).zip(expected).enumerate() {
             assert!(
                 gpu.is_finite() && (f64::from(*gpu) - cpu).abs() < 2e-5,
@@ -83,15 +82,8 @@ fn finite_scene_leaf_axes_cutouts_and_miss_bounds_match_cpu()
     Ok(())
 }
 #[test]
-fn finite_gpu_lighting_and_gap_requests_respect_both_sides()
--> Result<(), Box<dyn std::error::Error>> {
+fn finite_gpu_lights_both_sides() -> Result<(), Box<dyn std::error::Error>> {
     let actual = run("verify_finite_pending", &[[0.0; 8]], 16)?;
-    assert!(actual[4] > 0.5, "finite selection never requested its gap");
-    assert!(actual[5] > 0.5, "finite gap view never requested its gap");
-    assert!(
-        actual[6] < 0.5,
-        "ordinary finite rendering requested unnecessary gaps"
-    );
     assert!(
         actual[7] < -0.99,
         "back face kept its forward lighting normal"
@@ -151,7 +143,7 @@ fn finite_plane_real_gpu_matches_cpu_edges_front_back_and_misses()
             o: [0, 1, 2].map(|i| f64::from(input[i])),
             d: [4, 5, 6].map(|i| f64::from(input[i])),
         };
-        let expected = query_object(&object, ray, true)?.packed(ray);
+        let expected = query_object(&object, ray)?.packed(ray);
         for field in 0..24 {
             let value = f64::from(actual[index * 32 + field]);
             assert!(

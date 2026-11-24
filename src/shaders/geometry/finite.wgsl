@@ -102,7 +102,7 @@ fn plane_supported(o:vec3f,d:vec3f)->bool {
   }
   return abs(dot(d,d)-1.0)<=32.0*FI_U;
 }
-fn plane_flat(o:vec3f,d:vec3f,need_gap:bool)->GeometryQuery {
+fn plane_flat(o:vec3f,d:vec3f)->GeometryQuery {
   if(!plane_supported(o,d)){return GeometryQuery(plane_sample(vec3f(0.0),0.0,false),0.0,0.0,3u);}
   var query=plane_sample(vec3f(0.0),0.0,false);var uncertain=false;var time_error=0.0;
   if(d.z!=0.0){
@@ -133,13 +133,10 @@ fn plane_flat(o:vec3f,d:vec3f,need_gap:bool)->GeometryQuery {
     }
   }
   if(query.hit){return GeometryQuery(query,0.0,plane_rounding(o,query.t)+time_error,select(0u,1u,uncertain));}
-  if(need_gap){
-    var gap=plane_gap(o,d);gap.status=max(gap.status,select(0u,1u,uncertain));return gap;
-  }
-  return GeometryQuery(query,0.0,0.0,select(2u,1u,uncertain));
+  var gap=plane_gap(o,d);gap.status=max(gap.status,select(0u,1u,uncertain));return gap;
 }
-fn finite_plane(o:vec3f,d:vec3f,axis:u32,need_gap:bool)->GeometryQuery {
-  var query=plane_flat(plane_frame(o,axis),plane_frame(d,axis),need_gap);
+fn finite_plane(o:vec3f,d:vec3f,axis:u32)->GeometryQuery {
+  var query=plane_flat(plane_frame(o,axis),plane_frame(d,axis));
   query.query.p=plane_unframe(query.query.p,axis);
   query.query.n=plane_unframe(query.query.n,axis);return query;
 }

@@ -1,4 +1,4 @@
-// Colour/filtering only: collision always uses all four immutable scalar fields.
+// Filtered shading from the same immutable height bands.
 @group(0) @binding(10) var leaf_repeat:sampler;
 @group(0) @binding(11) var leaf_clamp:sampler;
 fn leaf_uv(p:vec2f,order:u32)->vec2f {

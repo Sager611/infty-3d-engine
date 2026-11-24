@@ -19,7 +19,7 @@ fn distance_case(p: V, expected: f64) -> Result<(), ArithmeticError> {
     Ok(())
 }
 fn ray_case(o: V, d: V, expected: f64) -> Result<(), ArithmeticError> {
-    let result = query(Ray { o, d }, true)?;
+    let result = query(Ray { o, d })?;
     assert!(result.sample.hit, "expected hit at {expected}, got miss");
     assert!((result.sample.t - expected).abs() <= 1e-8_f64.mul_add(1.0 + expected, result.error));
     assert!(result.sample.gap.abs() < 1e-14);
@@ -64,11 +64,10 @@ fn miss_gap_and_shadow_status() -> Result<(), ArithmeticError> {
         o: [-3.0; 3],
         d: [d; 3],
     };
-    let result = query(ray, true)?;
+    let result = query(ray)?;
     let expected = closest(ray.o)?;
-    assert!(!result.sample.hit && result.gap_computed);
+    assert!(!result.sample.hit);
     assert!(result.gap_lower <= expected.upper && result.sample.gap >= expected.lower);
-    assert!(!query(ray, false)?.gap_computed);
     Ok(())
 }
 #[test]
@@ -98,18 +97,15 @@ fn finite_apex_cap_and_lowest_bands_are_global() -> Result<(), ArithmeticError> 
 #[test]
 fn negative_roots_never_become_origin_hits() -> Result<(), ArithmeticError> {
     for scale in [MIN_SCALE, 1e-24, 1e-300] {
-        let result = query(
-            Ray {
-                o: [0.0, 0.0, -scale],
-                d: [0.0, 0.0, -1.0],
-            },
-            true,
-        )?;
+        let result = query(Ray {
+            o: [0.0, 0.0, -scale],
+            d: [0.0, 0.0, -1.0],
+        })?;
         assert!(
             !result.sample.hit,
             "negative root became a hit at scale {scale}"
         );
-        assert!(result.gap_computed && result.sample.gap.is_finite());
+        assert!(result.sample.gap.is_finite());
     }
     Ok(())
 }

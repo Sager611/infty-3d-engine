@@ -7,7 +7,9 @@
 - Intuitive web controls to add and delete geometry instances.
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
 - Free-camera WASD movement and drag look; wheel changes travel speed. Only straight W approaches to nearby center-ray hits ease down to a minimum speed; reverse, strafe and diagonal movement retain normal speed. Minimum travel speed and the approach floor are0.000001 units/s for close inspection.
-- Leaf: broadest height gain1 (32× original1/32); finer gains and cutout unchanged.
+- Base ray queries always return a gap and matching surface witness with UV/normal; preserve explicit uncertainty and independent point queries.
+- Texh: on a base miss, sample an optional heightmap once at the witness UV. Accept if signed height reaches the gap toward the ray. Keep base hits and cutouts. No displaced-ray traversal; the approximation can miss relief elsewhere. Expand culling by texture reach.
+- Leaf: keep four bands, gain1 at the broadest, and the existing cutout. Compare warm displayed FPS before/after at1265×791; target60FPS.
 
 ## Changelog
 | When | Who | What | Why |
@@ -22,3 +24,4 @@
 | 2026-11-09 | Assistant | Clarified reference-grounded, appearance-only materials | Preserve geometry/query/navigation behavior |
 | 2026-11-23 | User | Doubled broadest Leaf height | Exaggerate largest-scale geometry |
 | 2026-11-23 | User | Set broadest Leaf height to32× original | Make broad folds obvious |
+| 2026-11-24 | User | Replace displaced rays with generic texh | One sample instead of traversal |

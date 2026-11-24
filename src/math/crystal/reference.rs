@@ -192,7 +192,7 @@ fn exhaustive_model_checks_all_twenty_bands_and_component_ties()
                 o: p,
                 d: p.map(|x| -x / length),
             };
-            let result = super::query(ray, true)?;
+            let result = super::query(ray)?;
             match (first_hit(ray), result.sample.hit) {
                 (Some(t), true) => assert!(
                     (result.sample.t - t).abs() <= result.error + slack,

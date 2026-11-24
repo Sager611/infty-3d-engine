@@ -46,20 +46,17 @@ fn finite_plane_axes_bounds_and_edges_are_explicit() -> Result<(), Box<dyn std::
             o: unframe(axis, [0.25, 0.5, 2.0]),
             d: unframe(axis, [0.0, 0.0, -1.0]),
         };
-        let q = geometry.query(ray, true)?;
+        let q = geometry.query(ray)?;
         assert!(q.sample.hit && !q.uncertain);
         assert!((q.sample.t - 2.0).abs() < 1e-13);
         assert_eq!(q.sample.p, unframe(axis, [0.25, 0.5, 0.0]));
         assert_eq!(q.sample.n, unframe(axis, [0.0, 0.0, 1.0]));
         assert_eq!(q.sample.uv, [0.625, 0.75]);
-        let outside = geometry.query(
-            Ray {
-                o: unframe(axis, [1.000_001, 0.5, 2.0]),
-                d: ray.d,
-            },
-            true,
-        )?;
-        assert!(!outside.sample.hit && outside.gap_computed);
+        let outside = geometry.query(Ray {
+            o: unframe(axis, [1.000_001, 0.5, 2.0]),
+            d: ray.d,
+        })?;
+        assert!(!outside.sample.hit);
     }
     let kind = Kind::from_tag(5).ok_or("missing finite plane")?;
     for parameter in [-1.0, 0.5, 3.0, f64::NAN] {
@@ -72,32 +69,23 @@ fn finite_plane_axes_bounds_and_edges_are_explicit() -> Result<(), Box<dyn std::
 fn finite_plane_is_double_sided_and_handles_coplanar_contacts() -> Result<(), Error> {
     let geometry = finite(0.0)?;
     for z in [-2.0_f64, 2.0] {
-        let q = geometry.query(
-            Ray {
-                o: [1.0, 1.0, z],
-                d: [0.0, 0.0, -z.signum()],
-            },
-            true,
-        )?;
+        let q = geometry.query(Ray {
+            o: [1.0, 1.0, z],
+            d: [0.0, 0.0, -z.signum()],
+        })?;
         assert!(q.sample.hit && !q.uncertain);
         assert!((q.sample.t - 2.0).abs() < 1e-13);
     }
-    let q = geometry.query(
-        Ray {
-            o: [-2.0, 0.0, 0.0],
-            d: [1.0, 0.0, 0.0],
-        },
-        true,
-    )?;
+    let q = geometry.query(Ray {
+        o: [-2.0, 0.0, 0.0],
+        d: [1.0, 0.0, 0.0],
+    })?;
     assert!(q.sample.hit && (q.sample.t - 1.0).abs() < 1e-13);
     assert_eq!(q.sample.p, [-1.0, 0.0, 0.0]);
-    let q = geometry.query(
-        Ray {
-            o: [0.0; 3],
-            d: [0.0, 1.0, 0.0],
-        },
-        true,
-    )?;
+    let q = geometry.query(Ray {
+        o: [0.0; 3],
+        d: [0.0, 1.0, 0.0],
+    })?;
     assert!(q.sample.hit && q.sample.t == 0.0);
     Ok(())
 }
@@ -116,7 +104,7 @@ fn finite_precision_boundaries_never_claim_a_resolved_false_hit() -> Result<(), 
             d: [diagonal, diagonal, 0.0],
         },
     ] {
-        let q = geometry.query(ray, true)?;
+        let q = geometry.query(ray)?;
         assert!(
             !q.sample.hit || q.uncertain,
             "rounding manufactured a certain finite-plane contact"
@@ -165,8 +153,8 @@ fn finite_plane_miss_gaps_use_real_rectangle_witnesses() -> Result<(), Error> {
             2.0_f64.sqrt(),
         ),
     ] {
-        let q = geometry.query(ray, true)?;
-        assert!(!q.sample.hit && q.gap_computed);
+        let q = geometry.query(ray)?;
+        assert!(!q.sample.hit);
         assert!(q.sample.p[0].abs() <= 1.0 && q.sample.p[1].abs() <= 1.0);
         assert_eq!(q.sample.p[2], 0.0);
         assert!(q.gap_lower <= gap + 1e-12 && q.sample.gap >= gap - 1e-12);
@@ -206,7 +194,7 @@ fn leaf_collision_and_cutout_belong_to_the_instance_not_the_view()
 -> Result<(), Box<dyn std::error::Error>> {
     let flat = leaf_scene(0.0)?;
     let leaf = leaf_scene(2.0)?;
-    assert!(!flat.has_leaf() && leaf.has_leaf());
+    assert!(!flat.has_leaf_finish() && leaf.has_leaf_finish());
     let ray = Ray {
         o: [0.0, 0.0, 0.05],
         d: [0.0, 0.0, -1.0],
@@ -214,10 +202,23 @@ fn leaf_collision_and_cutout_belong_to_the_instance_not_the_view()
     let a = query_prepared(&flat, ray, QueryMode::Inspect)?;
     let b = query_prepared(&leaf, ray, QueryMode::Inspect)?;
     assert!(a[0].sample.hit && b[0].sample.hit);
-    assert!(
-        (a[0].sample.t - b[0].sample.t).abs() > 1e-8,
-        "leaf is only an appearance"
-    );
+    assert_eq!(a[0].sample.t, b[0].sample.t, "base hits stay put");
+    let height = crate::heightfield::LEAF.sample([0.0, 0.0])?.height * 0.07;
+    assert!(height.abs() > 1e-8);
+    for (ratio, hit) in [(0.5, true), (2.0, false), (-0.5, false)] {
+        let ray = Ray {
+            o: [0.0, 0.0, height * ratio],
+            d: [0.0, 0.0, (height * ratio).signum()],
+        };
+        let base = query_prepared(&flat, ray, QueryMode::Inspect)?;
+        assert!(!base[0].sample.hit);
+        assert_eq!(base[0].sample.p, [0.0; 3]);
+        assert_eq!(
+            !query_prepared(&leaf, ray, QueryMode::First)?.is_empty(),
+            hit,
+            "height/gap case {ratio}"
+        );
+    }
     let outside = Ray {
         o: [-0.067, -0.067, 0.05],
         d: ray.d,
@@ -239,7 +240,7 @@ fn leaf_collision_and_cutout_belong_to_the_instance_not_the_view()
     )?;
     assert_eq!(point.resolution, Resolution::Unresolved);
     assert!(point.evaluations <= 1 && point.witness.is_some());
-    let on_surface = closest_prepared(&leaf, 1, b[0].sample.p, Request::default())?;
+    let on_surface = closest_prepared(&leaf, 1, [0.0, 0.0, height], Request::default())?;
     assert!(on_surface.distance.lower <= 1e-10 && on_surface.distance.upper < 1e-8);
     Ok(())
 }
@@ -255,7 +256,7 @@ fn leaf_finish_does_not_displace_existing_geometry() -> Result<(), Box<dyn std::
         let kind = Kind::from_tag(tag).ok_or("missing original geometry")?;
         let object = Object::new(1, kind, [0.0; 3], 1.0, if tag == 2 { 1.5 } else { 0.0 })?;
         let painted = Prepared::new(&[object.with_material(leaf)])?;
-        assert!(painted.has_leaf_finish() && !painted.has_leaf());
+        assert!(painted.has_leaf_finish());
         let a = query_objects(&[object], ray, QueryMode::Inspect)?;
         let b = query_objects(&[object.with_material(leaf)], ray, QueryMode::Inspect)?;
         assert_eq!(

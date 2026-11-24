@@ -48,8 +48,8 @@ fn checked_fields_require_a_layout_and_a_covered_anchor() -> Result<(), Error> {
 fn gpu_header_preserves_scalar_bytes_and_exact_canonical_amplitudes()
 -> Result<(), Box<dyn std::error::Error>> {
     let bytes = LEAF.gpu_bytes()?;
-    assert_eq!(bytes.len(), DATA.len() + 32);
-    for (index, expected) in [512, 436_908, 512_000, 1].into_iter().enumerate() {
+    assert_eq!(bytes.len(), 5 * 512 * 512 + 32);
+    for (index, expected) in [512, 262_144, 512_000, 1].into_iter().enumerate() {
         assert_eq!(
             u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into()?),
             expected
@@ -63,7 +63,12 @@ fn gpu_header_preserves_scalar_bytes_and_exact_canonical_amplitudes()
             expected
         );
     }
-    assert_eq!(&bytes[32..], DATA.as_slice());
+    for (gpu, cpu) in bytes[32..]
+        .chunks_exact(512 * 512)
+        .zip(DATA.chunks_exact(436_908))
+    {
+        assert_eq!(gpu, &cpu[..512 * 512]);
+    }
     assert!(
         Field {
             amplitudes: [0.1; 4],
@@ -77,8 +82,6 @@ fn gpu_header_preserves_scalar_bytes_and_exact_canonical_amplitudes()
 
 #[path = "point_tests.rs"]
 mod point_tests;
-#[path = "ray_tests.rs"]
-mod ray_tests;
 fn tile(v: [u8; 4]) -> [u8; 8] {
     [
         v[0],
@@ -243,6 +246,5 @@ fn preset_height_bytes_equal_the_uploaded_rgba_height_channels()
     assert!(LEAF.sample([0.0; 2])?.coverage >= 127.5);
     assert!(LEAF.sample([-0.96; 2])?.coverage < 127.5);
     assert_eq!(STEPS, 64);
-    assert_eq!(DEPTH, 19);
     Ok(())
 }

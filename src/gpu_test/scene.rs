@@ -30,7 +30,7 @@ fn transformed_scene_packets_match_cpu() -> Result<(), Box<dyn std::error::Error
             o: std::array::from_fn(|i| f64::from(input[i])),
             d: std::array::from_fn(|i| f64::from(input[i + 4])),
         };
-        let expected = query_object(&object, ray, true)?.packed(ray);
+        let expected = query_object(&object, ray)?.packed(ray);
         let output = &actual[index * 32..(index + 1) * 32];
         for (field, expected) in expected.into_iter().enumerate() {
             let value = f64::from(output[field]);

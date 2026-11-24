@@ -173,7 +173,6 @@ impl Renderer {
                 &self.device,
                 &self.queue,
                 Demand {
-                    geometry: scene.core.has_leaf(),
                     leaf: scene.core.has_leaf_finish(),
                     materials: params.screen[2] == 3,
                 },

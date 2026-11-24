@@ -3,7 +3,6 @@ use super::Tiles;
 use crate::heightfield::gpu::Heights;
 #[derive(Clone, Copy)]
 pub struct Demand {
-    pub geometry: bool,
     pub leaf: bool,
     pub materials: bool,
 }
@@ -28,12 +27,12 @@ impl Resources {
     ) -> Result<bool, String> {
         self.dirty |= self
             .heights
-            .ensure(device, need.geometry)
+            .ensure(device, need.leaf)
             .map_err(|error| error.to_string())?;
         if need.materials {
             self.dirty |= self
                 .tiles
-                .ensure(device, queue, need.leaf || need.geometry)
+                .ensure(device, queue, need.leaf)
                 .map_err(str::to_owned)?;
         }
         Ok(std::mem::take(&mut self.dirty))

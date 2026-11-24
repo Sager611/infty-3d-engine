@@ -77,7 +77,7 @@ fn expected(name: &str, input: [f32; 8]) -> Result<[f64; 16], String> {
             f64::from(input[6]),
         ],
     };
-    let result = goursat(ray, f64::from(input[3]), true)
+    let result = goursat(ray, f64::from(input[3]))
         .map_err(|error| format!("{name}: CPU Goursat error: {error:?}; input={input:?}"))?;
     Ok([
         if result.sample.hit { 1.0 } else { 0.0 },

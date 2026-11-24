@@ -2,7 +2,8 @@ use super::*;
 use crate::geometry::point::{Request, Resolution};
 
 #[test]
-fn leaf_closest_budget_and_valid_witness_bounds_are_explicit() -> Result<(), Error> {
+fn leaf_closest_budget_and_valid_witness_bounds_are_explicit()
+-> Result<(), Box<dyn std::error::Error>> {
     let p = [0.0, 0.0, 1.0];
     let none = point::query(
         LEAF,
@@ -29,7 +30,7 @@ fn leaf_closest_budget_and_valid_witness_bounds_are_explicit() -> Result<(), Err
             && q.distance.lower >= (p[2] - cap).next_down()
             && q.distance.lower <= q.distance.upper
     );
-    let w = q.witness.ok_or(Error::Unresolved)?;
+    let w = q.witness.ok_or("missing witness")?;
     let v = LEAF.sample([w.point[0], w.point[1]])?;
     assert!(v.coverage >= 127.5 && (v.height - w.point[2]).abs() <= w.error);
     let distance = (p[0] - w.point[0])
@@ -40,19 +41,21 @@ fn leaf_closest_budget_and_valid_witness_bounds_are_explicit() -> Result<(), Err
 }
 
 #[test]
-fn surface_proximity_uses_continuous_witnesses_not_grid_vertex_snapping() -> Result<(), Error> {
+fn surface_proximity_uses_continuous_witnesses_not_grid_vertex_snapping()
+-> Result<(), Box<dyn std::error::Error>> {
     let xy = [0.012, -0.217];
     let height = LEAF.sample(xy)?.height;
     let p = [xy[0], xy[1], height];
     let q = point::query(LEAF, p, Request::default())?;
     assert_eq!(q.resolution, Resolution::Converged);
     assert!(q.distance.lower == 0.0 && q.distance.upper < 1e-12 && q.evaluations <= 64);
-    assert_eq!(q.witness.ok_or(Error::Unresolved)?.point, p);
+    assert_eq!(q.witness.ok_or("missing witness")?.point, p);
     Ok(())
 }
 
 #[test]
-fn cutout_closest_bounds_never_use_the_removed_rectangle() -> Result<(), Error> {
+fn cutout_closest_bounds_never_use_the_removed_rectangle() -> Result<(), Box<dyn std::error::Error>>
+{
     let pixels = data([[128; 4], [128; 4], [128; 4], [128; 4], [0, 255, 0, 255]]);
     let field = Field {
         amplitudes: [0.0; 4],
@@ -63,7 +66,7 @@ fn cutout_closest_bounds_never_use_the_removed_rectangle() -> Result<(), Error> 
     let q = point::query(field, p, Request::default())?;
     assert!(q.distance.lower <= expected && q.distance.upper >= expected);
     assert!(q.evaluations <= 64);
-    let w = q.witness.ok_or(Error::Unresolved)?;
+    let w = q.witness.ok_or("missing witness")?;
     assert!(w.point[0] >= -0.5 && field.sample([w.point[0], w.point[1]])?.coverage >= 127.5);
     Ok(())
 }

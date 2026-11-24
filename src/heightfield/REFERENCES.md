@@ -1,29 +1,21 @@
 # Finite leaf
 
 Try Scene controls → Scene → Leaf; Add → Finite plane reuses the carrier.
-Axis0/1/2 means normalZ/X/Y. Kind5 is a double-sided square; material2 adds one fixed leaf surface.
-Kinds1–4 keep appearance-only finishes; steel/brick leave the finite carrier flat.
+Axis0/1/2 means normalZ/X/Y. Kind5 is a double-sided square with a Leaf cutout.
+Leaf relief can be applied to any geometry; steel/brick leave intersections unchanged.
 At reference half-size70mm, four vertex-aligned512² height fields span140/14/1.4/0.14mm.
 The macro field clamps; finer fields repeat. Raw bytes are centered at128, divided by255,
-and multiplied by canonical gains2^-5/2^-10/2^-13/2^-15 before summation.
+and multiplied by canonical gains1/2^-10/2^-13/2^-15 before summation.
 A separate512² opacity field clips coverage at127.5. It is not height or optical albedo.
 Uniform instance size scales the entire surface; peers still share their carrier definition.
 
 ## Geometry and rendering
 
-CPU and GPU intersect the same summed bilinear scalar, not independently displaced hits.
-Five immutable min/max pyramids bound analytic cell intersections; queues/visits cap at64.
-One immutable scalar payload serves CPU queries and lazy GPU upload.
-No recursion, marching, directional hit cache, or view-dependent collision.
-Contacts may coexist with pending work; unresolved work is never a certain miss.
-Proximity returns conservative bounds and real covered witnesses, not exact/unique nearest points.
-A point query additionally probes its anchor and at most two witnesses per visited node.
-
-Colour sampling shares vertex addressing, macro clamping, and fine wrapping with geometry.
-Display LOD filters colour/normals and adds unresolved roughness; it cannot change collision.
-Full-resolution normals differentiate the sum. Filtered normals do not add relief a second time.
-Shadows query that surface too, using canonical precision/contact-error bias, not a metre-scale floor.
-Amber hatching marks unresolved primary ordering or shadow work; it is not a certified clear ray.
+Ray tests keep base hits, reject cutouts, and test signed height once at a miss witness UV.
+Promoted hits use the closest ray point; relief away from the witness is not searched.
+Point queries still use bounded height regions and covered witnesses, independent of ray tests.
+Colour and filtered normals share vertex addressing with the height sample; Leaf skips self-shadowing.
+Amber hatching marks unresolved ray or shadow work.
 The finest reference texel is273.4375nm; below this there is bilinear interpolation, not new evidence.
 Extreme close-ups expose cells and discontinuous normals at their boundaries.
 The leaf is an authored opaque sheet, not measured anatomy, transmission, thickness, or volumetric tissue.
@@ -54,7 +46,7 @@ Run `uv run --no-project tools/bake_leaf.py /path/to/references /path/to/checkou
 Dependencies are pinned in the script; references/previews stay outside the repository.
 Outputs: four linear RGB8/height-alpha zlib tiles and `leaf.bin` (2,184,540 bytes).
 Each scalar field has262,144 samples, nine interleaved min/max levels, and padding:436,908 bytes.
-GPU upload adds32 bytes: u32[edge,stride,resolution,version1], then four f32 gains.
+GPU upload omits pyramids: 32-byte header plus five raw planes.
 Layout, covered positive-zero anchor, and exact finite f32 gains are checked; no upload resampling.
 Byte reproducibility is checked against a fresh bake; these assets are not scientific measurements.
 
@@ -62,3 +54,4 @@ Byte reproducibility is checked against a fresh bake; these assets are not scien
 | When | Who | What | Why |
 |---|---|---|---|
 | 2026-11-11 | Assistant | Documented Leaf usage, fixed surface, source derivatives and bake | Make geometry, limits and attribution explicit |
+| 2026-11-24 | Assistant | Documented texh ray approximation | Separate ray, point, and shading rules |

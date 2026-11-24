@@ -93,79 +93,16 @@ pub const fn sample(p: [f64; 3], t: f64, hit: bool) -> Sample {
         uv: [0.5_f64.mul_add(p[0], 0.5), 0.5_f64.mul_add(p[1], 0.5)],
     }
 }
-pub fn query(ray: Ray, axis: f64, leaf: bool, need_gap: bool) -> Result<GeometrySample, Error> {
-    let ray = Ray {
+pub fn query(ray: Ray, axis: f64) -> Result<GeometrySample, Error> {
+    let mut result = flat_query(Ray {
         o: frame(ray.o, axis),
         d: frame(ray.d, axis),
-    };
-    let mut result = if leaf {
-        leaf_query(ray, need_gap)?
-    } else {
-        flat_query(ray, need_gap)?
-    };
+    })?;
     result.sample.p = unframe(result.sample.p, axis);
     result.sample.n = unframe(result.sample.n, axis);
     Ok(result)
 }
-fn leaf_query(ray: Ray, need_gap: bool) -> Result<GeometrySample, Error> {
-    let field = crate::heightfield::LEAF;
-    let query = crate::heightfield::ray::query(field, ray, 64)?;
-    if query.visits > 64 {
-        return Err(Error::Unresolved);
-    }
-    if !query.complete && !need_gap {
-        return Err(Error::Unresolved);
-    }
-    if let Some(hit) = query.contact {
-        let mut sample = sample(hit.p, hit.time.middle(), true);
-        sample.n = hit.normal;
-        return Ok(GeometrySample {
-            sample,
-            gap_lower: 0.0,
-            error: hit.error,
-            uncertain: !query.complete || query.uncertain,
-            gap_computed: true,
-        });
-    }
-    if !need_gap {
-        return Ok(GeometrySample {
-            sample: sample([0.0; 3], 0.0, false),
-            gap_lower: 0.0,
-            error: 0.0,
-            uncertain: false,
-            gap_computed: false,
-        });
-    }
-    // A cutout is only a subset of the displaced carrier: no carrier upper-bound shortcut.
-    let xy = field.anchor();
-    let value = field.sample(xy)?;
-    let point = [xy[0], xy[1], value.height];
-    let delta = [0, 1, 2].map(|i| point[i] - ray.o[i]);
-    let t = (dot(delta, ray.d) / dot(ray.d, ray.d)).max(0.0);
-    let error = rounding(ray, t) + field.roundoff();
-    let upper = distance(ray_point(ray, t), point)?
-        .add(I::point(error)?)?
-        .hi();
-    let bounds = field
-        .bounds(crate::heightfield::Node::default())?
-        .ok_or(Error::Numeric)?;
-    let envelope = bounds.lo[2].abs().max(bounds.hi[2].abs());
-    let lower = I::point(gap(ray)?.gap_lower)?
-        .sub(I::point(envelope)?)?
-        .lo()
-        .max(0.0);
-    let mut sample = sample(point, t, false);
-    sample.gap = upper;
-    sample.n = value.normal();
-    Ok(GeometrySample {
-        sample,
-        gap_lower: lower,
-        error,
-        uncertain: !query.complete,
-        gap_computed: true,
-    })
-}
-fn flat_query(ray: Ray, need_gap: bool) -> Result<GeometrySample, Error> {
+fn flat_query(ray: Ray) -> Result<GeometrySample, Error> {
     let mut hit = None;
     let mut uncertain = false;
     if ray.d[2] != 0.0 {
@@ -203,27 +140,15 @@ fn flat_query(ray: Ray, need_gap: bool) -> Result<GeometrySample, Error> {
             true,
         ));
     }
-    if uncertain && !need_gap {
-        return Err(Error::Unresolved);
-    }
     let mut result = if let Some(sample) = hit {
         GeometrySample {
             sample,
             gap_lower: 0.0,
             error: rounding(ray, sample.t),
             uncertain: false,
-            gap_computed: true,
         }
-    } else if need_gap {
-        gap(ray)?
     } else {
-        GeometrySample {
-            sample: sample([0.0; 3], 0.0, false),
-            gap_lower: 0.0,
-            error: 0.0,
-            uncertain: false,
-            gap_computed: false,
-        }
+        gap(ray)?
     };
     result.uncertain |= uncertain;
     Ok(result)
@@ -287,7 +212,6 @@ fn gap(ray: Ray) -> Result<GeometrySample, Error> {
                 gap_lower: 0.0,
                 error,
                 uncertain: false,
-                gap_computed: true,
             };
             if best.is_none_or(|v| candidate.sample.gap < v.sample.gap) {
                 best = Some(candidate);

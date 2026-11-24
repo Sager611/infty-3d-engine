@@ -68,10 +68,10 @@ fn crystal_trace_is_bounded_optional_and_result_neutral() -> Result<(), Box<dyn 
         o: [-3.0; 3],
         d: [-1.0 / 3.0_f64.sqrt(); 3],
     };
-    let plain = c.query(ray, false)?;
+    let plain = c.query(ray)?;
     let mut log = TraceLog::new(1)?;
-    let traced = c.query_traced(ray, false, &mut Recorder::new(Some(&mut log), 7))?;
-    c.query_traced(ray, false, &mut Recorder::new(Some(&mut log), 7))?;
+    let traced = c.query_traced(ray, &mut Recorder::new(Some(&mut log), 7))?;
+    c.query_traced(ray, &mut Recorder::new(Some(&mut log), 7))?;
     assert_eq!(
         plain.sample.packed(ray, 0.0).map(f64::to_bits),
         traced.sample.packed(ray, 0.0).map(f64::to_bits)
@@ -79,12 +79,14 @@ fn crystal_trace_is_bounded_optional_and_result_neutral() -> Result<(), Box<dyn 
     assert_eq!(plain.gap_lower.to_bits(), traced.gap_lower.to_bits());
     assert_eq!(plain.error.to_bits(), traced.error.to_bits());
     assert_eq!(plain.uncertain, traced.uncertain);
-    assert!(!plain.gap_computed && !traced.gap_computed);
     let packet = log.packed(&[])?;
     assert_eq!(packet.len(), 11);
     assert_eq!(packet[1].to_bits(), 1.0_f64.to_bits());
     assert_eq!(packet[2].to_bits(), 1.0_f64.to_bits());
-    assert_eq!(packet[10].to_bits(), 2.0_f64.to_bits());
+    assert_eq!(
+        packet[10].to_bits(),
+        f64::from(u8::from(plain.uncertain)).to_bits()
+    );
     let p = [1.2, -0.4, 0.9];
     let ordinary = c.closest(p, Request::default())?;
     let traced = c.closest_traced(p, Request::default(), &mut Recorder::new(Some(&mut log), 7))?;

@@ -230,20 +230,20 @@ fn plane_precision_gap_normal_projection_and_basis() {
 
 #[test]
 fn goursat_hit_miss_and_validation() -> Result<(), GoursatError> {
-    let hit = goursat(ray([0.5, 0.5, -3.0], [0.0, 0.0, 1.0]), 1.125, true)?;
+    let hit = goursat(ray([0.5, 0.5, -3.0], [0.0, 0.0, 1.0]), 1.125)?;
     assert!(hit.sample.hit);
     close(hit.sample.t, 2.0);
     assert_eq!(hit.gap_lower.to_bits(), 0.0f64.to_bits());
     assert!(hit.error.is_finite());
-    let miss = goursat(ray([0.4999, 0.4999, -3.0], [0.0, 0.0, 1.0]), 1.125, true)?;
+    let miss = goursat(ray([0.4999, 0.4999, -3.0], [0.0, 0.0, 1.0]), 1.125)?;
     assert!(!miss.sample.hit);
     assert!(miss.uncertain || miss.error.is_finite());
     assert!(matches!(
-        goursat(ray([0.0; 3], [0.0; 3]), 1.125, false),
+        goursat(ray([0.0; 3], [0.0; 3]), 1.125),
         Err(GoursatError::InvalidRay)
     ));
     assert!(matches!(
-        goursat(ray([0.0; 3], [0.0, 0.0, 1.0]), 2.0, false),
+        goursat(ray([0.0; 3], [0.0, 0.0, 1.0]), 2.0),
         Err(GoursatError::InvalidBeta)
     ));
     Ok(())

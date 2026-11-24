@@ -257,7 +257,7 @@ fn crystal_component(o: vec3f,d: vec3f) -> CrystalShot {
   q.root.status=max(q.root.status,max(outside.status,inside.status));
   return q;
 }
-fn crystal(o: vec3f,d: vec3f,need_gap: bool) -> GeometryQuery {
+fn crystal(o: vec3f,d: vec3f) -> GeometryQuery {
   let empty=Query(false,0.0,0.0,vec3f(0.0),vec3f(0.0,0.0,1.0),vec2f(0.0));
   if (!all(abs(o)<vec3f(1e15)) || !(abs(dot(d,d)-1.0)<=32.0*CRYSTAL_U)) {
     return GeometryQuery(empty,0.0,0.0,3u);
@@ -275,13 +275,6 @@ fn crystal(o: vec3f,d: vec3f,need_gap: bool) -> GeometryQuery {
     else if (shot.axis==2u) {q=crystal_turn_foot(crystal_turn_foot(q));}
     return GeometryQuery(Query(true,shot.root.t,0.0,q.p,q.n,q.uv),0.0,
       shot.root.error+q.upper,shot.root.status);
-  }
-  if (!need_gap) {
-    if (shot.root.status!=0u) {
-      var q=empty;q.gap=max(1e-18,length(o)*(1.0+64.0*CRYSTAL_U));
-      return GeometryQuery(q,0.0,0.0,1u);
-    }
-    return GeometryQuery(empty,0.0,0.0,2u);
   }
   let a2=dot(d,d);let od=dot(o,d);let t=max(0.0,-od/a2);
   let p=fma(d,vec3f(t),o);let q=crystal_closest(p);

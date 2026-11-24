@@ -6,11 +6,14 @@ use crate::geometry::{
 #[cfg(test)]
 #[path = "query/point_tests.rs"]
 mod point_tests;
-use crate::math::{Ray, Sample};
 use crate::scene::{
     model::{Kind, Object, SceneError},
     prepared::Prepared,
     transform::Transform,
+};
+use crate::{
+    material::Material,
+    math::{Ray, Sample},
 };
 
 /// Which subset of the scene query results to return.
@@ -31,7 +34,6 @@ pub struct SceneSample {
     pub gap_lower: f64,
     pub error: f64,
     pub uncertain: bool,
-    pub gap_computed: bool,
 }
 
 /// Errors raised before or during a deterministic scene query.
@@ -136,13 +138,7 @@ impl SceneSample {
             } else {
                 0.0
             },
-            if !self.gap_computed {
-                2.0
-            } else if self.uncertain {
-                1.0
-            } else {
-                0.0
-            },
+            f64::from(u8::from(self.uncertain)),
             0.0,
         ]
     }
@@ -151,16 +147,14 @@ impl SceneSample {
 /// Query one object. The ray is normalized once, then transformed to the
 /// object's canonical unit-size coordinates.
 #[cfg(test)]
-pub fn query_object(object: &Object, ray: Ray, need_gap: bool) -> Result<SceneSample, QueryError> {
+pub fn query_object(object: &Object, ray: Ray) -> Result<SceneSample, QueryError> {
     validate_ray(ray)?;
     query_definition(
         object.id(),
-        object
-            .geometry()
-            .with_leaf_surface(object.material() == crate::material::Material::Leaf),
+        object.geometry(),
         object.transform(),
         normalized_ray(ray),
-        need_gap,
+        u32::from(object.material().tag()),
         &mut Recorder::off(),
     )
 }
@@ -170,17 +164,22 @@ fn query_definition(
     geometry: Geometry,
     transform: Transform,
     ray: Ray,
-    need_gap: bool,
+    material: u32,
     trace: &mut Recorder<'_>,
 ) -> Result<SceneSample, QueryError> {
     let local_ray = transform.local_ray(ray);
-    let result = if trace.enabled() {
-        geometry.query_traced(local_ray, need_gap, trace)
+    let mut result = if trace.enabled() {
+        geometry.query_traced(local_ray, trace)
     } else {
-        geometry.query(local_ray, need_gap)
+        geometry.query(local_ray)
     }
     .map_err(QueryError::Geometry)?;
     let local = result.sample.p;
+    if Material::from_tag(material) == Some(Material::Leaf) {
+        result = crate::heightfield::LEAF
+            .texh(local_ray, result, geometry.kind() == Kind::FinitePlane)
+            .map_err(QueryError::Geometry)?;
+    }
     let world = transform
         .world_query(result)
         .map_err(QueryError::Geometry)?;
@@ -193,7 +192,6 @@ fn query_definition(
         gap_lower: world.gap_lower,
         error: world.error,
         uncertain: world.uncertain,
-        gap_computed: world.gap_computed,
     })
 }
 
@@ -225,8 +223,7 @@ pub fn query_prepared_traced(
 ) -> Result<Vec<SceneSample>, QueryError> {
     validate_ray(ray)?;
     let ray = normalized_ray(ray);
-    let need_gap = mode == QueryMode::Inspect;
-    let candidates = if need_gap {
+    let candidates = if mode == QueryMode::Inspect {
         (0..scene.instances().len()).collect()
     } else {
         scene.spatial().candidates(ray.o, ray.d)
@@ -257,7 +254,7 @@ pub fn query_prepared_traced(
                 scene.surface(instance).map_err(QueryError::Geometry)?,
                 instance.transform(),
                 ray,
-                need_gap,
+                instance.material(),
                 &mut Recorder::new(trace.as_deref_mut(), instance.id()),
             )
         })
@@ -330,6 +327,21 @@ mod tests {
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+    #[test]
+    fn texh_candidates_are_not_culled_by_the_carrier_bounds() -> TestResult {
+        let textured = Object::default().with_material(Material::Leaf);
+        let other = Object::new(2, Kind::Sphere, [0.0, -4.0, 0.0], 0.25, 0.0)?;
+        let height = crate::heightfield::LEAF.sample([0.0; 2])?.height;
+        assert!(height > 0.0);
+        let ray = ray([height.mul_add(0.5, 1.0), 0.0, 0.0], [1.0, 0.0, 0.0]);
+        assert!(query_objects(&[Object::default(), other], ray, QueryMode::First)?.is_empty());
+        let samples = query_objects(&[textured, other], ray, QueryMode::First)?;
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].id, 1);
+        assert!(samples[0].sample.hit);
+        Ok(())
+    }
+
     fn sphere(
         id: u32,
         position: [f64; 3],
@@ -341,7 +353,7 @@ mod tests {
     #[test]
     fn translated_scaled_hit_keeps_local_witness() -> TestResult {
         let object = sphere(7, [0.0, 0.0, 1.0], 2.0)?;
-        let sample = query_object(&object, ray([0.0, 0.0, -5.0], [0.0, 0.0, 1.0]), false)?;
+        let sample = query_object(&object, ray([0.0, 0.0, -5.0], [0.0, 0.0, 1.0]))?;
         assert!(sample.sample.hit);
         assert_eq!(sample.sample.t.to_bits(), 4.0f64.to_bits());
         assert_eq!(
@@ -437,7 +449,7 @@ mod tests {
             Err(QueryError::InvalidRay)
         ));
         assert!(matches!(
-            query_object(&object, ray([0.0; 3], [0.0; 3]), false),
+            query_object(&object, ray([0.0; 3], [0.0; 3])),
             Err(QueryError::InvalidRay)
         ));
         assert!(matches!(
@@ -455,7 +467,7 @@ mod tests {
     fn packed_quartic_bounds_enclose_axis_hole_gap() -> Result<(), Box<dyn std::error::Error>> {
         let object = Object::new(1, Kind::Goursat, [0.0; 3], 1.0, 1.5)?;
         let ray = ray([0.0, 0.0, -3.0], [0.0, 0.0, 1.0]);
-        let sample = query_object(&object, ray, true)?;
+        let sample = query_object(&object, ray)?;
         let packet = sample.packed(ray);
         let true_gap = (2.0 - 3.0f64.sqrt()).sqrt();
         assert!(!sample.sample.hit);
@@ -475,7 +487,7 @@ mod tests {
     fn packed_layout_is_finite() -> TestResult {
         let object = sphere(1, [0.0; 3], 1.0)?;
         let ray = ray([0.0, 0.0, -3.0], [0.0, 0.0, 2.0]);
-        let packet = query_object(&object, ray, false)?.packed(ray);
+        let packet = query_object(&object, ray)?.packed(ray);
         assert!(packet.iter().all(|value| value.is_finite()));
         assert_eq!(packet.len(), 24);
         assert_eq!(

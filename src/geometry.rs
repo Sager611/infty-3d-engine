@@ -48,7 +48,6 @@ pub enum Error {
     InvalidRay,
     InvalidPoint,
     InvalidRequest,
-    Unresolved,
     Numeric,
     Kernel(GoursatError),
 }
@@ -59,9 +58,6 @@ impl std::fmt::Display for Error {
             Self::InvalidRay => f.write_str("canonical ray must be finite and unit length"),
             Self::InvalidPoint => f.write_str("point must be finite"),
             Self::InvalidRequest => f.write_str("invalid query accuracy or evaluation budget"),
-            Self::Unresolved => {
-                f.write_str("finite-plane query exceeded its fixed work or precision bound")
-            }
             Self::Numeric => f.write_str("query arithmetic is not representable"),
             Self::Kernel(error) => error.fmt(f),
         }
@@ -117,15 +113,10 @@ impl Geometry {
         }
     }
     /// Query a finite unit-direction ray in canonical coordinates.
-    pub fn query(self, ray: Ray, need_gap: bool) -> Result<GeometrySample, Error> {
-        self.query_traced(ray, need_gap, &mut Recorder::off())
+    pub fn query(self, ray: Ray) -> Result<GeometrySample, Error> {
+        self.query_traced(ray, &mut Recorder::off())
     }
-    pub fn query_traced(
-        self,
-        ray: Ray,
-        need_gap: bool,
-        trace: &mut Recorder<'_>,
-    ) -> Result<GeometrySample, Error> {
+    pub fn query_traced(self, ray: Ray, trace: &mut Recorder<'_>) -> Result<GeometrySample, Error> {
         let squared = ray.d[0].mul_add(ray.d[0], ray.d[1].mul_add(ray.d[1], ray.d[2] * ray.d[2]));
         if !finite3(ray.o) || !finite3(ray.d) || (squared - 1.0).abs() > 32.0 * f64::EPSILON {
             return Err(Error::InvalidRay);
@@ -135,11 +126,11 @@ impl Geometry {
             Kind::Plane => plane(ray, [0.0; 3], [0.0, 1.0, 0.0]),
             Kind::Goursat | Kind::CrystallineCluster | Kind::FinitePlane => {
                 let result = if self.kind == Kind::Goursat {
-                    goursat_traced(ray, self.parameter, need_gap, trace).map_err(Error::Kernel)?
+                    goursat_traced(ray, self.parameter, trace).map_err(Error::Kernel)?
                 } else if self.kind == Kind::FinitePlane {
-                    finite::query(ray, self.parameter, self.leaf, need_gap)?
+                    finite::query(ray, self.parameter)?
                 } else {
-                    crystal::query(ray, need_gap)?
+                    crystal::query(ray)?
                 };
                 let result = checked(result)?;
                 record_ray(result, trace, Tag::Ray);
@@ -151,7 +142,6 @@ impl Geometry {
             gap_lower: sample.gap,
             error: 0.0,
             uncertain: false,
-            gap_computed: true,
         })?;
         record_ray(result, trace, Tag::Ray);
         Ok(result)
@@ -185,11 +175,7 @@ pub fn record_ray(result: GeometrySample, trace: &mut Recorder<'_>, tag: Tag) {
             result.gap_lower,
             result.sample.gap,
             result.error,
-            if result.gap_computed {
-                f64::from(u8::from(result.uncertain))
-            } else {
-                2.0
-            },
+            f64::from(u8::from(result.uncertain)),
         ],
     );
 }
@@ -223,6 +209,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_geometry_returns_a_gap_with_a_surface_witness() -> Result<(), Error> {
+        use crate::math::vector::{dot, madd, sub};
+        let ray = Ray {
+            o: [3.0, 3.0, 4.0],
+            d: [0.0, 0.0, 1.0],
+        };
+        for (kind, parameter) in [
+            (Kind::Sphere, 0.0),
+            (Kind::Plane, 0.0),
+            (Kind::FinitePlane, 0.0),
+            (Kind::Goursat, 1.5),
+            (Kind::CrystallineCluster, 0.0),
+        ] {
+            let result = Geometry::new(kind, parameter)?.query(ray)?;
+            let sample = result.sample;
+            let delta = sub(madd(ray.o, ray.d, sample.t), sample.p);
+            assert!(
+                !sample.hit && sample.gap > 0.0 && result.gap_lower <= sample.gap,
+                "{kind:?}"
+            );
+            assert!(
+                (dot(delta, delta).sqrt() - sample.gap).abs() <= result.error + 1e-10,
+                "{kind:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn every_kernel_rejects_invalid_rays() -> Result<(), Error> {
         for kind in [
             Kind::Sphere,
@@ -243,20 +258,17 @@ mod tests {
                 },
             ] {
                 assert!(
-                    geometry.query(ray, false).is_err(),
+                    geometry.query(ray).is_err(),
                     "{kind:?} accepted an invalid ray"
                 );
             }
         }
         assert!(
             matches!(
-                Geometry::SPHERE.query(
-                    Ray {
-                        o: [f64::MAX, 0.0, 0.0],
-                        d: [0.0, 0.0, -1.0]
-                    },
-                    false
-                ),
+                Geometry::SPHERE.query(Ray {
+                    o: [f64::MAX, 0.0, 0.0],
+                    d: [0.0, 0.0, -1.0]
+                }),
                 Err(Error::Numeric)
             ),
             "unrepresentable ray arithmetic returned a sample"

@@ -106,9 +106,12 @@ test("WASM finite leaf keeps shared carriers, real cutouts, bounds and result-ne
 		expect(hit).toHaveLength(24);
 		expect(hit[1]).toBe(5);
 		expect(hit[2]).toBe(1);
-		expect(
-			Math.abs((hit[3] ?? Number.NaN) - (flat[3] ?? Number.NaN)),
-		).toBeGreaterThan(1e-9);
+		expect(hit).toEqual(flat);
+		const near = new Float64Array([0, 0, 0.001, 0, 0, 1]);
+		expect(card.query_ray(near, 0)).toHaveLength(0);
+		expect(Array.from(leaf.query_ray(near, 0).slice(0, 4))).toEqual([
+			7, 5, 1, 0,
+		]);
 		const cutout = new Float64Array([-0.067, -0.067, 0.05, 0, 0, -1]);
 		expect(leaf.query_ray(cutout, 0)).toHaveLength(0);
 		expect(card.query_ray(cutout, 0)).toHaveLength(24);
@@ -282,23 +285,24 @@ test("WASM trace limits, IDs and modes reject coercion rather than wrapping", ()
 	}
 });
 
-test("WASM large quartic holes remain misses and expose only computed inspection bounds", () => {
+test("WASM quartic hole misses retain computed bounds in every mode", () => {
 	const input = new Float64Array([0, 0, -6, 0, 0, 1]);
 	for (const size of [1, 2, 4]) {
 		const prepared = new PreparedScene(
 			new Float64Array([42, 2, 0, 0, 0, size, 1.5, 0]),
 		);
 		try {
+			const gap = size * Math.sqrt(2 - Math.sqrt(3));
 			for (const mode of [0, 1]) {
 				expect(prepared.query_ray(input, mode).length).toBe(0);
 				const trace = tracePacket(prepared.trace_ray(input, mode, 256));
 				expect(trace.result.length).toBe(0);
-				expect(trace.events.some((row) => row[0] === 6 && row[7] === 2)).toBe(
-					true,
-				);
+				const world = trace.events.find((row) => row[0] === 6);
+				expect(world?.[4]).toBeLessThanOrEqual(gap);
+				expect(world?.[5]).toBeGreaterThanOrEqual(gap);
+				expect(world?.[7]).toBeLessThan(2);
 			}
 			const inspection = prepared.query_ray(input, 2);
-			const gap = size * Math.sqrt(2 - Math.sqrt(3));
 			expect(inspection[4]).toBeLessThanOrEqual(gap);
 			expect(inspection[5]).toBeGreaterThanOrEqual(gap);
 			expect(inspection[22]).toBeLessThan(2);
@@ -308,7 +312,7 @@ test("WASM large quartic holes remain misses and expose only computed inspection
 	}
 });
 
-test("WASM crystalline instances retain fixed work, tag four and explicit skipped gaps", () => {
+test("WASM crystalline instances retain fixed point work and ray miss bounds", () => {
 	const origin = new Float64Array(3);
 	const fixed = new Float64Array([1e-12, 0, 27]);
 	const result = closest_point(4, 0, origin, fixed);
@@ -334,12 +338,13 @@ test("WASM crystalline instances retain fixed work, tag four and explicit skippe
 		expect(Array.from(hit.slice(0, 4))).toEqual([7, 4, 1, 4]);
 		expect(hit[22]).toBeLessThan(2);
 		const away = new Float64Array([-6, -5, -6, -1, -1, -1]);
-		const skipped = tracePacket(scene.trace_ray(away, 0, 256));
-		expect(skipped.result.length).toBe(0);
-		expect(skipped.events.some((row) => row[0] === 6 && row[7] === 2)).toBe(
-			true,
-		);
+		const trace = tracePacket(scene.trace_ray(away, 0, 256));
+		expect(trace.result.length).toBe(0);
 		const miss = scene.query_ray(away, 2);
+		const world = trace.events.find((row) => row[0] === 6);
+		expect(world?.[4]).toBe(miss[4]);
+		expect(world?.[5]).toBe(miss[5]);
+		expect(world?.[7]).toBeLessThan(2);
 		expect(miss[21]).toBe(1);
 		expect(miss[22]).toBeLessThan(2);
 	} finally {

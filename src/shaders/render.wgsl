@@ -4,7 +4,7 @@
 fn empty_sample() -> SceneSample {
   return SceneSample(
     Query(false, 0.0, 0.0, vec3f(0.0), vec3f(0.0, 1.0, 0.0), vec2f(0.0)),
-    vec3f(0.0), 0u, 0u, 0.0, 0.0, 2u,Pending(0.0,false),0.0,false
+    vec3f(0.0), 0u, 0u, 0.0, 0.0, 2u,Pending(0.0,false),0.0
   );
 }
 
@@ -62,13 +62,9 @@ fn resolved_object(index: u32) -> SceneObject {
   return object;
 }
 
-fn scene_needs_gap(kind: u32, display_gap: bool, selected: bool) -> bool {
-  return (kind == 2u || kind == 4u || kind==5u) && (display_gap || selected);
-}
-
 fn outline_eligible(sample: SceneSample, selected: bool, thickness: f32) -> bool {
   return selected && (sample.kind == 1u || sample.kind == 2u || sample.kind == 4u || sample.kind==5u) &&
-    !sample.query.hit && sample.gap_computed && sample.query.gap < thickness;
+    !sample.query.hit && sample.status<2u && sample.query.gap < thickness;
 }
 
 @compute @workgroup_size(8, 8)
@@ -120,9 +116,8 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     } else {
       let object = resolved_object(i);
       let selected = scene_selected(object);
-      let need_gap = scene_needs_gap(object.identity.y, display_gap, selected);
 
-      let sample = scene_object_precise(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w), direction, object, need_gap);
+      let sample = scene_object_precise(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w), direction, object);
       pending=pending_min(pending,sample.pending);
       if (sample.query.hit && (!nearest_hit || sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
         nearest = sample;
@@ -136,7 +131,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
       }
 
       if (display_gap && object.identity.y != 3u && !sample.query.hit &&
-          sample.gap_computed && (!halo_found||sample.query.gap<halo_gap)) {
+          sample.status<2u && (!halo_found||sample.query.gap<halo_gap)) {
         halo_gap = sample.query.gap;halo_found=true;
         halo_uv = sample.query.uv;
       }

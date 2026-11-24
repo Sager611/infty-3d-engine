@@ -200,14 +200,13 @@ fn witness(ray: Ray, p0: V, d: V, t0: f64, beta: f64) -> Option<Witness> {
 
 /// Intersect a normalized forward ray with the canonical Goursat surface.
 #[cfg(test)]
-pub fn goursat(ray: Ray, beta: f64, need_gap: bool) -> Result<GoursatSample, GoursatError> {
-    goursat_traced(ray, beta, need_gap, &mut Recorder::off())
+pub fn goursat(ray: Ray, beta: f64) -> Result<GoursatSample, GoursatError> {
+    goursat_traced(ray, beta, &mut Recorder::off())
 }
 
 pub fn goursat_traced(
     ray: Ray,
     beta: f64,
-    need_gap: bool,
     trace: &mut Recorder<'_>,
 ) -> Result<GoursatSample, GoursatError> {
     if !beta.is_finite() || !(BETA_MIN..=BETA_MAX).contains(&beta) {
@@ -252,7 +251,6 @@ pub fn goursat_traced(
             gap_lower: 0.0,
             error: roots.error,
             uncertain: roots.uncertain,
-            gap_computed: true,
         });
     }
     let forward_t = t0.max(0.0);
@@ -260,21 +258,8 @@ pub fn goursat_traced(
     let norm = dot(closest, closest).sqrt();
     let slack = 16.0 * f64::EPSILON * (1.0 + dot(ray.o, ray.o).sqrt() + t0.abs() + radius);
     let gap_lower = (norm - radius - slack).max(0.0);
-    let (wp, gap_upper, error) = if need_gap {
-        let witness = witness(nray, p0, d, t0, beta).ok_or(GoursatError::NoWitness)?;
-        (witness.p, witness.upper, witness.error)
-    } else {
-        let q = if norm > f64::EPSILON {
-            [
-                closest[0] * radius / norm,
-                closest[1] * radius / norm,
-                closest[2] * radius / norm,
-            ]
-        } else {
-            [radius, 0.0, 0.0]
-        };
-        (q, gap_lower, 0.0)
-    };
+    let witness = witness(nray, p0, d, t0, beta).ok_or(GoursatError::NoWitness)?;
+    let wp = witness.p;
     let (n, uv) = normal_uv(wp);
     let witness_t = dot([wp[0] - ray.o[0], wp[1] - ray.o[1], wp[2] - ray.o[2]], d).max(0.0);
     let root_uncertain = roots.is_some_and(|roots| roots.uncertain);
@@ -282,15 +267,14 @@ pub fn goursat_traced(
         sample: Sample {
             hit: false,
             t: witness_t,
-            gap: gap_upper,
+            gap: witness.upper,
             p: wp,
             n,
             uv,
         },
         gap_lower,
-        error,
+        error: witness.error,
         uncertain: root_uncertain,
-        gap_computed: need_gap,
     })
 }
 
@@ -335,7 +319,7 @@ mod tests {
         };
         for beta in [1.05_f32, 1.95_f32] {
             assert!(
-                goursat(ray, f64::from(beta), false).is_ok(),
+                goursat(ray, f64::from(beta)).is_ok(),
                 "f32 beta {beta} was rejected"
             );
         }
@@ -347,9 +331,6 @@ mod tests {
             o: [1.0e150, 1.0e150, 0.0],
             d: [1.0, 0.0, 0.0],
         };
-        assert!(matches!(
-            goursat(ray, 1.125, true),
-            Err(GoursatError::NoWitness)
-        ));
+        assert!(matches!(goursat(ray, 1.125), Err(GoursatError::NoWitness)));
     }
 }

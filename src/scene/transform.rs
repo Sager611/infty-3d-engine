@@ -183,7 +183,6 @@ impl Transform {
             },
             error: result.error * self.scale,
             uncertain: result.uncertain,
-            gap_computed: result.gap_computed,
         })
     }
 }

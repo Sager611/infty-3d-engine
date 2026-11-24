@@ -458,33 +458,7 @@ fn line_lower(ray: Ray) -> Result<f64, ArithmeticError> {
         .lo();
     Ok((low - RADIUS).next_down().max(0.0))
 }
-fn miss(ray: Ray, need_gap: bool, uncertain: bool) -> Result<GeometrySample, ArithmeticError> {
-    if !need_gap {
-        let gap = if uncertain {
-            norm([
-                I::point(ray.o[0])?,
-                I::point(ray.o[1])?,
-                I::point(ray.o[2])?,
-            ])?
-            .hi()
-        } else {
-            0.0
-        };
-        return Ok(GeometrySample {
-            sample: Sample {
-                hit: false,
-                t: 0.0,
-                gap,
-                p: [0.0; 3],
-                n: [0.0, 0.0, 1.0],
-                uv: [0.0; 2],
-            },
-            gap_lower: 0.0,
-            error: 0.0,
-            uncertain,
-            gap_computed: uncertain,
-        });
-    }
+fn miss(ray: Ray, uncertain: bool) -> Result<GeometrySample, ArithmeticError> {
     let a = ray.d[0].mul_add(ray.d[0], ray.d[1].mul_add(ray.d[1], ray.d[2] * ray.d[2]));
     let dot = ray.o[0].mul_add(ray.d[0], ray.o[1].mul_add(ray.d[1], ray.o[2] * ray.d[2]));
     let t = (-dot / a).max(0.0);
@@ -518,10 +492,9 @@ fn miss(ray: Ray, need_gap: bool, uncertain: bool) -> Result<GeometrySample, Ari
         gap_lower: line_lower(ray)?,
         error: witness.error,
         uncertain,
-        gap_computed: true,
     })
 }
-pub fn query(ray: Ray, need_gap: bool) -> Result<GeometrySample, ArithmeticError> {
+pub fn query(ray: Ray) -> Result<GeometrySample, ArithmeticError> {
     let a = component(ray)?;
     let mut b = component(Ray {
         o: cycle(ray.o),
@@ -535,7 +508,7 @@ pub fn query(ray: Ray, need_gap: bool) -> Result<GeometrySample, ArithmeticError
     c.axis = 2;
     let shot = choose(choose(a, b), c);
     if !shot.root.t.is_finite() {
-        return miss(ray, need_gap, shot.root.uncertain);
+        return miss(ray, shot.root.uncertain);
     }
     let local = match shot.axis {
         1 => Ray {
@@ -569,6 +542,5 @@ pub fn query(ray: Ray, need_gap: bool) -> Result<GeometrySample, ArithmeticError
         gap_lower: 0.0,
         error,
         uncertain: shot.root.uncertain,
-        gap_computed: true,
     })
 }

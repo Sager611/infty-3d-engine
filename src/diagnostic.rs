@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn large_quartic_hole_misses_are_uncomputed_not_numeric_errors()
+    fn quartic_hole_misses_keep_computed_gap_bounds_in_hit_modes()
     -> Result<(), Box<dyn std::error::Error>> {
         use crate::{
             math::Ray,
@@ -177,11 +177,8 @@ mod tests {
                 .iter()
                 .find(|row| matches!(row.tag, Tag::WorldRay))
                 .ok_or("no evaluated instance")?;
-            assert_eq!(
-                row.values[5].to_bits(),
-                2.0_f64.to_bits(),
-                "uncomputed gap reported as valid"
-            );
+            assert!(row.values[5] <= 1.0, "gap was not computed");
+            assert!(row.values[3] > 0.0 && row.values[2] <= row.values[3]);
         }
         Ok(())
     }

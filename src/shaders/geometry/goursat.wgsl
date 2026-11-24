@@ -81,7 +81,7 @@ fn goursat_witness(o: vec3f, d: vec3f, candidate: vec3f, beta: f32) -> GoursatWi
   return GoursatWitness(mid, upper, error, true, uncertain);
 }
 
-fn goursat(o: vec3f, d: vec3f, beta: f32, need_gap: bool) -> GoursatQuery {
+fn goursat(o: vec3f, d: vec3f, beta: f32) -> GoursatQuery {
   let dd = dot(d, d);
   let t0 = -dot(o, d) / dd;
   let p0 = fma(vec3f(t0), d, o);
@@ -122,10 +122,6 @@ fn goursat(o: vec3f, d: vec3f, beta: f32, need_gap: bool) -> GoursatQuery {
 
   let forward = o + max(0.0, t0) * d;
   let ray_gap = max(length(forward) - radius - slack, 0.0);
-  if (!need_gap) {
-    query.gap = ray_gap;
-    return GoursatQuery(query, ray_gap, 1e30, 2u);
-  }
   var best = GoursatWitness(o, 1e30, 1e30, false, 1u);
   let origin_witness = goursat_witness(o, d, o, beta);
   if (origin_witness.valid && origin_witness.upper < best.upper) { best = origin_witness; }

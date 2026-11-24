@@ -10,7 +10,10 @@ pub struct Bounds {
 impl Bounds {
     #[must_use]
     pub fn object(object: Object) -> Option<Self> {
-        let radius = object.geometry().radius()?;
+        let mut radius = object.geometry().radius()?;
+        if object.material() == crate::material::Material::Leaf {
+            radius = (radius + crate::heightfield::LEAF.reach()).next_up();
+        }
         let transform = object.transform();
         Some(Self {
             min: transform.world_point([-radius; 3]),
@@ -178,7 +181,7 @@ mod tests {
             for mode in [QueryMode::First, QueryMode::All, QueryMode::Inspect] {
                 let mut brute = objects
                     .iter()
-                    .map(|object| query_object(object, ray, mode == QueryMode::Inspect))
+                    .map(|object| query_object(object, ray))
                     .collect::<Result<Vec<_>, _>>()?;
                 if mode != QueryMode::Inspect {
                     brute.retain(|sample| sample.sample.hit);
@@ -244,7 +247,7 @@ mod tests {
             assert!(candidates.contains(&4096));
             let mut brute = objects
                 .iter()
-                .map(|object| query_object(object, ray, false))
+                .map(|object| query_object(object, ray))
                 .collect::<Result<Vec<_>, _>>()?;
             brute.retain(|s| s.sample.hit);
             brute.sort_by(|a, b| a.sample.t.total_cmp(&b.sample.t).then(a.id.cmp(&b.id)));

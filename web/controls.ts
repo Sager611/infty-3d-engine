@@ -269,8 +269,7 @@ const materialControl = (object: SceneObject): HTMLLabelElement => {
 	select.id = `property-${object.id}-material`;
 	select.name = "material";
 	select.dataset.controlKey = "material";
-	select.title =
-		"Leaf adds relief and cutouts to finite planes; other geometry stays unchanged";
+	select.title = "Leaf adds one-sample relief; finite planes also use a cutout";
 	select.setAttribute("aria-label", "Material");
 	label.htmlFor = select.id;
 	for (const descriptor of Object.values(MATERIALS)) {

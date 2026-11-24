@@ -1,4 +1,4 @@
-//! Immutable field upload; a safe placeholder until a finite leaf is present.
+//! Immutable field upload; a placeholder until a Leaf material is present.
 use super::{Field, LEAF};
 use crate::geometry::Error;
 use wgpu::util::DeviceExt;
