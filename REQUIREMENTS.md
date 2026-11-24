@@ -8,8 +8,8 @@
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
 - Free-camera WASD movement and drag look; wheel changes travel speed. Only straight W approaches to nearby center-ray hits ease down to a minimum speed; reverse, strafe and diagonal movement retain normal speed. Minimum travel speed and the approach floor are0.000001 units/s for close inspection.
 - Base ray queries always return a gap and matching surface witness with UV/normal; preserve explicit uncertainty and independent point queries.
-- Texh: on a base miss, sample an optional heightmap once at the witness UV with branchless bilinear interpolation. Accept if signed height reaches the gap toward the ray. Keep base hits and cutouts. No displaced-ray traversal; the approximation can miss relief elsewhere. Expand culling by texture reach.
-- Leaf: four bands (broadest gain1), stem lower than blade edges, unchanged cutout. Shade hits with color and carrier normals; sample height only for ray misses and independent point queries. Compare warm displayed FPS at1265×791; target60FPS.
+- Texh: on a base miss, bilinearly sample height once at the witness UV. Accept if signed height reaches the gap toward the ray. Preserve unmodified base hits and cutouts. Expand culling by texture reach; no displaced-ray traversal.
+- Scene → Leaf · deep cup opens an angled view. Keep original RGB, four bands (broadest gain1), deep stem and raised edges. Solve the broad cup analytically for candidate UVs; one branchless bilinear height sample corrects hit depth, then the cutout clips the projected UV. Point queries stay independent. Compare warm displayed FPS at1265×791; target60FPS.
 
 ## Changelog
 
@@ -28,3 +28,4 @@
 | 2026-11-24 | User | Replace displaced rays with generic texh | One sample instead of traversal |
 | 2026-11-24 | User | Remove hit height work and cup the Leaf heightmap | Faster close-ups and a lower stem |
 | 2026-11-24 | User | Require branchless bilinear height sampling | Smooth subtexel gaps without search |
+| 2026-11-24 | User | Expose the deeper Leaf and displace ray hits | Show true relief from the Scene menu |

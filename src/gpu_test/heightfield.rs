@@ -209,7 +209,7 @@ fn texh_gpu_matches_cpu_for_either_side_and_multiple_carriers()
             };
             let base = Geometry::new(kind, 0.0)?.query(ray)?;
             let query = if input[7] > 1.0 {
-                field.texh(ray, base, kind == Kind::FinitePlane)?
+                field.texh(ray, base, (kind == Kind::FinitePlane).then_some(0.0))?
             } else {
                 base
             };
@@ -234,7 +234,10 @@ fn texh_blends_four_texels_on_a_gap() -> Result<(), Box<dyn std::error::Error>> 
             o: [-0.5, -0.5, f64::from(input[2])],
             d: [0.0, 0.0, 1.0],
         };
-        assert_eq!(field.texh(ray, carrier.query(ray)?, true)?.sample.hit, hit);
+        assert_eq!(
+            field.texh(ray, carrier.query(ray)?, Some(0.0))?.sample.hit,
+            hit
+        );
         assert_eq!(row[0] > 0.5, hit);
     }
     Ok(())

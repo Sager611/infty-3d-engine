@@ -38,13 +38,15 @@ fn blade_rises_smoothly_from_stem_to_either_edge() -> Result<(), Error> {
     ] {
         let at = |x: f64| LEAF.sample([x.mul_add(1.0 / 256.0, -1.0), y / 256.0 - 1.0]);
         let spine = at(stem)?.height;
+        assert!(spine < -0.06, "the stem must sit below the carrier");
         for edge in edges {
             let mid = (edge - stem).mul_add(0.5, stem);
             let outer = (edge - stem).mul_add(0.85, stem);
             let inner = at(mid)?;
             let blade = at(outer)?;
             assert!(blade.coverage >= 127.5 && inner.coverage >= 127.5);
-            assert!(inner.height > spine + 0.02 && blade.height > inner.height + 0.055);
+            assert!(inner.height > spine + 0.035 && blade.height > inner.height + 0.095);
+            assert!(blade.height > spine + if y == 256.0 { 0.32 } else { 0.15 });
         }
     }
     Ok(())
@@ -128,6 +130,7 @@ fn fixture(data: &[u8]) -> Field<'_> {
         edge: 2,
         amplitudes: AMPLITUDES,
         anchor: [0.0; 2],
+        cup: false,
     }
 }
 

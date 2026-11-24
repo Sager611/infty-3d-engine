@@ -88,6 +88,8 @@ test("Leaf preset is immutable, framed, editable and snapshot-persistent", (): v
 		expect(object.size).toBe(0.07);
 		expect(state.mode).toBe(3);
 		expect(state.camera.target).toEqual(object.position);
+		expect(state.camera.yaw).toBeGreaterThan(0.2);
+		expect(state.camera.pitch).toBeGreaterThan(0.2);
 		expect(state.camera.distance).toBeGreaterThan(object.size);
 		const span =
 			(object.size * 1.8 * Math.max(1, 1 / aspect)) / state.camera.distance;
@@ -126,6 +128,9 @@ test("Leaf preset and reusable finite carrier are exposed accessibly", async ():
 		.on("#scene-preset option", {
 			element(element: HTMLRewriterTypes.Element): void {
 				active = element.getAttribute("value") === "leaf";
+				if (active) {
+					expect(element.hasAttribute("disabled")).toBe(false);
+				}
 			},
 			text(t: HTMLRewriterTypes.Text): void {
 				if (active && t.text.trim() !== "") {
@@ -141,7 +146,7 @@ test("Leaf preset and reusable finite carrier are exposed accessibly", async ():
 			},
 		});
 	await parser.transform(new Response(source)).text();
-	expect(found.preset).toContain("Leaf");
+	expect(found.preset).toBe("Leaf · deep cup");
 	expect(found.shape).toContain("Finite plane");
 });
 test("Old material and geometry tags stay unchanged", (): void => {

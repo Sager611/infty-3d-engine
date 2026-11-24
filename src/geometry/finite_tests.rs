@@ -202,9 +202,10 @@ fn leaf_collision_and_cutout_belong_to_the_instance_not_the_view()
     let a = query_prepared(&flat, ray, QueryMode::Inspect)?;
     let b = query_prepared(&leaf, ray, QueryMode::Inspect)?;
     assert!(a[0].sample.hit && b[0].sample.hit);
-    assert_eq!(a[0].sample.t, b[0].sample.t, "base hits stay put");
     let height = crate::heightfield::LEAF.sample([0.0, 0.0])?.height * 0.07;
-    assert!(height.abs() > 1e-8);
+    assert!(height.abs() > 0.005);
+    assert!((b[0].sample.p[2] - height).abs() < 1e-10);
+    assert!((b[0].sample.t - (a[0].sample.t - height)).abs() < 1e-10);
     for (ratio, hit) in [(0.5, true), (2.0, false), (-0.5, false)] {
         let ray = Ray {
             o: [0.0, 0.0, height * ratio],

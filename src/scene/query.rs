@@ -174,11 +174,15 @@ fn query_definition(
         geometry.query(local_ray)
     }
     .map_err(QueryError::Geometry)?;
-    let local = result.sample.p;
+    let mut local = result.sample.p;
     if Material::from_tag(material) == Some(Material::Leaf) {
+        let finite_axis = (geometry.kind() == Kind::FinitePlane).then_some(geometry.parameter());
         result = crate::heightfield::LEAF
-            .texh(local_ray, result, geometry.kind() == Kind::FinitePlane)
+            .texh(local_ray, result, finite_axis)
             .map_err(QueryError::Geometry)?;
+        if finite_axis.is_some() && result.sample.hit {
+            local = result.sample.p;
+        }
     }
     let world = transform
         .world_query(result)
@@ -331,9 +335,16 @@ mod tests {
     fn texh_candidates_are_not_culled_by_the_carrier_bounds() -> TestResult {
         let textured = Object::default().with_material(Material::Leaf);
         let other = Object::new(2, Kind::Sphere, [0.0, -4.0, 0.0], 0.25, 0.0)?;
-        let height = crate::heightfield::LEAF.sample([0.0; 2])?.height;
+        let u = 0.61_f64;
+        let height = crate::heightfield::LEAF
+            .sample([u.mul_add(2.0, -1.0), 0.0])?
+            .height;
         assert!(height > 0.0);
-        let ray = ray([height.mul_add(0.5, 1.0), 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let (z, x) = ((u - 0.5) * std::f64::consts::TAU).sin_cos();
+        let ray = ray(
+            [x, 0.0, z].map(|v| v * height.mul_add(0.5, 1.0)),
+            [x, 0.0, z],
+        );
         assert!(query_objects(&[Object::default(), other], ray, QueryMode::First)?.is_empty());
         let samples = query_objects(&[textured, other], ray, QueryMode::First)?;
         assert_eq!(samples.len(), 1);

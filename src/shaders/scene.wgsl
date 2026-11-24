@@ -27,18 +27,16 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
     if(kind==2u){canonical=goursat(local_o,d,obj.params.x);}else{canonical=crystal(local_o,d);}
     query=canonical.query;gap_lower=canonical.gap_lower;error=canonical.error;status=canonical.status;
   }else if(kind==5u){
-    let canonical=finite_plane(local_o,d,scene_axis(obj));
+    var canonical:GeometryQuery;
+    if(obj.params.w==2.0){canonical=finite_leaf(local_o,d,scene_axis(obj));}
+    else{canonical=finite_plane(local_o,d,scene_axis(obj));}
     pending=Pending(0.0,canonical.status==1u||canonical.status==3u);
     query=canonical.query;gap_lower=canonical.gap_lower;error=canonical.error;status=canonical.status;
   }else if(kind==3u){query=plane(local_o,d);gap_lower=query.gap;status=0u;}
   let local_error=error;let local=query.p;let canonical_gap=query.gap;let canonical_lower=gap_lower;
-  if(obj.params.w==2.0&&status<2u){
-    if(query.hit){
-      if(kind==5u){query.hit=leaf_covered(query.uv);}
-    }else if(status==0u){
-      query=texh(local_o,d,query,gap_lower,kind==5u);
-      if(query.hit){gap_lower=0.0;}
-    }
+  if(obj.params.w==2.0&&kind!=5u&&!query.hit&&status==0u){
+    query=texh(local_o,d,query,gap_lower,false);
+    if(query.hit){gap_lower=0.0;}
   }
   query.p=position+size*query.p;query.t*=size;query.gap*=size;gap_lower*=size;error*=size;
   if(pending.valid){

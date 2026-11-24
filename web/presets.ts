@@ -81,7 +81,7 @@ export function presetSnapshot(
 		camera = { ...camera, yaw: YAW, pitch: PITCH };
 	} else if (name === "leaf") {
 		objects = LEAF;
-		camera = { ...camera, yaw: 0, pitch: 0 };
+		camera = { ...camera, yaw: 0.28, pitch: 0.32 };
 		viewMode = MATERIAL_MODE;
 	} else if (name !== "default") {
 		throw new Error("Unknown scene preset");

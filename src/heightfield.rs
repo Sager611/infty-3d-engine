@@ -1,14 +1,7 @@
 //! Immutable vertex-aligned bilinear heights; five independently bounded scalar maps.
-use crate::{
-    geometry::Error,
-    math::{
-        Ray,
-        interval::Interval as I,
-        types::GeometrySample,
-        vector::{dot, madd, sub},
-    },
-};
+use crate::{geometry::Error, math::interval::Interval as I};
 pub mod gpu;
+mod ray;
 
 pub const STEPS: usize = 64;
 pub const AMPLITUDES: [f64; 4] = [
@@ -24,12 +17,14 @@ pub struct Field<'a> {
     edge: u32,
     amplitudes: [f64; 4],
     anchor: [f64; 2],
+    cup: bool,
 }
 pub static LEAF: Field<'static> = Field {
     data: DATA,
     edge: 512,
     amplitudes: AMPLITUDES,
     anchor: [0.0; 2],
+    cup: true,
 };
 #[derive(Clone, Copy, Default)]
 pub struct Node {
@@ -124,6 +119,7 @@ impl<'a> Field<'a> {
             edge,
             amplitudes,
             anchor,
+            cup: false,
         };
         let stride = field.stride()?;
         if data.len() != 5 * stride || amplitudes.iter().any(|value| !value.is_finite()) {
@@ -144,7 +140,7 @@ impl<'a> Field<'a> {
         let plane = field.edge * field.edge;
         let count = usize::try_from(plane).map_err(|_| Error::Numeric)?;
         let mut bytes = Vec::with_capacity(32 + 5 * count);
-        for value in [field.edge, plane, field.resolution()?, 1] {
+        for value in [field.edge, plane, field.resolution()?, u32::from(self.cup)] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         for amplitude in field.amplitudes {
@@ -260,80 +256,6 @@ impl<'a> Field<'a> {
     pub fn reach(self) -> f64 {
         let [a, b, c, d] = self.amplitudes;
         ((a.abs() + b.abs() + c.abs() + d.abs()) * (128.0 / 255.0)).next_up()
-    }
-
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "Unit UV scales to 0..=512000"
-    )]
-    fn bilinear(self, uv: [f64; 2], order: usize, stride: usize, edge: usize) -> f64 {
-        let scale = f64::from(self.edge * repeat(order));
-        let [x, y] = [uv[0] * scale, uv[1] * scale];
-        let (ix, iy) = (x as usize, y as usize);
-        let (fx, fy) = (x.fract(), y.fract());
-        let last = edge - 1;
-        let mask = last | 0_usize.wrapping_sub(usize::from(order.is_multiple_of(4)));
-        let at = |i: usize, j: usize| {
-            f64::from(
-                self.data[order * stride + (j & mask).min(last) * edge + (i & mask).min(last)],
-            )
-        };
-        let a = at(ix, iy);
-        let b = at(ix, iy + 1);
-        let lo = (at(ix + 1, iy) - a).mul_add(fx, a);
-        let hi = (at(ix + 1, iy + 1) - b).mul_add(fx, b);
-        (hi - lo).mul_add(fy, lo)
-    }
-
-    pub fn texh(
-        self,
-        ray: Ray,
-        mut base: GeometrySample,
-        cutout: bool,
-    ) -> Result<GeometrySample, Error> {
-        if (base.sample.hit && !cutout)
-            || (!base.sample.hit && (base.uncertain || base.gap_lower > self.reach()))
-        {
-            return Ok(base);
-        }
-        // Wrap out-of-range UVs without moving the last vertex at exactly 1.
-        let unit = |u: f64| u - u.floor() + f64::from(u8::from(u.to_bits() == 1.0_f64.to_bits()));
-        let [uv_x, uv_y] = base.sample.uv;
-        let uv = [unit(uv_x), unit(uv_y)];
-        let stride = self.stride()?;
-        let edge = usize::try_from(self.edge).map_err(|_| Error::Numeric)?;
-        let tap = |order| self.bilinear(uv, order, stride, edge);
-        if cutout && tap(4) < 127.5 {
-            base.sample.hit = false;
-            return Ok(base);
-        }
-        if base.sample.hit {
-            return Ok(base);
-        }
-        let point = madd(ray.o, ray.d, base.sample.t);
-        let side = dot(sub(point, base.sample.p), base.sample.n);
-        if side == 0.0 {
-            return Ok(base);
-        }
-        let [a, b, c, d] = self.amplitudes;
-        let height = (d / 255.0).mul_add(
-            tap(3) - 128.0,
-            (c / 255.0).mul_add(
-                tap(2) - 128.0,
-                (b / 255.0).mul_add(tap(1) - 128.0, (a / 255.0) * (tap(0) - 128.0)),
-            ),
-        );
-        if !height.is_finite() {
-            return Err(Error::Numeric);
-        }
-        if side.signum() * height >= base.sample.gap {
-            base.sample.hit = true;
-            base.sample.p = point;
-            base.sample.gap = 0.0;
-            base.gap_lower = 0.0;
-        }
-        Ok(base)
     }
 
     fn alpha_range(self, order: usize, node: Node) -> Result<I, Error> {

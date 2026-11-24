@@ -1,6 +1,6 @@
 # Finite leaf
 
-Try Scene controls → Scene → Leaf; Add → Finite plane reuses the carrier.
+Try Scene controls → Scene → Leaf · deep cup; Add → Finite plane reuses the carrier.
 Axis0/1/2 means normalZ/X/Y. Kind5 is a double-sided square with a Leaf cutout.
 Leaf relief can be applied to any geometry; steel/brick leave intersections unchanged.
 At reference half-size70mm, four vertex-aligned512² height fields span140/14/1.4/0.14mm.
@@ -11,11 +11,11 @@ Uniform instance size scales the entire surface; peers still share their carrier
 
 ## Geometry and rendering
 
-Ray tests keep base hits, reject cutouts, and test signed height at miss UVs using branchless bilinear samples.
-Promoted hits use the closest ray point; relief away from the witness is not searched.
-Point queries still use bounded height regions and covered witnesses, independent of ray tests.
-Hits use color and the carrier normal, not height shading. Leaf skips self-shadowing.
-The broadest height band cups upward on both sides of the stem; finer bands and opacity are unchanged.
+Other carriers keep their hits; a miss is promoted only if the signed bilinear height at its witness reaches the ray.
+For the finite Leaf, an analytic cup seeds a candidate UV. A single bilinear height evaluation corrects ray depth; opacity clips the projected UV.
+The cup provides smooth geometric normals. Colors are unchanged; Leaf skips self-shadowing.
+Fine relief away from the witness is not searched. Grazing corrections are bounded; this is not an exact heightfield intersection.
+Point queries still use the height pyramid and covered witnesses independently.
 Amber hatching marks unresolved ray or shadow work.
 The finest reference texel is273.4375nm; below this there is bilinear interpolation, not new evidence.
 Extreme close-ups expose texture cells.
@@ -25,7 +25,7 @@ The leaf is an authored opaque sheet, not measured anatomy, transmission, thickn
 
 - [ambientCG LeafSet001](https://ambientcg.com/a/LeafSet001):
   colour/displacement/opacity8K-JPG, [CC0](https://docs.ambientcg.com/license/).
-  Optical RGB is converted to linear light; cropped, resized, flipped, and combined with authored bend/veins.
+  Optical RGB is cropped, resized, flipped, and converted to linear light. The macro shape is authored.
   Macro crop(256,128,2560,3936); middle crop(1282,1666,1663,2047).
 - William J. Matthaeus, Jonathan Schmidt, Joseph D. White, Bernd Zechmann (2020),
   [Novel perspectives on stomatal impressions: Rapid and non-invasive surface characterization
@@ -49,7 +49,7 @@ Outputs: four linear RGB8/height-alpha zlib tiles and `leaf.bin` (2,184,540 byte
 Each scalar field has262,144 samples, nine interleaved min/max levels, and padding:436,908 bytes.
 GPU upload omits pyramids: 32-byte header plus five raw planes.
 Layout, covered positive-zero anchor, and exact finite f32 gains are checked; no upload resampling.
-The bake cups the quantized macro band before building its pyramid.
+The macro field quantizes the same quadratic cup used to seed rays.
 
 ## Changelog
 
@@ -58,3 +58,4 @@ The bake cups the quantized macro band before building its pyramid.
 | 2026-11-11 | Assistant | Documented Leaf usage, fixed surface, source derivatives and bake | Make geometry, limits and attribution explicit |
 | 2026-11-24 | Assistant | Documented texh ray approximation | Separate ray, point, and shading rules |
 | 2026-11-24 | Assistant | Documented cupped heights and color-only hits | Keep height out of the hit path |
+| 2026-11-24 | Assistant | Documented analytic seed and height-corrected hits | Render depth without traversal |

@@ -77,22 +77,12 @@ def pyramid(value: NDArray[np.uint8]) -> bytes:
     return bytes(data)
 
 
-def cup(height: NDArray[np.uint8], mask: NDArray[np.uint8]) -> NDArray[np.uint8]:
-    """Smooth the blade outline into a spine and a tapered cross-blade cup."""
-    visible = mask >= 128
-    rows = np.flatnonzero(visible.any(axis=1))
-    y = np.arange(EDGE)
-    left, right = (
-        np.convolve(np.pad(np.interp(y, rows, edge[rows]), 8, mode="edge"),
-                    np.ones(17) / 17, mode="valid")[:, None]
-        for edge in (visible.argmax(axis=1), EDGE - 1 - visible[:, ::-1].argmax(axis=1))
-    )
-    width = np.maximum(1.0, right - left)
-    across = np.minimum(1.0, np.abs((2 * np.arange(EDGE) - left - right) / width))
-    stem = 0.45 + 0.06 * np.sin(np.pi * y[:, None] / EDGE)
-    lift = 0.21 * np.minimum(1.0, width / 125) * across ** 2
-    detail = 0.32 * (height / 255 - 0.5)
-    return np.rint(255 * np.clip(stem + lift + detail, 0.05, 0.95)).astype(np.uint8)
+def cup(mask: NDArray[np.uint8]) -> Array:
+    """Macro displacement and its analytic ray seed use the same cup."""
+    y, x = np.mgrid[:EDGE, :EDGE] * (2 / EDGE) - 1
+    height = 4.375 * (x + 0.09375) ** 2 + 0.0625 * y ** 2 - 0.15
+    covered = np.asarray(Image.fromarray(mask).filter(ImageFilter.MaxFilter(5))) >= 128
+    return np.clip(np.where(covered, height, 0) + 128 / 255, 0, 1)
 
 
 def bake(references: Path, root: Path) -> None:
@@ -111,15 +101,8 @@ def bake(references: Path, root: Path) -> None:
     mask_image = Image.new("L", (EDGE, EDGE))
     mask_image.paste(opacity, (101, 0))
     mask = np.asarray(mask_image.transpose(Image.Transpose.FLIP_TOP_BOTTOM), dtype=np.uint8)
-    displacement = image("Displacement", macro_box, "L").resize((310, EDGE), Image.Resampling.LANCZOS)
-    relief_image = Image.new("L", (EDGE, EDGE), 128)
-    relief_image.paste(displacement, (101, 0))
-    relief = scalar(relief_image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).filter(ImageFilter.GaussianBlur(1)))
     visible = mask >= 128
-    vein = (relief - np.quantile(relief[visible], 0.1)) / max(float(np.ptp(relief[visible])), 1e-6)
     y, x = np.mgrid[:EDGE, :EDGE] / EDGE
-    bend = 0.16 * np.cos(np.pi * (y - 0.5)) + 0.35 * (x - 0.45) ** 2
-    macro_h = np.clip(0.38 + bend + 0.15 * vein, 0.05, 0.95)
 
     mid_rgb = linear(scalar(image("Color", middle_box, "RGB").resize((EDGE, EDGE), Image.Resampling.LANCZOS)))
     mid_gray = scalar(image("Displacement", middle_box, "L").resize((EDGE, EDGE), Image.Resampling.LANCZOS)
@@ -132,7 +115,7 @@ def bake(references: Path, root: Path) -> None:
     micro_h = np.clip(0.5 + 0.13 * standardized(periodic(scalar(sem))), 0.05, 0.95)
     mean = base_rgb[visible].mean(axis=0)
     tone = np.sin(2 * np.pi * (3 * x + 2 * y)) * np.sin(2 * np.pi * (y - x))
-    heights = (macro_h, middle_h, fine_h, micro_h)
+    heights = (cup(mask), middle_h, fine_h, micro_h)
     colors = (base_rgb, periodic(mid_rgb[::-1]), mean * (1 + 0.035 * network[..., None]),
               mean * (1 + 0.018 * tone[..., None]))
     tiles = root / "src/material/tiles"
@@ -141,8 +124,6 @@ def bake(references: Path, root: Path) -> None:
     preview = Image.new("RGB", (EDGE * 4, EDGE * 2))
     for order in range(4):
         height = np.rint(np.clip(heights[order], 0, 1) * 255).astype(np.uint8)
-        if order == 0:
-            height = cup(height, mask)
         rgb = np.rint(np.clip(colors[order], 0, 1) * 255).astype(np.uint8)
         rgba = np.dstack((rgb, height))
         (tiles / f"leaf-{order}.rgba.z").write_bytes(zlib.compress(rgba.tobytes(), 9))
