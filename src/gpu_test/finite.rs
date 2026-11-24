@@ -55,22 +55,22 @@ fn finite_scene_leaf_axes_cutouts_and_miss_bounds_match_cpu()
         [-0.96, -0.96, 1.0, 0.0, 0.0, 0.0, -1.0, 2.0],
         [0.012, -0.217, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0],
         [1.01, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0],
-        [-0.8, 0.0, 0.13, 0.0, 1.0, 0.0, 0.0, 2.0],
+        [-0.8, 0.0, 0.01625, 0.0, 1.0, 0.0, 0.0, 2.0],
         [-0.125, 0.09375, 1.0, 0.0, 0.0, 0.0, -1.0, 2.0],
         [-0.09375, 0.09375, 1.0, 0.0, 0.0, 0.0, -1.0, 2.0],
         [
             2.130_976_7,
             0.355_660_14,
-            1.691_038_9,
+            1.691_038_9 / 8.0,
             0.0,
             -0.758_468_9,
             -0.258_317_85,
-            -0.598_328_3,
+            -0.598_328_3 / 8.0,
             2.0,
         ],
     ];
     let actual = run("verify_finite_scene", &inputs, inputs.len() * 32)?;
-    assert!(actual[8 * 32 + 9] < -0.2 && actual[9 * 32 + 9] > 0.25);
+    assert!(actual[8 * 32 + 9] < -0.025 && actual[9 * 32 + 9] > 0.03);
     assert!(
         actual[10 * 32 + 2] > 0.5,
         "oblique ray lost the covered blade"
@@ -102,7 +102,7 @@ fn finite_scene_leaf_axes_cutouts_and_miss_bounds_match_cpu()
             assert!(row[2] > 0.5, "edge-on ray missed the cup");
             let xy = [6, 7].map(|i| f64::from(row[i]));
             let height = crate::heightfield::LEAF.sample(xy)?.height;
-            assert!((height - f64::from(row[8])).abs() < 0.004);
+            assert!((height - f64::from(row[8])).abs() < 0.0005);
         }
         for (field, (gpu, cpu)) in row.iter().take(24).zip(expected).enumerate() {
             assert!(

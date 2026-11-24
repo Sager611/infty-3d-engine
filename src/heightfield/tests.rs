@@ -2,35 +2,13 @@
 use super::*;
 
 #[test]
-fn leaf_exaggerates_only_its_broadest_geometry_band() -> Result<(), Error> {
-    assert_eq!(AMPLITUDES, [1.0, 1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0]);
-    let original = Field::new(
-        DATA,
-        512,
-        [1.0 / 32.0, AMPLITUDES[1], AMPLITUDES[2], AMPLITUDES[3]],
-        LEAF.anchor(),
-    )?;
-    let added = Field::new(DATA, 512, [31.0 / 32.0, 0.0, 0.0, 0.0], LEAF.anchor())?;
-    let mut changed = false;
-    for point in [[0.0; 2], [-0.5, 0.25], [0.75, -0.25], [1.0; 2]] {
-        let before = original.sample(point)?;
-        let after = LEAF.sample(point)?;
-        let broad = added.sample(point)?;
-        assert!((after.height - before.height - broad.height).abs() < 1e-15);
-        for axis in 0..2 {
-            assert!(
-                (after.gradient[axis] - before.gradient[axis] - broad.gradient[axis]).abs() < 1e-12
-            );
-        }
-        assert_eq!(after.coverage, before.coverage);
-        changed |= broad.height.abs() > 1e-6;
-    }
-    assert!(changed);
-    Ok(())
+fn leaf_preserves_fine_height_gains() {
+    assert_eq!(AMPLITUDES[1..], [1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0]);
 }
+const HALF_SIZE_MM: f64 = 70.0;
 
 #[test]
-fn blade_rises_smoothly_from_stem_to_either_edge() -> Result<(), Error> {
+fn blade_rises_gently_from_spine_to_either_edge() -> Result<(), Error> {
     for (y, stem, edges) in [
         (168.0, 237.0, [172.0_f64, 302.0]),
         (256.0, 234.0, [146.0, 322.0]),
@@ -38,15 +16,17 @@ fn blade_rises_smoothly_from_stem_to_either_edge() -> Result<(), Error> {
     ] {
         let at = |x: f64| LEAF.sample([x.mul_add(1.0 / 256.0, -1.0), y / 256.0 - 1.0]);
         let spine = at(stem)?.height;
-        assert!(spine < -0.06, "the stem must sit below the carrier");
+        let spine_mm = spine * HALF_SIZE_MM;
+        assert!((-1.5..-0.7).contains(&spine_mm), "spine {spine_mm} mm");
         for edge in edges {
             let mid = (edge - stem).mul_add(0.5, stem);
             let outer = (edge - stem).mul_add(0.85, stem);
             let inner = at(mid)?;
             let blade = at(outer)?;
             assert!(blade.coverage >= 127.5 && inner.coverage >= 127.5);
-            assert!(inner.height > spine + 0.035 && blade.height > inner.height + 0.095);
-            assert!(blade.height > spine + if y == 256.0 { 0.32 } else { 0.15 });
+            assert!(inner.height > spine && blade.height > inner.height);
+            let rise_mm = (blade.height - spine) * HALF_SIZE_MM;
+            assert!((1.3..3.7).contains(&rise_mm), "edge rise {rise_mm} mm");
         }
     }
     Ok(())
@@ -58,14 +38,14 @@ fn photographed_leaf_has_midrib_and_secondary_vein_relief() -> Result<(), Error>
         LEAF.sample([x / 256.0 - 1.0, y / 256.0 - 1.0])
             .map(|value| value.height)
     };
+    let midrib =
+        height(228.0, 280.0)? - f64::midpoint(height(219.0, 280.0)?, height(237.0, 280.0)?);
+    let vein = height(269.0, 304.0)? - f64::midpoint(height(269.0, 299.0)?, height(269.0, 309.0)?);
     assert!(
-        height(228.0, 280.0)? > (height(219.0, 280.0)? + height(237.0, 280.0)?).mul_add(0.5, 0.02),
-        "the midrib must rise between the shoulders of the cupped blade"
+        (0.18..0.34).contains(&(midrib * HALF_SIZE_MM)),
+        "midrib {midrib}"
     );
-    assert!(
-        height(269.0, 304.0)? > (height(269.0, 299.0)? + height(269.0, 309.0)?).mul_add(0.5, 0.008),
-        "a lateral vein must rise out of the blade"
-    );
+    assert!((0.09..0.20).contains(&(vein * HALF_SIZE_MM)), "vein {vein}");
     Ok(())
 }
 

@@ -1,18 +1,18 @@
 # Finite leaf
 
-Try Scene controls → Scene → Leaf · deep cup; Add → Finite plane reuses the carrier.
+Try Scene controls → Scene → Leaf · relief; Add → Finite plane reuses the carrier.
 Axis0/1/2 means normalZ/X/Y. Kind5 is a double-sided square with a Leaf cutout.
 Leaf relief can be applied to any geometry; brick has separate render-only recesses.
 At reference half-size70mm, four vertex-aligned512² height fields span140/14/1.4/0.14mm.
 The macro field clamps; finer fields repeat. Raw bytes are centered at128, divided by255,
-and multiplied by canonical gains1/2^-10/2^-13/2^-15 before summation.
+and multiplied by gains2^-3/2^-10/2^-13/2^-15 before summation.
 A separate512² opacity field clips coverage at127.5. It is not height or optical albedo.
 Uniform instance size scales the entire surface; peers still share their carrier definition.
 
 ## Geometry and rendering
 
 Other carriers keep their hits; a miss is promoted only if the signed bilinear height at its witness reaches the ray.
-For finite Leaf, the analytic cup seeds up to two UVs. One bilinear height sum per candidate corrects ray depth; projected cutouts can fall through to the second root.
+For finite Leaf, the analytic cup shares the macro gain and seeds up to two UVs. One bilinear height sum per candidate corrects ray depth; projected cutouts can fall through to the second root.
 Filtered macro slopes blend into the cup normal. Colors are unchanged; Leaf skips self-shadowing.
 Fine relief away from the witness is not searched. Grazing corrections are bounded; this is not an exact heightfield intersection.
 Point queries still use the height pyramid and covered witnesses independently.
@@ -60,3 +60,4 @@ The macro field adds asymmetric folds, a tapered midrib and traced side veins to
 | 2026-11-24 | Assistant | Documented cupped heights and color-only hits | Keep height out of the hit path |
 | 2026-11-24 | Assistant | Documented analytic seed and height-corrected hits | Render depth without traversal |
 | 2026-11-25 | Assistant | Described blade relief and alternate roots | Preserve oblique cutouts and light the veins |
+| 2026-11-24 | Assistant | Scale guide and macro heights together | Keep the curl shallow |

@@ -41,9 +41,10 @@ fn leaf_domain(p:vec3f,t:f32)->bool {
 struct LeafRoots {times:vec2f,count:u32};
 fn leaf_roots(o:vec3f,d:vec3f)->LeafRoots {
   let delta=o.xy+CUP_STEM;
-  let a=dot(CUP_SCALE,d.xy*d.xy);
-  let b=fma(2.0*CUP_SCALE.x*delta.x,d.x,fma(2.0*CUP_SCALE.y*delta.y,d.y,-d.z));
-  let c=fma(CUP_SCALE.x,delta.x*delta.x,fma(CUP_SCALE.y,delta.y*delta.y,-CUP_FLOOR-o.z));
+  let gain=height_data.amplitudes.x;let scale=CUP_SCALE*gain;
+  let a=dot(scale,d.xy*d.xy);
+  let b=fma(2.0*scale.x*delta.x,d.x,fma(2.0*scale.y*delta.y,d.y,-d.z));
+  let c=fma(scale.x,delta.x*delta.x,fma(scale.y,delta.y*delta.y,-CUP_FLOOR*gain-o.z));
   if(a==0.0){return LeafRoots(vec2f(-c/b),1u);}
   let disc=fma(b,b,-4.0*a*c);
   if(disc<0.0){return LeafRoots(vec2f(0.0),0u);}
@@ -51,7 +52,7 @@ fn leaf_roots(o:vec3f,d:vec3f)->LeafRoots {
   if(q==0.0){return LeafRoots(vec2f(-b/(2.0*a)),1u);}
   return LeafRoots(vec2f(min(q/a,c/q),max(q/a,c/q)),2u);
 }
-fn leaf_slope(p:vec2f)->vec2f {return -2.0*CUP_SCALE*(p+CUP_STEM);}
+fn leaf_slope(p:vec2f)->vec2f {return -2.0*CUP_SCALE*height_data.amplitudes.x*(p+CUP_STEM);}
 fn blade_normal(p:vec2f,uv:vec2f)->vec3f {
   // A wider derivative suppresses 8-bit height terraces without flattening veins.
   let step=3.0/f32(height_data.info.x);

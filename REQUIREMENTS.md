@@ -9,7 +9,7 @@
 - Free-camera WASD movement and drag look; wheel changes travel speed. Only straight W approaches to nearby center-ray hits ease down to a minimum speed; reverse, strafe and diagonal movement retain normal speed. Minimum travel speed and the approach floor are0.000001 units/s for close inspection.
 - Base ray queries always return a gap and matching surface witness with UV/normal; preserve explicit uncertainty and independent point queries.
 - Texh: on a base miss, bilinearly sample height once at the witness UV. Accept if signed height reaches the gap toward the ray. Preserve unmodified base hits and cutouts. Expand culling by texture reach; no displaced-ray traversal.
-- Scene → Leaf · deep cup: original RGB, four height bands, uneven cup, low spine, raised midrib/veins and intact cutout. Solve the broad cup analytically, apply one branchless bilinear height correction per candidate, then clip at the projected UV. Point queries stay independent.
+- Scene → Leaf · relief: original RGB, four height bands, shallow uneven curl, subtle raised veins, and intact cutout. Solve the curl analytically, apply one branchless bilinear height correction per candidate, then clip at the projected UV. Point queries stay independent.
 - Scene → Red brick · relief: in Materials view, recess rendered hits using the weighted height bands from the existing phase-aligned brick textures. Preserve carrier picking, silhouettes and cast shadows. Both previews target60 warm FPS at1265×791.
 
 ## Changelog
@@ -31,3 +31,4 @@
 | 2026-11-24 | User | Require branchless bilinear height sampling | Smooth subtexel gaps without search |
 | 2026-11-24 | User | Expose the deeper Leaf and displace ray hits | Show true relief from the Scene menu |
 | 2026-11-25 | User | Require veined Leaf geometry and recessed brick hits | Natural multiscale relief |
+| 2026-11-24 | User | Reduce Leaf curl and vein relief | Avoid exaggerated folds |

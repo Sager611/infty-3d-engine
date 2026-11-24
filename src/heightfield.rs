@@ -5,7 +5,7 @@ mod ray;
 
 pub const STEPS: usize = 64;
 pub const AMPLITUDES: [f64; 4] = [
-    1.0,
+    0.125,
     0.000_976_562_5,
     0.000_122_070_312_5,
     0.000_030_517_578_125,

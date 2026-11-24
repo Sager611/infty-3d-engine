@@ -146,7 +146,7 @@ test("Leaf preset and reusable finite carrier are exposed accessibly", async ():
 			},
 		});
 	await parser.transform(new Response(source)).text();
-	expect(found.preset).toBe("Leaf · deep cup");
+	expect(found.preset).toBe("Leaf · relief");
 	expect(found.shape).toContain("Finite plane");
 });
 test("Old material and geometry tags stay unchanged", (): void => {

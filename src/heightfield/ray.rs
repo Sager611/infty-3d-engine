@@ -14,10 +14,10 @@ const CUP_Y: f64 = 0.0625;
 const STEM: f64 = 0.09375;
 const FLOOR: f64 = 0.15;
 
-fn gradient(point: [f64; 3]) -> [f64; 3] {
+fn gradient(point: [f64; 3], gain: f64) -> [f64; 3] {
     [
-        -2.0 * CUP_X * (point[0] + STEM),
-        -2.0 * CUP_Y * point[1],
+        -2.0 * CUP_X * gain * (point[0] + STEM),
+        -2.0 * CUP_Y * gain * point[1],
         1.0,
     ]
 }
@@ -35,15 +35,19 @@ fn roots(a: f64, b: f64, c: f64) -> [f64; 2] {
     [first.min(second), first.max(second)]
 }
 
-fn seeds(ray: Ray) -> [Sample; 2] {
+fn seeds(ray: Ray, gain: f64) -> [Sample; 2] {
+    let (scale_x, scale_y) = (CUP_X * gain, CUP_Y * gain);
     let shift = (-dot(ray.o, ray.d)).max(0.0);
     let origin = madd(ray.o, ray.d, shift);
     let ox = origin[0] + STEM;
     let oy = origin[1];
     let [dx, dy, dz] = ray.d;
-    let a = CUP_X.mul_add(dx * dx, CUP_Y * dy * dy);
-    let b = (2.0 * CUP_X * ox).mul_add(dx, (2.0 * CUP_Y * oy).mul_add(dy, -dz));
-    let c = CUP_X.mul_add(ox * ox, CUP_Y.mul_add(oy * oy, -FLOOR - origin[2]));
+    let a = scale_x.mul_add(dx * dx, scale_y * dy * dy);
+    let b = (2.0 * scale_x * ox).mul_add(dx, (2.0 * scale_y * oy).mul_add(dy, -dz));
+    let c = scale_x.mul_add(
+        ox * ox,
+        scale_y.mul_add(oy * oy, (-FLOOR).mul_add(gain, -origin[2])),
+    );
     roots(a, b, c).map(|root| finite::sample(madd(origin, ray.d, root), shift + root, true))
 }
 
@@ -94,7 +98,7 @@ impl Field<'_> {
         uv: [f64; 2],
         macro_tap: impl Fn([f64; 2]) -> f64,
     ) -> [f64; 3] {
-        let mut normal = gradient(point);
+        let mut normal = gradient(point, self.amplitudes[0]);
         let step = 3.0 / f64::from(self.edge);
         for (axis, value) in normal.iter_mut().take(2).enumerate() {
             let (mut lo, mut hi) = (uv, uv);
@@ -116,7 +120,7 @@ impl Field<'_> {
         macro_tap: impl Fn([f64; 2]) -> f64,
     ) -> Option<Sample> {
         let normal = if self.cup {
-            gradient(sample.p)
+            gradient(sample.p, self.amplitudes[0])
         } else {
             [0.0, 0.0, 1.0]
         };
@@ -161,7 +165,7 @@ impl Field<'_> {
         };
         let covered = |uv| tap(uv, 4) >= 127.5;
         let candidates = if self.cup {
-            seeds(local_ray).map(Some)
+            seeds(local_ray, self.amplitudes[0]).map(Some)
         } else {
             [
                 base.sample.hit.then(|| {

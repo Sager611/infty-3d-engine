@@ -107,7 +107,8 @@ test("WASM finite leaf keeps shared carriers, real cutouts, bounds and result-ne
 		expect(hit[1]).toBe(5);
 		expect(hit[2]).toBe(1);
 		const height = hit[8] ?? Number.NaN;
-		expect(height).toBeLessThan(-0.005);
+		expect(height).toBeGreaterThan(-0.0016);
+		expect(height).toBeLessThan(-0.0009);
 		expect(hit[3]).toBeCloseTo((flat[3] ?? Number.NaN) - height, 12);
 		expect(hit.slice(12, 14)).toEqual(flat.slice(12, 14));
 		const near = new Float64Array([0, 0, height * 0.5, 0, 0, -1]);
