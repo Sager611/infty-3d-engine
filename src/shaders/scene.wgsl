@@ -33,8 +33,12 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
   }else if(kind==3u){query=plane(local_o,d);gap_lower=query.gap;status=0u;}
   let local_error=error;let local=query.p;let canonical_gap=query.gap;let canonical_lower=gap_lower;
   if(obj.params.w==2.0&&status<2u){
-    query=texh(local_o,d,query,gap_lower,status==0u,kind==5u);
-    if(query.hit){gap_lower=0.0;}
+    if(query.hit){
+      if(kind==5u){query.hit=leaf_covered(query.uv);}
+    }else if(status==0u){
+      query=texh(local_o,d,query,gap_lower,kind==5u);
+      if(query.hit){gap_lower=0.0;}
+    }
   }
   query.p=position+size*query.p;query.t*=size;query.gap*=size;gap_lower*=size;error*=size;
   if(pending.valid){

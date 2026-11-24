@@ -77,6 +77,24 @@ def pyramid(value: NDArray[np.uint8]) -> bytes:
     return bytes(data)
 
 
+def cup(height: NDArray[np.uint8], mask: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    """Smooth the blade outline into a spine and a tapered cross-blade cup."""
+    visible = mask >= 128
+    rows = np.flatnonzero(visible.any(axis=1))
+    y = np.arange(EDGE)
+    left, right = (
+        np.convolve(np.pad(np.interp(y, rows, edge[rows]), 8, mode="edge"),
+                    np.ones(17) / 17, mode="valid")[:, None]
+        for edge in (visible.argmax(axis=1), EDGE - 1 - visible[:, ::-1].argmax(axis=1))
+    )
+    width = np.maximum(1.0, right - left)
+    across = np.minimum(1.0, np.abs((2 * np.arange(EDGE) - left - right) / width))
+    stem = 0.45 + 0.06 * np.sin(np.pi * y[:, None] / EDGE)
+    lift = 0.21 * np.minimum(1.0, width / 125) * across ** 2
+    detail = 0.32 * (height / 255 - 0.5)
+    return np.rint(255 * np.clip(stem + lift + detail, 0.05, 0.95)).astype(np.uint8)
+
+
 def bake(references: Path, root: Path) -> None:
     source = references / "LeafSet001-8K"
     macro_box = (256, 128, 2560, 3936)
@@ -123,6 +141,8 @@ def bake(references: Path, root: Path) -> None:
     preview = Image.new("RGB", (EDGE * 4, EDGE * 2))
     for order in range(4):
         height = np.rint(np.clip(heights[order], 0, 1) * 255).astype(np.uint8)
+        if order == 0:
+            height = cup(height, mask)
         rgb = np.rint(np.clip(colors[order], 0, 1) * 255).astype(np.uint8)
         rgba = np.dstack((rgb, height))
         (tiles / f"leaf-{order}.rgba.z").write_bytes(zlib.compress(rgba.tobytes(), 9))

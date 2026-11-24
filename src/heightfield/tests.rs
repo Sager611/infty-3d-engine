@@ -30,6 +30,27 @@ fn leaf_exaggerates_only_its_broadest_geometry_band() -> Result<(), Error> {
 }
 
 #[test]
+fn blade_rises_smoothly_from_stem_to_either_edge() -> Result<(), Error> {
+    for (y, stem, edges) in [
+        (168.0, 237.0, [172.0_f64, 302.0]),
+        (256.0, 234.0, [146.0, 322.0]),
+        (384.0, 232.0, [169.0, 295.0]),
+    ] {
+        let at = |x: f64| LEAF.sample([x.mul_add(1.0 / 256.0, -1.0), y / 256.0 - 1.0]);
+        let spine = at(stem)?.height;
+        for edge in edges {
+            let mid = (edge - stem).mul_add(0.5, stem);
+            let outer = (edge - stem).mul_add(0.85, stem);
+            let inner = at(mid)?;
+            let blade = at(outer)?;
+            assert!(blade.coverage >= 127.5 && inner.coverage >= 127.5);
+            assert!(inner.height > spine + 0.02 && blade.height > inner.height + 0.055);
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn checked_fields_require_a_layout_and_a_covered_anchor() -> Result<(), Error> {
     let field = Field::new(DATA, 512, AMPLITUDES, [0.0; 2])?;
     assert_eq!(

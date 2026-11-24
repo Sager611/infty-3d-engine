@@ -158,7 +158,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
       let material_t=render_material_distance(nearest,direction,nearest_size,nearest_parameter);
       let footprint=max(1e-30,2.0*material_t/(frame_params.forward.w*height*max(0.05,abs(dot(normal,direction)))));
       var material:MaterialSurface;
-      if(nearest.kind==5u&&nearest_material==2u){material=leaf_material(nearest.local,scene_axis(nearest_object),direction,nearest_size,footprint);}
+      if(nearest_material==2u){material=leaf_material(nearest.query.uv,normal,nearest_size,footprint);}
       else{material=layered_material(nearest_material,direction*material_t,normal,footprint,nearest_anchor);}
       color=material_shade(material,nearest.query.p,direction,light,shadow);
     } else {

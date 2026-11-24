@@ -17,13 +17,13 @@ fn verify_finite_shadow(@builtin(global_invocation_id) id:vec3u) {
 @compute @workgroup_size(1)
 fn verify_leaf_material(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
-  let input=rays[id.x];let axis=u32(input.o.w);let value=hf_sample(input.o.xy);
-  let local=plane_unframe(vec3f(input.o.xy,value.scalar),axis);
-  let material=leaf_material(local,axis,input.d.xyz,input.d.w,input.o.z);
+  let input=rays[id.x];let axis=u32(input.o.w);
+  let uv=fma(input.o.xy,vec2f(0.5),vec2f(0.5));
+  let normal=surface_normal(plane_unframe(vec3f(0.0,0.0,1.0),axis),input.d.xyz,5u);
+  let material=leaf_material(uv,normal,input.d.w,input.o.z);
   results[id.x]=ProbeResult(vec4f(material.normal,material.roughness),vec4f(material.albedo,material.metallic),
-    vec4f(value.height.v,value.gradient),vec4f(
-      leaf_fetch(leaf_uv(input.o.xy,0u),0u,8,0.0).a,
-      leaf_fetch(leaf_uv(input.o.xy,3u),3u,11,0.0).a,0.0,0.0));
+    vec4f(0.0),vec4f(leaf_fetch(leaf_uv(uv,0u),0u,8,0.0).a,
+      leaf_fetch(leaf_uv(uv,3u),3u,11,0.0).a,0.0,0.0));
 }
 @compute @workgroup_size(1)
 fn verify_finite_precise(@builtin(global_invocation_id) id:vec3u) {
@@ -70,16 +70,9 @@ fn verify_texh(@builtin(global_invocation_id) id:vec3u) {
 @compute @workgroup_size(1)
 fn verify_heightfield(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
-  let input=rays[id.x];var value=HFValue(fi_invalid(),0.0,vec2f(0.0),fi_invalid());
-  if(hf_header_ok()){
-    value=hf_sample(input.o.xy);
-  }
-  let normal=normalize(vec3f(-value.gradient,1.0));
-  results[id.x*2u]=ProbeResult(vec4f(fi_middle(value.height),value.height.v,fi_middle(value.mask)),
-    vec4f(value.gradient,value.mask.v),vec4f(normal,f32(value.height.valid&&value.mask.valid)),
-    vec4f(0.0));
-  results[id.x*2u+1u]=ProbeResult(vec4f(0.0),vec4f(height_data.info),
-    vec4f(0.0),vec4f(0.0));
+  let uv=rays[id.x].o.xy;
+  results[id.x]=ProbeResult(vec4f(hf_height(uv),hf_bilinear(4u,uv,1.0),0.0,0.0),
+    vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 
 @compute @workgroup_size(1)

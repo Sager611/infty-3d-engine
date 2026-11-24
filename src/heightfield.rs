@@ -106,12 +106,7 @@ impl Node {
     }
 }
 const fn repeat(order: usize) -> u32 {
-    match order {
-        1 => 10,
-        2 => 100,
-        3 => 1000,
-        _ => 1,
-    }
+    [1, 10, 100, 1000, 1][order]
 }
 fn polynomial(c: [f64; 4], x: f64, y: f64) -> f64 {
     c[3].mul_add(x * y, c[1].mul_add(x, c[2].mul_add(y, c[0])))
@@ -263,7 +258,32 @@ impl<'a> Field<'a> {
         Ok(value)
     }
     pub fn reach(self) -> f64 {
-        (self.amplitudes.into_iter().map(f64::abs).sum::<f64>() * (128.0 / 255.0)).next_up()
+        let [a, b, c, d] = self.amplitudes;
+        ((a.abs() + b.abs() + c.abs() + d.abs()) * (128.0 / 255.0)).next_up()
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "Unit UV scales to 0..=512000"
+    )]
+    fn bilinear(self, uv: [f64; 2], order: usize, stride: usize, edge: usize) -> f64 {
+        let scale = f64::from(self.edge * repeat(order));
+        let [x, y] = [uv[0] * scale, uv[1] * scale];
+        let (ix, iy) = (x as usize, y as usize);
+        let (fx, fy) = (x.fract(), y.fract());
+        let last = edge - 1;
+        let mask = last | 0_usize.wrapping_sub(usize::from(order.is_multiple_of(4)));
+        let at = |i: usize, j: usize| {
+            f64::from(
+                self.data[order * stride + (j & mask).min(last) * edge + (i & mask).min(last)],
+            )
+        };
+        let a = at(ix, iy);
+        let b = at(ix, iy + 1);
+        let lo = (at(ix + 1, iy) - a).mul_add(fx, a);
+        let hi = (at(ix + 1, iy + 1) - b).mul_add(fx, b);
+        (hi - lo).mul_add(fy, lo)
     }
 
     pub fn texh(
@@ -277,27 +297,41 @@ impl<'a> Field<'a> {
         {
             return Ok(base);
         }
-        let xy = base.sample.uv.map(|u| {
-            let u = if (0.0..=1.0).contains(&u) {
-                u
-            } else {
-                u.rem_euclid(1.0)
-            };
-            2.0_f64.mul_add(u, -1.0)
-        });
-        let value = self.sample(xy)?;
-        if cutout && value.coverage < 127.5 {
+        // Wrap out-of-range UVs without moving the last vertex at exactly 1.
+        let unit = |u: f64| u - u.floor() + f64::from(u8::from(u.to_bits() == 1.0_f64.to_bits()));
+        let [uv_x, uv_y] = base.sample.uv;
+        let uv = [unit(uv_x), unit(uv_y)];
+        let stride = self.stride()?;
+        let edge = usize::try_from(self.edge).map_err(|_| Error::Numeric)?;
+        let tap = |order| self.bilinear(uv, order, stride, edge);
+        if cutout && tap(4) < 127.5 {
             base.sample.hit = false;
-        } else if !base.sample.hit {
-            let point = madd(ray.o, ray.d, base.sample.t);
-            let side = dot(sub(point, base.sample.p), base.sample.n);
-            let gap = base.sample.gap;
-            if (side > 0.0 && value.height >= gap) || (side < 0.0 && -value.height >= gap) {
-                base.sample.hit = true;
-                base.sample.p = point;
-                base.sample.gap = 0.0;
-                base.gap_lower = 0.0;
-            }
+            return Ok(base);
+        }
+        if base.sample.hit {
+            return Ok(base);
+        }
+        let point = madd(ray.o, ray.d, base.sample.t);
+        let side = dot(sub(point, base.sample.p), base.sample.n);
+        if side == 0.0 {
+            return Ok(base);
+        }
+        let [a, b, c, d] = self.amplitudes;
+        let height = (d / 255.0).mul_add(
+            tap(3) - 128.0,
+            (c / 255.0).mul_add(
+                tap(2) - 128.0,
+                (b / 255.0).mul_add(tap(1) - 128.0, (a / 255.0) * (tap(0) - 128.0)),
+            ),
+        );
+        if !height.is_finite() {
+            return Err(Error::Numeric);
+        }
+        if side.signum() * height >= base.sample.gap {
+            base.sample.hit = true;
+            base.sample.p = point;
+            base.sample.gap = 0.0;
+            base.gap_lower = 0.0;
         }
         Ok(base)
     }

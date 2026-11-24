@@ -100,7 +100,6 @@ fn layered_material(material: u32, delta: vec3f, normal: vec3f, footprint: f32, 
   var modulation=vec3f(1.0);
   var gradient=vec3f(0.0);
   var roughness=select(0.26,0.86,material==1u);
-  if(material==2u){roughness=0.5;}
   var variance=roughness*roughness;
   var occlusion=1.0;
   for (var i=0u;i<arrayLength(&material_levels);i++) {

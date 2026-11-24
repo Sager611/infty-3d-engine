@@ -8,12 +8,13 @@
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
 - Free-camera WASD movement and drag look; wheel changes travel speed. Only straight W approaches to nearby center-ray hits ease down to a minimum speed; reverse, strafe and diagonal movement retain normal speed. Minimum travel speed and the approach floor are0.000001 units/s for close inspection.
 - Base ray queries always return a gap and matching surface witness with UV/normal; preserve explicit uncertainty and independent point queries.
-- Texh: on a base miss, sample an optional heightmap once at the witness UV. Accept if signed height reaches the gap toward the ray. Keep base hits and cutouts. No displaced-ray traversal; the approximation can miss relief elsewhere. Expand culling by texture reach.
-- Leaf: keep four bands, gain1 at the broadest, and the existing cutout. Compare warm displayed FPS before/after at1265×791; target60FPS.
+- Texh: on a base miss, sample an optional heightmap once at the witness UV with branchless bilinear interpolation. Accept if signed height reaches the gap toward the ray. Keep base hits and cutouts. No displaced-ray traversal; the approximation can miss relief elsewhere. Expand culling by texture reach.
+- Leaf: four bands (broadest gain1), stem lower than blade edges, unchanged cutout. Shade hits with color and carrier normals; sample height only for ray misses and independent point queries. Compare warm displayed FPS at1265×791; target60FPS.
 
 ## Changelog
+
 | When | Who | What | Why |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 2026-11-08 | Assistant | Recorded the complete two-item requirements | Keep project scope explicit |
 | 2026-11-08 | User | Required intuitive add/delete controls | Create and remove instances in the visualization |
 | 2026-11-08 | User | Required modular geometry queries and free-camera surface inspection | Keep implementation scope explicit |
@@ -25,3 +26,5 @@
 | 2026-11-23 | User | Doubled broadest Leaf height | Exaggerate largest-scale geometry |
 | 2026-11-23 | User | Set broadest Leaf height to32× original | Make broad folds obvious |
 | 2026-11-24 | User | Replace displaced rays with generic texh | One sample instead of traversal |
+| 2026-11-24 | User | Remove hit height work and cup the Leaf heightmap | Faster close-ups and a lower stem |
+| 2026-11-24 | User | Require branchless bilinear height sampling | Smooth subtexel gaps without search |

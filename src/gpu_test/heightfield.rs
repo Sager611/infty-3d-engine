@@ -1,4 +1,4 @@
-use super::support::run_field;
+use super::support::{run, run_field, used_bindings};
 use crate::heightfield::{Field, LEAF};
 use crate::{
     geometry::{Geometry, Kind},
@@ -7,7 +7,7 @@ use crate::{
 };
 
 #[test]
-fn leaf_gpu_material_uses_the_same_scalar_and_vertex_aligned_tiles()
+fn leaf_gpu_material_uses_carrier_normals_and_vertex_aligned_color()
 -> Result<(), Box<dyn std::error::Error>> {
     let points = [
         [0.0_f32, 0.0],
@@ -30,7 +30,8 @@ fn leaf_gpu_material_uses_the_same_scalar_and_vertex_aligned_tiles()
             }
         }
     }
-    let actual = run_field("verify_leaf_material", &inputs, inputs.len() * 16, LEAF)?;
+    assert!(!used_bindings("verify_leaf_material")?.contains(&9));
+    let actual = run("verify_leaf_material", &inputs, inputs.len() * 16)?;
     let coarse = Field::new(
         crate::heightfield::DATA,
         512,
@@ -45,27 +46,15 @@ fn leaf_gpu_material_uses_the_same_scalar_and_vertex_aligned_tiles()
     )?;
     for (input, row) in inputs.iter().zip(actual.chunks_exact(16)) {
         let xy = [f64::from(input[0]), f64::from(input[1])];
-        let value = LEAF.sample(xy)?;
-        let n = value.normal();
-        let mut n = if input[3] < 0.5 {
-            n
-        } else if input[3] < 1.5 {
-            [n[2], n[0], n[1]]
-        } else {
-            [n[1], n[2], n[0]]
-        };
-        if (0..3).map(|a| n[a] * f64::from(input[4 + a])).sum::<f64>() > 0.0 {
-            n = n.map(|v| -v);
-        }
+        let n = [4, 5, 6].map(|axis| -f64::from(input[axis]));
         assert!(row.iter().all(|v| v.is_finite()));
         assert!(row[7] < 0.5, "leaf is metallic");
         for a in 0..3 {
             assert!(
                 (f64::from(row[a]) - n[a]).abs() < 2e-5,
-                "wrong summed normal: {row:?} {n:?}"
+                "direct hit evaluated height shading: {row:?} {n:?}"
             );
         }
-        assert!(f64::from(row[8]) <= value.height && f64::from(row[9]) >= value.height);
         for (index, field) in [(12, coarse), (13, finest)] {
             let alpha = field.sample(xy)?.height + 128.0 / 255.0;
             assert!(
@@ -84,12 +73,12 @@ fn leaf_gpu_lod_filters_only_appearance_and_scales_with_the_instance()
         inputs.push([0.012, -0.217, footprint, 0.0, 0.0, 0.0, -1.0, 0.07]);
     }
     inputs.push([0.012, -0.217, 0.000_005_4, 0.0, 0.0, 0.0, -1.0, 0.14]);
-    let actual = run_field("verify_leaf_material", &inputs, inputs.len() * 16, LEAF)?;
+    let actual = run("verify_leaf_material", &inputs, inputs.len() * 16)?;
     for row in actual.chunks_exact(16) {
         assert!(row.iter().all(|v| v.is_finite()));
         assert_eq!(
-            bytemuck::cast_slice::<f32, u32>(&row[8..14]),
-            bytemuck::cast_slice::<f32, u32>(&actual[8..14])
+            bytemuck::cast_slice::<f32, u32>(&row[..4]),
+            bytemuck::cast_slice::<f32, u32>(&actual[..4])
         );
     }
     let base = &actual[2 * 16..3 * 16];
@@ -99,8 +88,8 @@ fn leaf_gpu_lod_filters_only_appearance_and_scales_with_the_instance()
         bytemuck::cast_slice::<f32, u32>(doubled)
     );
     assert!(
-        actual[7 * 16 + 3] > actual[3],
-        "unresolved fine slopes add no roughness"
+        (actual[7 * 16 + 4] - actual[4]).abs() > 0.001,
+        "LOD did not filter the leaf color"
     );
     Ok(())
 }
@@ -233,7 +222,26 @@ fn texh_gpu_matches_cpu_for_either_side_and_multiple_carriers()
 }
 
 #[test]
-fn leaf_gpu_reads_one_summed_scalar_and_normals() -> Result<(), Box<dyn std::error::Error>> {
+fn texh_blends_four_texels_on_a_gap() -> Result<(), Box<dyn std::error::Error>> {
+    let data = fixture([[192, 128, 224, 160], [128; 4], [128; 4], [128; 4], [255; 4]]);
+    let field = Field::new(&data, 2, [255.0 / 256.0, 0.0, 0.0, 0.0], [0.0; 2])?;
+    // UV (.25,.25) blends four corners to 176, for a height of 0.1875.
+    let inputs = [0.17_f32, 0.20].map(|z| [-0.5, -0.5, z, 5.0, 0.0, 0.0, 1.0, 2.0]);
+    let actual = run_field("verify_texh", &inputs, inputs.len() * 16, field)?;
+    let carrier = Geometry::new(Kind::FinitePlane, 0.0)?;
+    for ((row, input), hit) in actual.chunks_exact(16).zip(inputs).zip([true, false]) {
+        let ray = Ray {
+            o: [-0.5, -0.5, f64::from(input[2])],
+            d: [0.0, 0.0, 1.0],
+        };
+        assert_eq!(field.texh(ray, carrier.query(ray)?, true)?.sample.hit, hit);
+        assert_eq!(row[0] > 0.5, hit);
+    }
+    Ok(())
+}
+
+#[test]
+fn leaf_gpu_bilinear_matches_cpu_bands_and_mask() -> Result<(), Box<dyn std::error::Error>> {
     let points: [[f32; 2]; 16] = [
         [0.0, 0.0],
         [0.012, -0.217],
@@ -252,17 +260,23 @@ fn leaf_gpu_reads_one_summed_scalar_and_normals() -> Result<(), Box<dyn std::err
         [-0.007, 0.019],
         [0.42, 0.18],
     ];
-    let inputs = points.map(|[x, y]| [x, y, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-    let actual = run_field("verify_heightfield", &inputs, inputs.len() * 32, LEAF)?;
-    for (index, row) in actual.chunks_exact(32).enumerate() {
-        let value = LEAF.sample(points[index].map(f64::from))?;
-        assert!(
-            row[11] > 0.5 && f64::from(row[1]) <= value.height && f64::from(row[2]) >= value.height
-        );
-        assert!(f64::from(row[6]) <= value.coverage && f64::from(row[7]) >= value.coverage);
-        for axis in 0..2 {
-            assert!((f64::from(row[4 + axis]) - value.gradient[axis]).abs() < 2e-5);
-        }
+    let inputs = points.map(|[x, y]| {
+        [
+            x.mul_add(0.5, 0.5),
+            y.mul_add(0.5, 0.5),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ]
+    });
+    let actual = run_field("verify_heightfield", &inputs, inputs.len() * 16, LEAF)?;
+    for (row, input) in actual.chunks_exact(16).zip(inputs) {
+        let value = LEAF.sample([0, 1].map(|axis| f64::from(input[axis]).mul_add(2.0, -1.0)))?;
+        assert!((f64::from(row[0]) - value.height).abs() < 1e-5);
+        assert!((f64::from(row[1]) - value.coverage).abs() < 5e-5);
     }
     Ok(())
 }

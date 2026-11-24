@@ -11,13 +11,14 @@ Uniform instance size scales the entire surface; peers still share their carrier
 
 ## Geometry and rendering
 
-Ray tests keep base hits, reject cutouts, and test signed height once at a miss witness UV.
+Ray tests keep base hits, reject cutouts, and test signed height at miss UVs using branchless bilinear samples.
 Promoted hits use the closest ray point; relief away from the witness is not searched.
 Point queries still use bounded height regions and covered witnesses, independent of ray tests.
-Colour and filtered normals share vertex addressing with the height sample; Leaf skips self-shadowing.
+Hits use color and the carrier normal, not height shading. Leaf skips self-shadowing.
+The broadest height band cups upward on both sides of the stem; finer bands and opacity are unchanged.
 Amber hatching marks unresolved ray or shadow work.
 The finest reference texel is273.4375nm; below this there is bilinear interpolation, not new evidence.
-Extreme close-ups expose cells and discontinuous normals at their boundaries.
+Extreme close-ups expose texture cells.
 The leaf is an authored opaque sheet, not measured anatomy, transmission, thickness, or volumetric tissue.
 
 ## Sources and changes
@@ -48,10 +49,12 @@ Outputs: four linear RGB8/height-alpha zlib tiles and `leaf.bin` (2,184,540 byte
 Each scalar field has262,144 samples, nine interleaved min/max levels, and padding:436,908 bytes.
 GPU upload omits pyramids: 32-byte header plus five raw planes.
 Layout, covered positive-zero anchor, and exact finite f32 gains are checked; no upload resampling.
-Byte reproducibility is checked against a fresh bake; these assets are not scientific measurements.
+The bake cups the quantized macro band before building its pyramid.
 
 ## Changelog
+
 | When | Who | What | Why |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 2026-11-11 | Assistant | Documented Leaf usage, fixed surface, source derivatives and bake | Make geometry, limits and attribution explicit |
 | 2026-11-24 | Assistant | Documented texh ray approximation | Separate ray, point, and shading rules |
+| 2026-11-24 | Assistant | Documented cupped heights and color-only hits | Keep height out of the hit path |

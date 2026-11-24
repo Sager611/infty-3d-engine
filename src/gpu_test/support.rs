@@ -55,7 +55,9 @@ pub(super) fn run_field(
 ) -> Result<Vec<f32>, Box<dyn Error>> {
     pollster::block_on(run_async(entry, rays, output_floats, None, field))
 }
-fn used_bindings(entry: &str) -> Result<std::collections::BTreeSet<u32>, Box<dyn Error>> {
+pub(super) fn used_bindings(
+    entry: &str,
+) -> Result<std::collections::BTreeSet<u32>, Box<dyn Error>> {
     let module = naga::front::wgsl::parse_str(SHADER)?;
     let info = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
