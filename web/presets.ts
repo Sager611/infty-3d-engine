@@ -8,18 +8,27 @@ import {
 import { DEFAULT_SNAPSHOT, type Snapshot } from "./state.ts";
 import { MATERIAL_MODE } from "./view.ts";
 
+const PANEL_FRAME = 0.4;
 const LEAF_SIZE = 0.07;
-const LEAF_FRAME = 0.4;
-const LEAF: Scene = Object.freeze([
-	Object.freeze({
-		id: 1,
-		kind: "finite",
-		position: Object.freeze([0, 1, 0] as const),
-		size: LEAF_SIZE,
-		parameter: 0,
-		material: "leaf",
-	}),
-]);
+const BRICK_SIZE = 0.42;
+
+function panel(material: "leaf" | "brick", size: number): Scene {
+	return Object.freeze([
+		Object.freeze({
+			id: 1,
+			kind: "finite",
+			position: Object.freeze([0, 1, 0] as const),
+			size,
+			parameter: 0,
+			material,
+		}),
+	]);
+}
+
+const PANELS = {
+	leaf: { objects: panel("leaf", LEAF_SIZE), yaw: 0.28, pitch: 0.32 },
+	brick: { objects: panel("brick", BRICK_SIZE), yaw: 0.52, pitch: 0.16 },
+} as const;
 
 const SIDE = 16;
 const LAYER: number = SIDE * SIDE;
@@ -79,18 +88,19 @@ export function presetSnapshot(
 	if (name === "showcase") {
 		objects = showcase();
 		camera = { ...camera, yaw: YAW, pitch: PITCH };
-	} else if (name === "leaf") {
-		objects = LEAF;
-		camera = { ...camera, yaw: 0.28, pitch: 0.32 };
+	} else if (name === "leaf" || name === "brick") {
+		const preset = PANELS[name];
+		objects = preset.objects;
+		camera = { ...camera, yaw: preset.yaw, pitch: preset.pitch };
 		viewMode = MATERIAL_MODE;
 	} else if (name !== "default") {
 		throw new Error("Unknown scene preset");
 	}
 	camera = frameCamera(camera, objects, [], aspect);
-	if (name === "leaf") {
+	if (name === "leaf" || name === "brick") {
 		camera = Object.freeze({
 			...camera,
-			distance: camera.distance * LEAF_FRAME,
+			distance: camera.distance * PANEL_FRAME,
 		});
 	}
 	return Object.freeze({

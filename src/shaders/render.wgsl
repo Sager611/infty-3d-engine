@@ -84,6 +84,8 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   let origin = frame_params.origin.xyz;
   let count = frame_params.screen.w;
   let display_gap = frame_params.screen.z == 1u;
+  let material_view = frame_params.screen.z == 3u;
+  let pixel_span = 2.0/(frame_params.forward.w*height);
   let light = vec3f(3.0, 5.0, 4.0);
 
   var nearest = empty_sample();
@@ -94,7 +96,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   var nearest_size = 1.0;
   var nearest_parameter = 0.0;
   var nearest_material = 0u;
-  var nearest_anchor = vec3f(0.0);
+  var nearest_carrier = empty_sample();
   var outline_uv = vec2f(0.0);
   var halo_uv = vec2f(0.0);
   var halo_gap=0.0;var halo_found=false;
@@ -117,7 +119,9 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
       let object = resolved_object(i);
       let selected = scene_selected(object);
 
-      let sample = scene_object_precise(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w), direction, object);
+      let carrier = scene_object_precise(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w), direction, object);
+      var sample=carrier;
+      if(material_view&&object.params.w==1.0){sample=brick_contact(carrier,direction,object,vec3f(0.0),pixel_span);}
       pending=pending_min(pending,sample.pending);
       if (sample.query.hit && (!nearest_hit || sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
         nearest = sample;
@@ -126,7 +130,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
         nearest_size = object.position_size.w;
         nearest_parameter = object.params.x;
         nearest_material = u32(object.params.w);
-        nearest_anchor = object.position_size.xyz;
+        nearest_carrier = carrier;
         nearest_hit = true;
       }
 
@@ -151,15 +155,19 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   let unknown=pending_before(pending,nearest_hit,nearest_t,nearest.error);
   var shadow_unknown=false;
   if (nearest_hit&&!unknown) {
-    let visibility=scene_shadow(nearest,nearest_object,surface_normal(nearest.query.n,direction,nearest.kind),light,count);
+    let normal=surface_normal(nearest.query.n,direction,nearest.kind);
+    // Carrier shadows avoid treating a recessed brick face as inside its own occluder.
+    let visibility=scene_shadow(nearest_carrier,nearest_object,normal,light,count);
     let shadow=shadow_value(visibility);shadow_unknown=visibility.uncertain;
-    if (frame_params.screen.z==3u) {
-      let normal=surface_normal(nearest.query.n,direction,nearest.kind);
-      let material_t=render_material_distance(nearest,direction,nearest_size,nearest_parameter);
-      let footprint=max(1e-30,2.0*material_t/(frame_params.forward.w*height*max(0.05,abs(dot(normal,direction)))));
+    if (material_view) {
+      var material_t=nearest_t;
+      if(nearest_t==nearest_carrier.query.t){
+        material_t=render_material_distance(nearest,direction,nearest_size,nearest_parameter);
+      }
+      let footprint=max(1e-30,pixel_span*material_t/max(0.05,abs(dot(normal,direction))));
       var material:MaterialSurface;
       if(nearest_material==2u){material=leaf_material(nearest.query.uv,normal,nearest_size,footprint);}
-      else{material=layered_material(nearest_material,direction*material_t,normal,footprint,nearest_anchor);}
+      else{material=layered_material(nearest_material,direction*material_t,normal,footprint,nearest_object.position_size.xyz);}
       color=material_shade(material,nearest.query.p,direction,light,shadow);
     } else {
       color = surface_shade(nearest.query, nearest.local, nearest.kind,

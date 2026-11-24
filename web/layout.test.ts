@@ -66,7 +66,7 @@ test("scene loader exposes all presets inside the accessible controls", async ()
 		});
 	await parser.transform(new Response(source)).text();
 	expect(found.label).toBe("Load scene");
-	expect(options).toEqual(["", "default", "showcase", "leaf"]);
+	expect(options).toEqual(["", "default", "showcase", "leaf", "brick"]);
 });
 
 test("scene controls stay inside a collapsed, accessible disclosure", async () => {

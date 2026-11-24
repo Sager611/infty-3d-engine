@@ -78,11 +78,37 @@ def pyramid(value: NDArray[np.uint8]) -> bytes:
 
 
 def cup(mask: NDArray[np.uint8]) -> Array:
-    """Macro displacement and its analytic ray seed use the same cup."""
-    y, x = np.mgrid[:EDGE, :EDGE] * (2 / EDGE) - 1
-    height = 4.375 * (x + 0.09375) ** 2 + 0.0625 * y ** 2 - 0.15
-    covered = np.asarray(Image.fromarray(mask).filter(ImageFilter.MaxFilter(5))) >= 128
-    return np.clip(np.where(covered, height, 0) + 128 / 255, 0, 1)
+    """Warp the analytic cup and trace the photographed blade's vein layout."""
+    row, col = np.mgrid[:EDGE, :EDGE]
+    y, across = row / 256 - 1, col / 256 - 1 + 0.09375
+    carrier = 4.375 * across ** 2 + 0.0625 * y ** 2 - 0.15
+    relief = 0.009 * np.sin(5 * y) + across * (
+        0.035 * np.sin(4 * y + 0.8) + 0.063 * across * np.sin(13 * y + 14 * across)
+    )
+    spine = np.interp(row, (95, 152, 214, 280, 346, 410, 475),
+                      (229, 229, 227, 228, 230, 232, 230))
+    offset = col - spine
+    blade = np.clip((row - 95) / 380, 0, 1)
+    relief += 0.045 * np.sin(np.pi * blade) * (1 - 0.45 * blade) * np.exp(
+        -(offset / (4.8 - 2.3 * blade)) ** 2
+    )
+    # Root, signed span, rise in source pixels; left and right veins do not pair.
+    for root, span, rise in (
+        (125, -48, 56), (156, 72, 61), (167, -65, 62), (199, 89, 68),
+        (207, -74, 75), (234, 94, 70), (246, -88, 74), (280, 92, 67),
+        (287, -83, 75), (313, 81, 63), (325, -69, 73), (350, 65, 57),
+        (366, -57, 69), (392, 46, 58), (403, -39, 53), (430, 31, 39),
+    ):
+        along = np.clip(offset / span, 0, 1)
+        curve = root + rise * along * (0.65 + 0.35 * along)
+        width = 3.0 - 1.35 * along
+        ridge = 0.026 * np.sin(np.pi * along) * np.exp(-((row - curve) / width) ** 2)
+        relief += ridge * (1 - 0.45 * along)
+    outline = Image.fromarray(mask)
+    # Let the ray seed set the delicate silhouette, not high-gradient veins.
+    interior = np.clip((scalar(outline.filter(ImageFilter.GaussianBlur(4))) - 0.66) / 0.30, 0, 1)
+    covered = np.asarray(outline.filter(ImageFilter.MaxFilter(9))) >= 128
+    return np.clip(np.where(covered, carrier + interior * relief, 0) + 128 / 255, 0, 1)
 
 
 def bake(references: Path, root: Path) -> None:

@@ -106,6 +106,45 @@ fn microscopic_goursat_material_contacts_do_not_collapse_to_the_camera()
 }
 
 #[test]
+fn brick_ray_hits_recess_mortar_below_faces_without_inventing_hits()
+-> Result<(), Box<dyn std::error::Error>> {
+    let inputs = [
+        [0.105, 0.035, 0.1, 1.0, 0.0, 0.0, -1.0, 5.0], // brick face
+        [0.105, 0.0, 0.1, 1.0, 0.0, 0.0, -1.0, 5.0],   // mortar
+        [0.105, 0.0, 0.1, 0.0, 0.0, 0.0, -1.0, 5.0],   // untextured carrier
+        [1.1, 0.0, 0.1, 1.0, 0.0, 0.0, -1.0, 5.0],     // finite miss
+        [0.0, 0.1, 0.02, 1.0, 0.6, 0.0, -0.8, 5.0],    // oblique
+        [0.105, 0.0, -0.1, 1.0, 0.0, 0.0, 1.0, 5.0],   // reverse
+        [0.0, 0.0, 1.1, 1.0, 0.0, 0.0, -1.0, 1.0],     // curved
+        [-0.8, 0.0, 0.01, 1.0, 1.0, 0.0, -0.015, 5.0], // grazing
+    ];
+    let rows = run("verify_brick_contact", &inputs, inputs.len() * 16)?;
+    let row = |i: usize| &rows[16 * i..16 * (i + 1)];
+    assert!(row(0)[0] > 0.5 && row(0)[1] > row(0)[2]);
+    assert!(row(1)[1] > row(0)[1] + 0.0025, "mortared joint stayed flat");
+    assert_eq!(row(2)[1].to_bits(), row(2)[2].to_bits());
+    assert!(
+        row(3)[0] < 0.5,
+        "displacement invented a hit outside the panel"
+    );
+    assert!((row(1)[1] + row(5)[1] - 0.2).abs() < 2e-6);
+    assert!(row(6)[0] > 0.5 && row(6)[1] > row(6)[2]);
+    assert_eq!(row(7)[1].to_bits(), row(7)[2].to_bits());
+    for i in [0, 1, 4, 5, 6] {
+        let input = inputs[i];
+        let result = row(i);
+        assert!(result.iter().all(|v| v.is_finite()));
+        for axis in 0..3 {
+            let p = input[4 + axis].mul_add(result[1], input[axis]);
+            assert!((result[4 + axis] - p).abs() < 2e-6);
+        }
+    }
+    assert!((row(4)[8] - 0.5_f32.mul_add(row(4)[4], 0.5)).abs() < 1e-6);
+    assert!((row(4)[1] - row(4)[2]).abs() > 1e-4);
+    Ok(())
+}
+
+#[test]
 fn material_contact_projection_preserves_other_geometry_misses_and_singularities()
 -> Result<(), Box<dyn std::error::Error>> {
     let inputs = [

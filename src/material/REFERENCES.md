@@ -3,8 +3,8 @@
 512² linear-RGB/relief assets, not measured reconstructions. SEM-derived relief is an artistic morphology proxy, never calibrated height or optical albedo. These derivatives do not imply source-author endorsement.
 
 | Source | Inspected images/scales | Application and limits |
-|---|---|---|
-| [Rob Tuytel, Poly Haven Red Brick](https://polyhaven.com/a/red_brick),[CC0](https://polyhaven.com/license) | 8K diffuse/4K displacement; advertised1.4m field | Brick0 packs twelve faces into a2×6 atlas; shader supplies running bond, mirrored variants, mortar borders and restrained tint. Faces approximate210×70mm, not exact scan dimensions. Brick1 uses a clean42mm face crop. Decode diffuse from sRGB; relief is appearance-only. |
+| --- | --- | --- |
+| [Rob Tuytel, Poly Haven Red Brick](https://polyhaven.com/a/red_brick),[CC0](https://polyhaven.com/license) | 8K diffuse/4K displacement; advertised1.4m field | Brick0 packs twelve faces into a2×6 atlas; shader supplies running bond, mirrored variants, mortar borders and restrained tint. Faces approximate210×70mm, not exact scan dimensions. Brick1 uses a clean42mm face crop. Decode diffuse from sRGB; alpha drives both relief shading and ray depth. |
 | [Pitak, Baltušnikas, Kalpokaitė-Dičkuvienė, Kriukienė & Denafas,2022](https://doi.org/10.1016/j.cscm.2022.e01230),[paper](https://epubl.ktu.edu/object/elaba:133905956/133905956.pdf),[CC BY4.0](https://creativecommons.org/licenses/by/4.0/) | Fig11a: BA0 control,100% clay,1000°C,12,000×,1µm bar approximately33px | Cut, gold-coated specimen; exclude ash-containing panels b–d. Crop/scale/flip/overlap the matrix into Brick2–3; authored irregular void fields supply larger pore hierarchy. Normalize SEM contrast for stylized relief, not RGB. Pore area tests describe authored maps, not measured bulk porosity. |
 | [Krakowiak, Lourenço & Ulm,2011](https://repositorium.uminho.pt/entities/publication/e7d6345e-ec03-46ba-ac0c-67c4887617b3),[DOI](https://doi.org/10.1111/j.1551-2916.2011.04484.x) | Figs4–5:50µm and5µm bars; facing/common fired bricks | Angular mineral grains, granular/glassy matrix and irregular connected voids, not round polka-dot pores. Reported pore modes18µm(B1),3/30µm(B2). Polished sections inform morphology only; exclude acid-etched Fig6 from surface appearance. |
 | [Rossi, Leso & Calovi,2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11012613/) | Fig1b: satin-finished304L,100µm bar; Table3 | Long, irregular directional grooves with torn edges, not isotropic cloudy bumps. Satin Ra0.68/1.45µm and Rz4.84/11.18µm in perpendicular directions guide relief orders, not a photometric fit. Exclude cold-rolled/sandblasted/corroded samples. CC BY4.0. Steel2–3 derivative: Fig1b crop(401,7,708,223), rotate90°, calibrated transverse scale, overlapping mirrored patches; extrapolate scratch length4×. Reflectance remains authored uniform silver. |
@@ -14,9 +14,13 @@ Assets are zlib-compressed, row-major512×512 RGBA8: linear RGB then normalized 
 
 Initial tile extents420/42/4.2/0.42mm remain10× apart; finest texels are0.82µm. Coarse layers depict courses/manufacturing variation; fine layers depict porous clay/minerals or abrasion, never tiny bricks. Subpixel structure belongs in filtered roughness, not aliased lines. Mirrored stochastic sampling preserves brush direction, bond and camera phase; packed identity repeats after256 tiles. Directional diffuse fill and anisotropic studio lobes are artistic lighting approximations, not measured BRDF/environment data. Tone-mapped linear output is sRGB-encoded for an unorm display target. Validate both distant appearance and zoom transitions against the images above; screenshots remain separate from numerical tests.
 
+Scene → Red brick · relief shows the same atlas at displaced primary hit positions. Each visible band samples its mip-filtered alpha using the color mapping; their weighted sum recesses the ray contact. Near-tangent corrections fade out; misses, panel edges, picking, and cast shadows use the carrier. This is a bounded approximation, not a full heightfield intersection.
+
 ## Changelog
+
 | When | Who | What | Why |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 2026-11-09 | Assistant | Recorded inspected microscopy, scales, exclusions and rendering limits | Ground material detail in actual samples without misusing SEM as height/albedo |
 | 2026-11-09 | Assistant | Credited photo/SEM asset derivatives, transformations and bounded decoding | Replace regular generated stamps; retain licenses and honest physical limits |
 | 2026-11-09 | Assistant | Recorded final atlas, brush axis, colour/relief separation and lighting | Describe shipped derivatives and finite limits |
+| 2026-11-25 | Assistant | Documented weighted brick depth projection | Distinguish rendered relief from carrier queries |

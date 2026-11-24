@@ -32,6 +32,7 @@ fn scene_shadow(source:SceneSample,object:SceneObject,n:vec3f,light:vec3f,count:
   if(!fi_finite(distance)){return Shadow(false,true);}if(distance<=0.0){return Shadow(false,false);}
   let bias=max(1e-4*object.position_size.w,8.0*EPS*max(1.0,length(p)));
   let origin=p+n*bias;let direction=to_light/distance;
+  let leaves_plane=source.kind==5u&&source.query.hit&&dot(n,direction)>=0.0;
   var result=Shadow(false,false);var i=0u;
   while(i<count){
     let record=scene_objects[i];
@@ -39,8 +40,8 @@ fn scene_shadow(source:SceneSample,object:SceneObject,n:vec3f,light:vec3f,count:
       if(!branch_intersects(record,origin,direction,0.0)){i=record.identity.y;continue;}
     }else{
       let other=resolved_object(i);
-      // A miss near the Leaf carrier must not promote itself into a blocker.
-      if(object.params.w==2.0&&source.id==other.identity.x){i++;continue;}
+      // An outward ray from a biased plane cannot recross it. Leaf omits self-shadows.
+      if(source.id==other.identity.x&&(leaves_plane||object.params.w==2.0)){i++;continue;}
       let legacy=source.kind!=5u&&other.identity.y!=5u;
       var local=(origin-other.position_size.xyz)/other.position_size.w;
       if(!legacy){local=shadow_local_origin(source,object,other,n);}

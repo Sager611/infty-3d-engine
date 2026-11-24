@@ -35,7 +35,7 @@ fn roots(a: f64, b: f64, c: f64) -> [f64; 2] {
     [first.min(second), first.max(second)]
 }
 
-fn seed(ray: Ray, covered: impl Fn([f64; 2]) -> bool) -> Option<Sample> {
+fn seeds(ray: Ray) -> [Sample; 2] {
     let shift = (-dot(ray.o, ray.d)).max(0.0);
     let origin = madd(ray.o, ray.d, shift);
     let ox = origin[0] + STEM;
@@ -44,14 +44,7 @@ fn seed(ray: Ray, covered: impl Fn([f64; 2]) -> bool) -> Option<Sample> {
     let a = CUP_X.mul_add(dx * dx, CUP_Y * dy * dy);
     let b = (2.0 * CUP_X * ox).mul_add(dx, (2.0 * CUP_Y * oy).mul_add(dy, -dz));
     let c = CUP_X.mul_add(ox * ox, CUP_Y.mul_add(oy * oy, -FLOOR - origin[2]));
-    let candidate = |root: f64| {
-        let time = shift + root;
-        let p = madd(origin, ray.d, root);
-        let sample = finite::sample(p, time, true);
-        (in_domain(sample) && covered(sample.uv)).then_some(sample)
-    };
-    let [near, far] = roots(a, b, c);
-    candidate(near).or_else(|| candidate(far))
+    roots(a, b, c).map(|root| finite::sample(madd(origin, ray.d, root), shift + root, true))
 }
 
 fn in_domain(sample: Sample) -> bool {
@@ -95,15 +88,33 @@ impl Field<'_> {
         value.is_finite().then_some(value).ok_or(Error::Numeric)
     }
 
+    fn blade_normal(
+        self,
+        point: [f64; 3],
+        uv: [f64; 2],
+        macro_tap: impl Fn([f64; 2]) -> f64,
+    ) -> [f64; 3] {
+        let mut normal = gradient(point);
+        let step = 3.0 / f64::from(self.edge);
+        for (axis, value) in normal.iter_mut().take(2).enumerate() {
+            let (mut lo, mut hi) = (uv, uv);
+            lo[axis] = (uv[axis] - step).max(0.0);
+            hi[axis] = (uv[axis] + step).min(1.0);
+            let slope = (macro_tap(lo) - macro_tap(hi)) * self.amplitudes[0] / (1020.0 * step);
+            *value = 0.7_f64.mul_add(slope, 0.3 * *value);
+        }
+        normal
+    }
+
     fn project(
         self,
-        ray: Ray,
+        direction: [f64; 3],
         sample: Sample,
         axis: f64,
         height: f64,
         covered: impl Fn([f64; 2]) -> bool,
+        macro_tap: impl Fn([f64; 2]) -> f64,
     ) -> Option<Sample> {
-        let direction = finite::frame(ray.d, axis);
         let normal = if self.cup {
             gradient(sample.p)
         } else {
@@ -111,11 +122,13 @@ impl Field<'_> {
         };
         let slope = dot(direction, normal);
         let difference = height - sample.p[2];
-        // Stabilize the tiny quantization correction at tangencies, without a ray search.
+        // Bound the tangent-plane correction; the analytic roots provide candidates.
         let step = if difference == 0.0 {
             0.0
         } else if self.cup {
-            (difference / slope).clamp(-0.05, 0.05)
+            let magnitude = slope.abs().max(1.0 / 1_048_576.0);
+            let divisor = if slope < 0.0 { -magnitude } else { magnitude };
+            (difference / divisor).clamp(-0.05, 0.05)
         } else {
             difference / slope
         };
@@ -124,10 +137,59 @@ impl Field<'_> {
         if !in_domain(projected) || !covered(projected.uv) {
             return None;
         }
+        let normal = if self.cup {
+            self.blade_normal(local, projected.uv, macro_tap)
+        } else {
+            normal
+        };
         let length = dot(normal, normal).sqrt();
         projected.p = finite::unframe(local, axis);
         projected.n = finite::unframe(normal.map(|v| v / length), axis);
         Some(projected)
+    }
+
+    fn finite_texh(
+        self,
+        ray: Ray,
+        mut base: GeometrySample,
+        axis: f64,
+        tap: impl Fn([f64; 2], usize) -> f64,
+    ) -> Result<Option<GeometrySample>, Error> {
+        let local_ray = Ray {
+            o: finite::frame(ray.o, axis),
+            d: finite::frame(ray.d, axis),
+        };
+        let covered = |uv| tap(uv, 4) >= 127.5;
+        let candidates = if self.cup {
+            seeds(local_ray).map(Some)
+        } else {
+            [
+                base.sample.hit.then(|| {
+                    finite::sample(finite::frame(base.sample.p, axis), base.sample.t, true)
+                }),
+                None,
+            ]
+        };
+        let mut seeded = base.sample.hit;
+        for candidate in candidates.into_iter().flatten() {
+            if self.cup && !(in_domain(candidate) && covered(candidate.uv)) {
+                continue;
+            }
+            seeded = true;
+            let height = self.height(|order| tap(candidate.uv, order))?;
+            if let Some(hit) = self.project(local_ray.d, candidate, axis, height, covered, |uv| {
+                tap(uv, 0)
+            }) {
+                return Ok(Some(GeometrySample {
+                    sample: hit,
+                    gap_lower: 0.0,
+                    error: finite::rounding(ray, hit.t),
+                    uncertain: !self.cup && base.uncertain,
+                }));
+            }
+        }
+        base.sample.hit = false;
+        Ok(seeded.then_some(base))
     }
 
     pub fn texh(
@@ -143,37 +205,10 @@ impl Field<'_> {
         let edge = usize::try_from(self.edge).map_err(|_| Error::Numeric)?;
         let tap = |uv, order| self.bilinear(uv, order, stride, edge);
         let covered = |uv| tap(uv, 4) >= 127.5;
-        if let Some(axis) = finite_axis {
-            let candidate = if self.cup {
-                seed(
-                    Ray {
-                        o: finite::frame(ray.o, axis),
-                        d: finite::frame(ray.d, axis),
-                    },
-                    covered,
-                )
-            } else {
-                base.sample.hit.then(|| {
-                    finite::sample(finite::frame(base.sample.p, axis), base.sample.t, true)
-                })
-            };
-            if let Some(candidate) = candidate {
-                let height = self.height(|order| tap(candidate.uv, order))?;
-                if let Some(hit) = self.project(ray, candidate, axis, height, covered) {
-                    return Ok(GeometrySample {
-                        sample: hit,
-                        gap_lower: 0.0,
-                        error: finite::rounding(ray, hit.t),
-                        uncertain: !self.cup && base.uncertain,
-                    });
-                }
-                base.sample.hit = false;
-                return Ok(base);
-            }
-            if base.sample.hit {
-                base.sample.hit = false;
-                return Ok(base);
-            }
+        if let Some(axis) = finite_axis
+            && let Some(result) = self.finite_texh(ray, base, axis, tap)?
+        {
+            return Ok(result);
         }
         if base.uncertain || base.gap_lower > self.reach() {
             return Ok(base);

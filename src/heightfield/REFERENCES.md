@@ -2,7 +2,7 @@
 
 Try Scene controls → Scene → Leaf · deep cup; Add → Finite plane reuses the carrier.
 Axis0/1/2 means normalZ/X/Y. Kind5 is a double-sided square with a Leaf cutout.
-Leaf relief can be applied to any geometry; steel/brick leave intersections unchanged.
+Leaf relief can be applied to any geometry; brick has separate render-only recesses.
 At reference half-size70mm, four vertex-aligned512² height fields span140/14/1.4/0.14mm.
 The macro field clamps; finer fields repeat. Raw bytes are centered at128, divided by255,
 and multiplied by canonical gains1/2^-10/2^-13/2^-15 before summation.
@@ -12,8 +12,8 @@ Uniform instance size scales the entire surface; peers still share their carrier
 ## Geometry and rendering
 
 Other carriers keep their hits; a miss is promoted only if the signed bilinear height at its witness reaches the ray.
-For the finite Leaf, an analytic cup seeds a candidate UV. A single bilinear height evaluation corrects ray depth; opacity clips the projected UV.
-The cup provides smooth geometric normals. Colors are unchanged; Leaf skips self-shadowing.
+For finite Leaf, the analytic cup seeds up to two UVs. One bilinear height sum per candidate corrects ray depth; projected cutouts can fall through to the second root.
+Filtered macro slopes blend into the cup normal. Colors are unchanged; Leaf skips self-shadowing.
 Fine relief away from the witness is not searched. Grazing corrections are bounded; this is not an exact heightfield intersection.
 Point queries still use the height pyramid and covered witnesses independently.
 Amber hatching marks unresolved ray or shadow work.
@@ -49,7 +49,7 @@ Outputs: four linear RGB8/height-alpha zlib tiles and `leaf.bin` (2,184,540 byte
 Each scalar field has262,144 samples, nine interleaved min/max levels, and padding:436,908 bytes.
 GPU upload omits pyramids: 32-byte header plus five raw planes.
 Layout, covered positive-zero anchor, and exact finite f32 gains are checked; no upload resampling.
-The macro field quantizes the same quadratic cup used to seed rays.
+The macro field adds asymmetric folds, a tapered midrib and traced side veins to the seed cup; extra relief tapers near the cutout.
 
 ## Changelog
 
@@ -59,3 +59,4 @@ The macro field quantizes the same quadratic cup used to seed rays.
 | 2026-11-24 | Assistant | Documented texh ray approximation | Separate ray, point, and shading rules |
 | 2026-11-24 | Assistant | Documented cupped heights and color-only hits | Keep height out of the hit path |
 | 2026-11-24 | Assistant | Documented analytic seed and height-corrected hits | Render depth without traversal |
+| 2026-11-25 | Assistant | Described blade relief and alternate roots | Preserve oblique cutouts and light the veins |

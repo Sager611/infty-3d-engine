@@ -64,6 +64,16 @@ fn verify_material_contact(@builtin(global_invocation_id) id: vec3u) {
   results[id.x]=ProbeResult(vec4f(t,q.query.t,q.error,f32(q.status)),vec4f(q.query.p,1.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)
+fn verify_brick_contact(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x>=arrayLength(&rays)) { return; }
+  let r=rays[id.x];let d=normalize(r.d.xyz);
+  let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w));
+  let base=scene_object(r.o.xyz,d,object);
+  let q=brick_contact(base,d,object,r.o.xyz,0.0).query;
+  results[id.x]=ProbeResult(vec4f(f32(q.hit),q.t,base.query.t,0.0),vec4f(q.p,0.0),
+    vec4f(q.uv,0.0,0.0),vec4f(0.0));
+}
+@compute @workgroup_size(1)
 fn verify_material_display(@builtin(global_invocation_id) id: vec3u) {
   if (id.x>=arrayLength(&rays)) { return; }
   results[id.x]=ProbeResult(vec4f(material_display(rays[id.x].o.xyz),1.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));

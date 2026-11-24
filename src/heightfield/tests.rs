@@ -53,6 +53,23 @@ fn blade_rises_smoothly_from_stem_to_either_edge() -> Result<(), Error> {
 }
 
 #[test]
+fn photographed_leaf_has_midrib_and_secondary_vein_relief() -> Result<(), Error> {
+    let height = |x: f64, y: f64| {
+        LEAF.sample([x / 256.0 - 1.0, y / 256.0 - 1.0])
+            .map(|value| value.height)
+    };
+    assert!(
+        height(228.0, 280.0)? > (height(219.0, 280.0)? + height(237.0, 280.0)?).mul_add(0.5, 0.02),
+        "the midrib must rise between the shoulders of the cupped blade"
+    );
+    assert!(
+        height(269.0, 304.0)? > (height(269.0, 299.0)? + height(269.0, 309.0)?).mul_add(0.5, 0.008),
+        "a lateral vein must rise out of the blade"
+    );
+    Ok(())
+}
+
+#[test]
 fn checked_fields_require_a_layout_and_a_covered_anchor() -> Result<(), Error> {
     let field = Field::new(DATA, 512, AMPLITUDES, [0.0; 2])?;
     assert_eq!(

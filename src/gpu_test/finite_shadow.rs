@@ -7,6 +7,46 @@ use crate::{
         packed::pack,
     },
 };
+#[test]
+fn brick_carrier_shadow_skips_only_its_provably_outgoing_ray()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source =
+        Object::new(7, Kind::FinitePlane, [0.0; 3], 1.0, 0.0)?.with_material(Material::Brick);
+    let blocker = Object::new(8, Kind::FinitePlane, [0.5, 0.0, 0.125], 0.25, 1.0)?;
+    for (scene, light, blocked) in [
+        (vec![source], [1.0, 1e-30, 1e-30], false),
+        (vec![source], [0.0, 0.0, -1.0], true),
+        (vec![source, blocker], [1.0, 0.0, 0.25], true),
+    ] {
+        let packet = pack(&scene, &[])?;
+        let slot = packet
+            .records
+            .iter()
+            .position(|r| r.identity[0] == 7)
+            .ok_or("source")?;
+        let input = [[
+            0.0,
+            0.0,
+            1.0,
+            f32::from(u16::try_from(slot)?),
+            light[0],
+            light[1],
+            light[2],
+            f32::from(u16::try_from(packet.count)?),
+        ]];
+        let row = run_scene_field(
+            "verify_finite_shadow",
+            &input,
+            &packet.records,
+            crate::heightfield::LEAF,
+        )?;
+        assert!(row[0] > 0.5);
+        assert!(row[2] < 0.5, "outgoing ray reported unresolved: {row:?}");
+        assert_eq!(row[3] > 0.5, blocked, "shadow changed: {row:?}");
+    }
+    Ok(())
+}
+
 fn data(height: [u8; 4], mask: [u8; 4]) -> [u8; 40] {
     let mut bytes = [0; 40];
     for (field, quad) in [height, [128; 4], [128; 4], [128; 4], mask]

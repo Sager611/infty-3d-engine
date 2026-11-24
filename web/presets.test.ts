@@ -90,6 +90,19 @@ test("preset framing contains finite geometry on desktop, portrait and landscape
 	}
 });
 
+test("Brick relief preset opens a framed material preview and round-trips", () => {
+	const state = presetSnapshot("brick", 1265 / 791, 0);
+	const panel = state.objects[0];
+	if (panel === undefined) {
+		throw new Error("missing brick panel");
+	}
+	expect(state.mode).toBe(3);
+	expect(panel).toMatchObject({ kind: "finite", material: "brick" });
+	expect(state.camera.target).toEqual(panel.position);
+	expect(Math.abs(state.camera.yaw)).toBeGreaterThan(0.2);
+	expect(parseSnapshot(serializeSnapshot(state))).toEqual(state);
+});
+
 test("unknown presets and invalid viewport geometry never produce a scene", () => {
 	expect(() => presetSnapshot("missing", 1, 0)).toThrow("preset");
 	for (const aspect of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {

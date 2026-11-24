@@ -38,55 +38,82 @@ fn texh(o:vec3f,d:vec3f,base:Query,gap_lower:f32,cutout:bool)->Query {
 fn leaf_domain(p:vec3f,t:f32)->bool {
   return fi_finite(t)&&t>=0.0&&all(abs(p.xy)<=vec2f(1.0));
 }
-fn leaf_root(o:vec3f,d:vec3f,offset:f32,root:f32)->Query {
-  let p=fma(vec3f(root),d,o);let t=offset+root;
-  var q=plane_sample(p,t,false);
-  q.hit=leaf_domain(p,t)&&leaf_covered(q.uv);
-  return q;
-}
-fn leaf_seed(o:vec3f,d:vec3f)->Query {
-  let offset=max(0.0,-dot(o,d));let origin=fma(vec3f(offset),d,o);
-  let delta=origin.xy+CUP_STEM;
+struct LeafRoots {times:vec2f,count:u32};
+fn leaf_roots(o:vec3f,d:vec3f)->LeafRoots {
+  let delta=o.xy+CUP_STEM;
   let a=dot(CUP_SCALE,d.xy*d.xy);
   let b=fma(2.0*CUP_SCALE.x*delta.x,d.x,fma(2.0*CUP_SCALE.y*delta.y,d.y,-d.z));
-  let c=fma(CUP_SCALE.x,delta.x*delta.x,fma(CUP_SCALE.y,delta.y*delta.y,-CUP_FLOOR-origin.z));
-  if(a==0.0){return leaf_root(origin,d,offset,-c/b);}
+  let c=fma(CUP_SCALE.x,delta.x*delta.x,fma(CUP_SCALE.y,delta.y*delta.y,-CUP_FLOOR-o.z));
+  if(a==0.0){return LeafRoots(vec2f(-c/b),1u);}
   let disc=fma(b,b,-4.0*a*c);
-  if(disc<0.0){return plane_sample(vec3f(0.0),0.0,false);}
+  if(disc<0.0){return LeafRoots(vec2f(0.0),0u);}
   let root=sqrt(disc);let q=-0.5*(b+select(-root,root,b>=0.0));
-  if(q==0.0){return leaf_root(origin,d,offset,-b/(2.0*a));}
-  let first=leaf_root(origin,d,offset,min(q/a,c/q));
-  if(first.hit){return first;}
-  return leaf_root(origin,d,offset,max(q/a,c/q));
+  if(q==0.0){return LeafRoots(vec2f(-b/(2.0*a)),1u);}
+  return LeafRoots(vec2f(min(q/a,c/q),max(q/a,c/q)),2u);
+}
+fn leaf_slope(p:vec2f)->vec2f {return -2.0*CUP_SCALE*(p+CUP_STEM);}
+fn blade_normal(p:vec2f,uv:vec2f)->vec3f {
+  // A wider derivative suppresses 8-bit height terraces without flattening veins.
+  let step=3.0/f32(height_data.info.x);
+  let dx=vec2f(step,0.0);let dy=dx.yx;
+  let slope=vec2f(
+    hf_bilinear(0u,max(uv-dx,vec2f(0.0)),1.0)-hf_bilinear(0u,min(uv+dx,vec2f(1.0)),1.0),
+    hf_bilinear(0u,max(uv-dy,vec2f(0.0)),1.0)-hf_bilinear(0u,min(uv+dy,vec2f(1.0)),1.0)
+  )*(height_data.amplitudes.x/(1020.0*step));
+  return vec3f(mix(leaf_slope(p),slope,0.7),1.0);
+}
+fn height_step(delta:f32,slope:f32,limit:f32)->f32 {
+  return clamp(delta*select(-1.0,1.0,slope>=0.0)/max(abs(slope),0x1p-20),-limit,limit);
 }
 fn leaf_project(d:vec3f,base:Query,axis:u32,cup:bool)->Query {
-  let slope=select(vec2f(0.0),-2.0*CUP_SCALE*(base.p.xy+CUP_STEM),cup);
-  let normal=vec3f(slope,1.0);
+  let slope=select(vec2f(0.0),leaf_slope(base.p.xy),cup);
+  var normal=vec3f(slope,1.0);
   let difference=hf_height(base.uv)-base.p.z;
   var step=0.0;
-  if(difference!=0.0){
-    step=difference/dot(d,normal);
-    if(cup){step=clamp(step,-0.05,0.05);}
-  }
+  if(cup){step=height_step(difference,dot(d,normal),0.05);}
+  else if(difference!=0.0){step=difference/dot(d,normal);}
   let t=base.t+step;let p=fma(vec3f(step),d,base.p);
   var hit=plane_sample(p,t,false);
   hit.hit=leaf_domain(p,t)&&leaf_covered(hit.uv);
+  if(hit.hit&&cup){normal=blade_normal(p.xy,hit.uv);}
   hit.p=plane_unframe(p,axis);hit.n=plane_unframe(normalize(normal),axis);
   return hit;
+}
+fn leaf_seed(o:vec3f,d:vec3f,offset:f32,root:f32)->Query {
+  var seed=plane_sample(fma(vec3f(root),d,o),offset+root,false);
+  seed.hit=leaf_domain(seed.p,seed.t)&&leaf_covered(seed.uv);
+  return seed;
 }
 fn finite_leaf(o:vec3f,d:vec3f,axis:u32)->GeometryQuery {
   let local_d=plane_frame(d,axis);
   let cup=height_data.info.w!=0u;
+  var seeded=false;
   if(cup){
-    let seed=leaf_seed(plane_frame(o,axis),local_d);
-    if(seed.hit){
-      let hit=leaf_project(local_d,seed,axis,true);
-      if(hit.hit){return GeometryQuery(hit,0.0,plane_rounding(o,hit.t),0u);}
-      var miss=finite_plane(o,d,axis);miss.query.hit=false;return miss;
+    let local_o=plane_frame(o,axis);
+    let offset=max(0.0,-dot(local_o,local_d));
+    let origin=fma(vec3f(offset),local_d,local_o);
+    let roots=leaf_roots(origin,local_d);
+    // Explicit candidates: the divergent root loop corrupted the browser draw.
+    if(roots.count!=0u){
+      let near=leaf_seed(origin,local_d,offset,roots.times.x);
+      if(near.hit){
+        seeded=true;
+        let hit=leaf_project(local_d,near,axis,true);
+        if(hit.hit){return GeometryQuery(hit,0.0,plane_rounding(o,hit.t),0u);}
+      }
+      if(roots.count==2u){
+        let far=leaf_seed(origin,local_d,offset,roots.times.y);
+        if(far.hit){
+          seeded=true;
+          let hit=leaf_project(local_d,far,axis,true);
+          if(hit.hit){return GeometryQuery(hit,0.0,plane_rounding(o,hit.t),0u);}
+        }
+      }
     }
   }
   var base=finite_plane(o,d,axis);
-  if(base.query.hit){
+  if(seeded){base.query.hit=false;}
+  else if(base.query.hit){
     if(!cup&&height_data.info.x>=2u){
       let projected=leaf_project(local_d,plane_sample(plane_frame(base.query.p,axis),base.query.t,true),axis,false);
       if(projected.hit){return GeometryQuery(projected,0.0,plane_rounding(o,projected.t),base.status);}

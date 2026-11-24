@@ -91,7 +91,10 @@ fn material_tiles(
 ) -> Result<Option<crate::material::gpu::Tiles>, Box<dyn Error>> {
     if !matches!(
         entry,
-        "verify_material" | "verify_material_mapping" | "verify_leaf_material"
+        "verify_material"
+            | "verify_material_mapping"
+            | "verify_leaf_material"
+            | "verify_brick_contact"
     ) {
         return Ok(None);
     }
