@@ -135,12 +135,20 @@ impl<'a> Field<'a> {
     )]
     pub fn gpu_bytes(self) -> Result<Vec<u8>, Error> {
         let field = Self::new(self.data, self.edge, self.amplitudes, self.anchor)?;
+        let stride = field.stride()?;
+        let edge = usize::try_from(field.edge).map_err(|_| Error::Numeric)?;
+        let coverage = &field.data[4 * stride..];
+        let clear_border = (0..edge).all(|i| {
+            [i, (edge - 1) * edge + i, i * edge, i * edge + edge - 1]
+                .into_iter()
+                .all(|at| coverage[at] == 0)
+        });
         let mut bytes = Vec::with_capacity(32 + field.data.len());
         for value in [
             field.edge,
-            u32::try_from(field.stride()?).map_err(|_| Error::Numeric)?,
+            u32::try_from(stride).map_err(|_| Error::Numeric)?,
             field.resolution()?,
-            0,
+            u32::from(clear_border),
         ] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }

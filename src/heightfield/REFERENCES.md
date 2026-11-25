@@ -13,6 +13,7 @@ Uniform instance size scales the entire surface; peers still share their carrier
 
 Carrier queries and picking stay on the base surface, with the Leaf cutout. The existing signed-height miss rule is unchanged; no new gap solver is provided.
 Rendered hits use one carrier-height evaluation and the direct local offset h·c/max(c²,0.0025), where c=N·ray. Below |c|=0.05, relief fades instead of producing an unbounded grazing slide. Shifted UV supplies RGB/cutout. Normals blend vertex slopes at shifted UVs: four fixed samples per band, a texel-sized minimum stencil, per-band footprint fading and the carrier UV Jacobian. Carrier frame/footprint stay frozen.
+Finer rendered height/normal bands skip below¼pixel maximum height and fade fully by½pixel. Sampled macro height plus the remaining height bound gives the closest possible depth; RGB keeps footprint filtering. Normals run only for the visible winner. A padded height envelope rejects irrelevant Leaf render/shadow rays while preserving selection outlines and uncertain cases. The GPU header flags a zero-opacity border; certified nonparallel boundary-witness misses then skip region enumeration, with a rounding guard and full-query fallback. Raw queries and full close-up gains stay unchanged.
 All four scalar bands, RGB, cutout, carrier cast shadows and the Leaf self-shadow exception remain. No asset is rebaked. Shader compilation expands level metadata into straight-line sample calls; displacement/shading have no loops, recursion or search.
 This deliberately favors speed over accuracy: no exact first crossing, normal-chart inversion, displaced silhouette or certified relief error. Strong slopes, grazing views and close-ups can distort or miss relief; an uncovered/backward candidate is discarded without searching again.
 Point queries still use the height pyramid and covered witnesses independently.
@@ -54,6 +55,7 @@ The retained macro asset blends source depth into offline polynomial matte paddi
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-25 | Assistant | Bound detail admission and cull irrelevant render work | Avoid premature fine heights and crowded-view stalls |
 | 2026-11-25 | Assistant | Describe smooth shared fine-coordinate variation and query bounds | Break up micro-tiling without rebaking or flattening |
 | 2026-11-25 | Assistant | Smooth each height band's vertex slopes at shifted UVs | Remove blocky close-up highlights without changing depth |
 | 2026-11-24 | Assistant | Document shared direct approximation, fixed samples and unchanged assets | Favor speed over iterative displacement accuracy |

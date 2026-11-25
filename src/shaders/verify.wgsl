@@ -69,20 +69,38 @@ fn verify_instance_pose(@builtin(global_invocation_id) id:vec3u) {
     vec4f(sample.query.uv,0.0,0.0),vec4f(material.albedo,sample.query.gap));
 }
 @compute @workgroup_size(1)
-fn verify_material_hit(@builtin(global_invocation_id) id: vec3u) {
+fn verify_leaf_culling(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}
+  let r=rays[id.x];let mode=u32(r.o.w);
+  let pose=mode%9u;let selected=mode>=9u;
+  let angle=select(0.0,0.73,pose>=3u);
+  let size=select(0.07,0.035,pose>=6u);
+  let object=SceneObject(vec4u(1u,5u,(mode%3u)<<8u,0u),vec4f(1.0,1.0,0.0,size),vec4f(0.0,0.0,0.0,2.0),vec4f(0.0,sin(angle*0.5),0.0,cos(angle*0.5)));
+  let d=normalize(r.d.xyz);let base=scene_object(r.o.xyz,d,object);
+  let sample=material_texh_depth(base,d,object,scene_origin_delta(r.o.xyz,vec3f(0.0),object),0.001);
+  let local=scene_local_vector(object,(r.o.xyz-object.position_size.xyz)/size);
+  let padding=select(0.0,6.0*(length(local)+2.0)/(1.8*791.0),selected);
+  let relevant=scene_leaf_relevant(local,scene_local_vector(object,d),object,r.d.w,padding);
+  results[id.x]=ProbeResult(vec4f(f32(relevant),f32(sample.query.hit),sample.query.t,f32(base.pending.valid)),
+    vec4f(f32(outline_eligible(sample,selected,6.0*sample.query.t/(1.8*791.0))),0.0,0.0,0.0),vec4f(0.0),vec4f(0.0));
+}
+fn material_hit_probe(id:vec3u,pixel_span:f32) {
   if (id.x>=arrayLength(&rays)) { return; }
   let r=rays[id.x];let d=normalize(r.d.xyz);
   var parameter=0.0;
   if(u32(r.d.w)==2u){parameter=select(1.5,16.0*fract(r.d.w),fract(r.d.w)>0.0);}
   let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(parameter,0.0,0.0,r.o.w),POSE_IDENTITY);
   let base=scene_object(r.o.xyz,d,object);
-  let sample=material_texh(base,d,object,r.o.xyz,0.001);let q=sample.query;
-  let footprint=texh_footprint(base,d,0.001);
-  let context=TexhContext(base,object,r.o.xyz+d*base.query.t,footprint);
+  let sample=material_texh(base,d,object,r.o.xyz,pixel_span);let q=sample.query;
+  let context=texh_context(base,d,object,r.o.xyz,pixel_span);
   let height=texh_height(geometry_surface(base.local,base,object),context);
   results[id.x]=ProbeResult(vec4f(f32(q.hit),q.t,base.query.t,f32(sample.status)),vec4f(q.p,sample.error),
     vec4f(q.uv,height,f32(base.base_hit)),vec4f(q.n,f32(base.query.hit)));
 }
+@compute @workgroup_size(1)
+fn verify_material_hit(@builtin(global_invocation_id) id:vec3u) {material_hit_probe(id,0.001);}
+@compute @workgroup_size(1)
+fn verify_material_hit_full(@builtin(global_invocation_id) id:vec3u) {material_hit_probe(id,0.0);}
 @compute @workgroup_size(1)
 fn verify_material_color(@builtin(global_invocation_id) id: vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
@@ -210,7 +228,7 @@ fn verify_outline(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let ray = rays[id.x];
   let q = Query(ray.d.x != 0.0, 2.0, ray.o.x, vec3f(0.0), vec3f(0.0, 1.0, 0.0), vec2f(0.0));
-  let sample = SceneSample(q, vec3f(0.0), 7u, u32(ray.o.w), ray.o.y, ray.o.z, u32(ray.d.w),Pending(0.0,false),ray.o.z,q.hit);
+  let sample = SceneSample(q, vec3f(0.0), 7u, u32(ray.o.w), ray.o.y, ray.o.z, u32(ray.d.w),Pending(0.0,false),ray.o.z,u32(q.hit));
   let eligible = outline_eligible(sample, ray.d.y != 0.0, ray.d.z);
   results[id.x] = ProbeResult(vec4f(select(0.0, 1.0, eligible), 0.0, 0.0, 0.0),
     vec4f(0.0), vec4f(0.0), vec4f(0.0));

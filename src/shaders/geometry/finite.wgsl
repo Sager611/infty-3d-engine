@@ -56,6 +56,12 @@ fn plane_project(offset:vec3f,tangent:vec3f,span:PlaneRange)->FInterval {
   }
   return plane_clamp_time(fi_neg(fi_div(numerator,fi_scale(denominator,scale))),span);
 }
+// Half the origin derivative of squared ray-to-square distance.
+fn plane_origin_derivative(o:vec3f,d:vec3f)->FInterval {
+  let witness=clamp(o.xy,vec2f(-1.0),vec2f(1.0));
+  return fi_add(fi_add(fi_scale(fi_sub(fi_exact(o.x),fi_exact(witness.x)),d.x),
+    fi_scale(fi_sub(fi_exact(o.y),fi_exact(witness.y)),d.y)),fi_scale(fi_exact(o.z),d.z));
+}
 fn plane_gap(o:vec3f,d:vec3f)->GeometryQuery {
   var best=GeometryQuery(plane_sample(vec3f(0.0),0.0,false),0.0,0.0,0u);
   var found=false;var lower=fi_exact(0.0);var imprecise=false;var have_lower=false;

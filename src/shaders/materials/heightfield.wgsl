@@ -40,27 +40,46 @@ fn hf_height(uv:vec2f)->f32 {
     hf_gradient_value(2u,uv,100.0),hf_gradient_value(3u,uv,1000.0))-vec4f(128.0);
   return dot(h,height_data.amplitudes/255.0);
 }
+// Byte heights lie in [-128,127]/255. Ignore sub-quarter-pixel relief;
+// fade to full strength over the next 2x approach. Raw queries stay exact.
+fn hf_detail_weight(order:u32,span:f32)->f32 {
+  let bound=abs(height_data.amplitudes[order])*(128.0/255.0);
+  if(bound==0.0){return 0.0;}
+  if(order==0u||span<=0.0){return 1.0;}
+  return smoothstep(0.25,0.5,bound/span);
+}
+fn hf_render_level(order:u32,uv:vec2f,span:f32)->f32 {
+  let weight=hf_detail_weight(order,span);
+  if(weight==0.0){return 0.0;}
+  return (hf_gradient_value(order,uv,LEAF_REPEATS[order])-128.0)*(height_data.amplitudes[order]/255.0)*weight;
+}
+fn hf_render_details(uv:vec2f,span:f32)->f32 {
+  return hf_render_level(1u,uv,span)+hf_render_level(2u,uv,span)+hf_render_level(3u,uv,span);
+}
+fn hf_render_height(uv:vec2f,span:f32)->f32 {return hf_render_level(0u,uv,span)+hf_render_details(uv,span);}
 // Bilinearly blend vertex slopes; subtexel differences expose faceted cell gradients.
 fn hf_gradient_value(order:u32,uv:vec2f,repeats:f32)->f32 {
   let p=hf_phase(uv,order,repeats);
   return hf_bilinear(order,select(fract(p),clamp(p,vec2f(0.0),vec2f(1.0)),order==0u),1.0);
 }
-fn hf_slope(order:u32,uv:vec2f,repeats:f32,footprint:f32)->vec2f {
+fn hf_slope(order:u32,uv:vec2f,repeats:f32,footprint:f32,span:f32)->vec2f {
+  let detail=hf_detail_weight(order,span);if(detail==0.0){return vec2f(0.0);}
   let edge=f32(height_data.info.x);
-  let visible=material_visible(clamp(log2(max(1e-30,footprint)*edge*repeats),0.0,9.0));
+  let visible=detail*material_visible(clamp(log2(max(1e-30,footprint)*edge*repeats),0.0,9.0));
   if(visible==0.0){return vec2f(0.0);}
   let step=max(1.0/(edge*repeats),0.5*footprint);
   let x=hf_gradient_value(order,uv+vec2f(step,0.0),repeats)-hf_gradient_value(order,uv-vec2f(step,0.0),repeats);
   let y=hf_gradient_value(order,uv+vec2f(0.0,step),repeats)-hf_gradient_value(order,uv-vec2f(0.0,step),repeats);
   return vec2f(x,y)*(visible/(2.0*step));
 }
-fn hf_gradient(uv:vec2f,footprint:f32)->vec2f {
+fn hf_gradient_lod(uv:vec2f,footprint:f32,span:f32)->vec2f {
   if(height_data.info.x<2u){return vec2f(0.0);}
-  return (hf_slope(0u,uv,1.0,footprint)*height_data.amplitudes.x
-    +hf_slope(1u,uv,10.0,footprint)*height_data.amplitudes.y
-    +hf_slope(2u,uv,100.0,footprint)*height_data.amplitudes.z
-    +hf_slope(3u,uv,1000.0,footprint)*height_data.amplitudes.w)/255.0;
+  return (hf_slope(0u,uv,1.0,footprint,span)*height_data.amplitudes.x
+    +hf_slope(1u,uv,10.0,footprint,span)*height_data.amplitudes.y
+    +hf_slope(2u,uv,100.0,footprint,span)*height_data.amplitudes.z
+    +hf_slope(3u,uv,1000.0,footprint,span)*height_data.amplitudes.w)/255.0;
 }
+fn hf_gradient(uv:vec2f,footprint:f32)->vec2f {return hf_gradient_lod(uv,footprint,0.0);}
 fn leaf_covered(uv:vec2f)->bool {
   return height_data.info.x<2u||hf_bilinear(4u,uv,1.0)>=127.5;
 }

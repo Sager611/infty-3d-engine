@@ -4,7 +4,7 @@
 fn empty_sample() -> SceneSample {
   return SceneSample(
     Query(false, 0.0, 0.0, vec3f(0.0), vec3f(0.0, 1.0, 0.0), vec2f(0.0)),
-    vec3f(0.0), 0u, 0u, 0.0, 0.0, 2u,Pending(0.0,false),0.0,false
+    vec3f(0.0), 0u, 0u, 0.0, 0.0, 2u,Pending(0.0,false),0.0,0u
   );
 }
 
@@ -44,7 +44,7 @@ fn resolved_object(index: u32) -> SceneObject {
 
 fn outline_eligible(sample: SceneSample, selected: bool, thickness: f32) -> bool {
   return selected && (sample.kind == 1u || sample.kind == 2u || sample.kind == 4u || sample.kind==5u) &&
-    !sample.base_hit && !sample.query.hit && sample.status<2u && sample.query.gap < thickness;
+    sample.base_hit==0u && !sample.query.hit && sample.status<2u && sample.query.gap < thickness;
 }
 
 @compute @workgroup_size(8, 8)
@@ -97,9 +97,14 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
       let object = resolved_object(i);
       let selected = scene_selected(object);
 
-      let carrier = scene_object_precise(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w), direction, object);
+      let delta=scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),object);
+      let local_o=scene_local_vector(object,delta/object.position_size.w);let local_d=scene_local_vector(object,direction);
+      let limit=select(1e30,nearest_t/max(0.01,1.0-6.0/(1.8*height))+nearest.error,nearest_hit&&height>4.0);
+      let padding=select(0.0,6.0*(length(local_o)+2.0)/(1.8*height),selected);
+      if(material_view&&!scene_leaf_relevant(local_o,local_d,object,limit,padding)){i++;continue;}
+      let carrier=scene_canonical(local_o,local_d,object);
       var sample=carrier;
-      if(material_view||object.params.w==2.0){sample=material_texh(carrier,direction,object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),object),pixel_span);}
+      if(material_view||object.params.w==2.0){sample=material_texh_depth(carrier,direction,object,delta,pixel_span);}
       pending=pending_min(pending,sample.pending);
       if (sample.query.hit && (!nearest_hit || sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
         nearest = sample;
@@ -131,6 +136,9 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   let unknown=pending_before(pending,nearest_hit,nearest_t,nearest.error);
   var shadow_unknown=false;
   if (nearest_hit&&!unknown) {
+    if(material_view||nearest_object.params.w==2.0){
+      nearest.query.n=texh_shade_normal(nearest,nearest_carrier,direction,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object),pixel_span);
+    }
     let normal=surface_normal(nearest.query.n,direction,nearest.kind);
     // Carrier shadows avoid treating a recessed brick face as inside its own occluder.
     let visibility=scene_shadow(nearest_carrier,nearest_object,normal,light,count);

@@ -15,7 +15,7 @@ fn scene_origin_delta(o:vec3f,low:vec3f,object:SceneObject)->vec3f {
 }
 struct SceneSample {
   query:Query,local:vec3f,id:u32,kind:u32,gap_lower:f32,error:f32,status:u32,
-  pending:Pending,local_error:f32,base_hit:bool,
+  pending:Pending,local_error:f32,base_hit:u32, // Full word avoids Metal's 24-bit padding-read bug.
 };
 fn scene_axis(object:SceneObject)->u32 {return (object.identity.z>>8u)&3u;}
 fn scene_selected(object:SceneObject)->bool {return (object.identity.z&1u)!=0u;}
@@ -25,6 +25,27 @@ fn scene_object(o:vec3f,d:vec3f,object:SceneObject)->SceneSample {
 fn scene_object_precise(o:vec3f,low:vec3f,d:vec3f,object:SceneObject)->SceneSample {
   let local=scene_local_vector(object,scene_origin_delta(o,low,object)/object.position_size.w);
   return scene_canonical(local,scene_local_vector(object,d),object);
+}
+// Full height envelope includes direct hits and witness-gap hits. Reject only
+// a certified miss/occluded leaf; never run nine-region gap math for it.
+fn scene_leaf_relevant(local_o:vec3f,local_d:vec3f,object:SceneObject,limit:f32,padding:f32)->bool {
+  if(object.identity.y!=5u||object.params.w!=2.0){return true;}
+  let o=plane_frame(local_o,scene_axis(object));let d=plane_frame(local_d,scene_axis(object));
+  let reach=fi_up(dot(abs(height_data.amplitudes),vec4f(128.0/255.0)));
+  let bounds=vec3f(1.0+reach,1.0+reach,reach)+vec3f(padding+plane_rounding(o,length(o)+2.0));
+  var span=plane_axis(plane_range(),o.z,d.z,-bounds.z,bounds.z);
+  span=plane_axis(span,o.x,d.x,-bounds.x,bounds.x);
+  span=plane_axis(span,o.y,d.y,-bounds.y,bounds.y);
+  if(span.uncertain){return true;}
+  if(!span.valid||span.near>fi_up(limit/object.position_size.w)){return false;}
+  // With no origin minimum or carrier crossing, a nonparallel ray's closest
+  // witness is on the square boundary. A zero-opacity border cannot cover it.
+  if(padding==0.0&&height_data.info.w!=0u&&d.z!=0.0&&plane_rounding(o,length(o)+2.0)*f32(height_data.info.x)<0.25){
+    let carrier=plane_box(o,d,vec3f(-1.0,-1.0,0.0),vec3f(1.0,1.0,0.0));
+    let derivative=plane_origin_derivative(o,d);
+    if(!carrier.valid&&!carrier.uncertain&&derivative.valid&&derivative.v.y<0.0){return false;}
+  }
+  return true;
 }
 fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
   let id=obj.identity.x;let kind=obj.identity.y;let position=obj.position_size.xyz;let size=obj.position_size.w;
@@ -69,7 +90,7 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
       else{status=3u;gap_lower=0.0;query.gap=0.0;}
     }
   }
-  return SceneSample(query,local,id,kind,gap_lower,error,status,pending,local_error,base_hit);
+  return SceneSample(query,local,id,kind,gap_lower,error,status,pending,local_error,u32(base_hit));
 }
 
 fn pending_min(a:Pending,b:Pending)->Pending {

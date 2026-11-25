@@ -112,6 +112,8 @@ fn material_tiles(
             | "verify_material_mapping"
             | "verify_leaf_material"
             | "verify_material_hit"
+            | "verify_material_hit_full"
+            | "verify_leaf_culling"
             | "verify_material_color"
             | "verify_instance_pose"
     ) {

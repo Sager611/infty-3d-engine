@@ -59,6 +59,17 @@ fn verify_finite_scene(@builtin(global_invocation_id) id:vec3u) {
 }
 
 @compute @workgroup_size(1)
+fn verify_height_lod(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}
+  let r=rays[id.x];
+  let object=SceneObject(vec4u(1u,5u,0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,2.0),POSE_IDENTITY);
+  let o=vec3f(2.0*r.o.xy-vec2f(1.0),r.o.w);let d=vec3f(0.0,0.0,-1.0);
+  let base=scene_object(o,d,object);let context=texh_context(base,d,object,o,r.d.x);
+  results[id.x]=ProbeResult(
+    vec4f(hf_detail_weight(0u,r.o.z),hf_detail_weight(1u,r.o.z),hf_detail_weight(2u,r.o.z),hf_detail_weight(3u,r.o.z)),
+    vec4f(hf_render_height(r.o.xy,r.o.z),hf_height(r.o.xy),0.0,0.0),vec4f(context.span,0.0,0.0,0.0),vec4f(0.0));
+}
+@compute @workgroup_size(1)
 fn verify_texh(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let r=rays[id.x];

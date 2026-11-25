@@ -167,7 +167,7 @@ fn gpu_header_preserves_scalar_bytes_and_exact_canonical_amplitudes()
 -> Result<(), Box<dyn std::error::Error>> {
     let bytes = LEAF.gpu_bytes()?;
     assert_eq!(bytes.len(), DATA.len() + 32);
-    for (index, expected) in [512, 436_908, 512_000, 0].into_iter().enumerate() {
+    for (index, expected) in [512, 436_908, 512_000, 1].into_iter().enumerate() {
         assert_eq!(
             u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into()?),
             expected
@@ -221,6 +221,17 @@ fn fixture(data: &[u8]) -> Field<'_> {
         amplitudes: AMPLITUDES,
         anchor: [0.0; 2],
     }
+}
+
+#[test]
+fn gpu_marks_only_zero_coverage_borders() -> Result<(), Error> {
+    for coverage in [128, 255] {
+        let pixels = data([[128; 4], [128; 4], [128; 4], [128; 4], [coverage; 4]]);
+        let bytes = fixture(&pixels).gpu_bytes()?;
+        assert_eq!(&bytes[12..16], &u32::from(coverage == 0).to_le_bytes());
+    }
+    assert_eq!(&LEAF.gpu_bytes()?[12..16], &1_u32.to_le_bytes());
+    Ok(())
 }
 
 #[test]
