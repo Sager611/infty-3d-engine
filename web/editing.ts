@@ -13,12 +13,12 @@ import {
 import type { PureCamera } from "./state.ts";
 
 type SpawnView = PureCamera & Readonly<{ aspect?: number }>;
-type Deleted = Readonly<{ objects: Scene; selection: Selection }>;
+type Edit = Readonly<{ objects: Scene; selection: Selection }>;
 type Editor = Readonly<{
 	objects: Scene;
 	selection: Selection;
 	nextId: number;
-	undo: Deleted | null;
+	undo: Edit | null;
 }>;
 const MAX_ID = 0xff_ff_ff_ff;
 const DEFAULT_PARAMETER = 1.5;
@@ -125,6 +125,13 @@ function spawnPosition(
 	}
 	return best;
 }
+function freeId(ids: ReadonlySet<number>, nextId: number): number {
+	let id = ((nextId - 1) % MAX_ID) + 1;
+	while (ids.has(id)) {
+		id = (id % MAX_ID) + 1;
+	}
+	return id;
+}
 function addInstance(
 	editor: Editor,
 	kind: SceneKind,
@@ -134,10 +141,7 @@ function addInstance(
 		throw new Error("Scene capacity reached");
 	}
 	const ids = new Set(editor.objects.map((existing) => existing.id));
-	let id = ((editor.nextId - 1) % MAX_ID) + 1;
-	while (ids.has(id)) {
-		id = (id % MAX_ID) + 1;
-	}
+	const id = freeId(ids, editor.nextId);
 	const size = Math.min(
 		MAX_SPAWN_SIZE,
 		Math.max(
@@ -166,6 +170,37 @@ function addInstance(
 		undo: null,
 	};
 }
+function duplicateInstances(editor: Editor): Editor {
+	const selection = cleanSelection(editor.objects, editor.selection);
+	if (selection.ids.length === 0) {
+		return { ...editor, selection };
+	}
+	if (editor.objects.length + selection.ids.length > MAX_OBJECTS) {
+		throw new Error("Scene capacity reached");
+	}
+	const selected = new Set(selection.ids);
+	const ids = new Set(editor.objects.map((object) => object.id));
+	const copies: SceneObject[] = [];
+	let nextId = editor.nextId;
+	let active: number | null = null;
+	for (const object of editor.objects) {
+		if (selected.has(object.id)) {
+			const id = freeId(ids, nextId);
+			ids.add(id);
+			nextId = id + 1;
+			copies.push({ ...object, id });
+			if (object.id === selection.active) {
+				active = id;
+			}
+		}
+	}
+	return {
+		objects: [...editor.objects, ...copies],
+		selection: { ids: copies.map((object) => object.id), active },
+		nextId,
+		undo: { objects: editor.objects, selection },
+	};
+}
 function deleteInstances(editor: Editor): Editor {
 	const selection = cleanSelection(editor.objects, editor.selection);
 	if (selection.ids.length === 0) {
@@ -179,7 +214,7 @@ function deleteInstances(editor: Editor): Editor {
 		undo: { objects: editor.objects, selection },
 	};
 }
-function undoDeletion(editor: Editor): Editor {
+function undoEdit(editor: Editor): Editor {
 	if (editor.undo === null) {
 		return editor;
 	}
@@ -194,7 +229,8 @@ export {
 	createEditor,
 	addInstance,
 	deleteInstances,
-	undoDeletion,
+	duplicateInstances,
+	undoEdit,
 	cleanSelection,
 	type Editor,
 };

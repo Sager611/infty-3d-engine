@@ -4,7 +4,7 @@
 - Extensible geometry; no ray marching.
 - Three intersecting ridged cones with genuine multiscale geometry, CPU/GPU queries and web creation. New cluster kernels use fixed direct analytic work: no iteration, recursion or traversal.
 - Materials view with selectable brushed steel and red brickwork/mortar. Each begins with four repeating512×512 albedo/relief levels,10× apart; finer levels reveal grooves, pores and mineral grains, not miniature bricks. Support additional coarser/finer scales; visually check sphere, plane and Goursat up close through microscopic distances. Ground appearance in inspected references; preserve carrier geometry, picking and navigation.
-- Intuitive add/delete controls. XYZ positions use numeric0.001 increments (10× finer), direct typing and wheel nudging.
+- Intuitive add/duplicate/delete controls. Duplicate selected instances in place with fresh IDs, matching geometry/pose/material, selected copies and one-step undo. XYZ positions use numeric0.001 increments (10× finer), direct typing and wheel nudging.
 - Selected geometry: centered XYZ translation arrows and between-axis rotation arcs, Unreal-style; Shift doubles either drag. Persist normalized quaternion poses without breaking legacy scenes/URLs; keep CPU/GPU queries, bounds, cutouts, normals, materials and shadows in the same instance frame.
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
 - Free-camera WASD and drag look; wheel sets travel speed, held Shift temporarily doubles translation. Straight W eases within0.25 units (4× previous approach gain); reverse/strafe/diagonals keep base speed. Minimum speed/approach floor0.000001 units/s.
@@ -17,6 +17,7 @@
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-25 | User | Require selected-object duplication | Reuse geometry with pose/material intact |
 | 2026-11-25 | User | Require varied fine Leaf detail and approach/orbit QA | Remove visible micro-tiling and inspect moving close-ups |
 | 2026-11-25 | User | Require translation/rotation gizmo with Shift2× | Edit selected geometry directly |
 | 2026-11-25 | User | Require Shift boost, faster approach, stronger pores, smooth normals and precise wheelable positions | Improve close inspection and editing |

@@ -4,9 +4,15 @@ import {
 	addInstance,
 	createEditor,
 	deleteInstances,
-	undoDeletion,
+	duplicateInstances,
+	undoEdit,
 } from "./editing.ts";
-import { DEFAULT_SCENE, MAX_OBJECTS, type Scene } from "./scene.ts";
+import {
+	DEFAULT_SCENE,
+	MAX_OBJECTS,
+	type Scene,
+	updateObject,
+} from "./scene.ts";
 import { DEFAULT_SNAPSHOT, parseSnapshot, serializeSnapshot } from "./state.ts";
 
 const DEFAULT_COUNT = 3;
@@ -14,6 +20,10 @@ const STALE_ID = 999;
 const NEXT_ID = 4;
 const BOUND = 20;
 const MAX_ID = 0xff_ff_ff_ff;
+const COPY_SIZE = 0.42;
+const LEAF_SIZE = 0.07;
+const GOURSAT_PARAMETER = 1.5;
+const COPY_Z = 3;
 
 test("add each kind, select fresh IDs, preserve camera and round-trip saved instances", () => {
 	let editor = createEditor(DEFAULT_SCENE);
@@ -43,6 +53,98 @@ test("add each kind, select fresh IDs, preserve camera and round-trip saved inst
 	expect(DEFAULT_SCENE).toHaveLength(DEFAULT_COUNT);
 });
 
+const COPY_SCENE: Scene = [
+	{
+		id: MAX_ID,
+		kind: "goursat",
+		position: [1, 2, COPY_Z],
+		size: COPY_SIZE,
+		parameter: GOURSAT_PARAMETER,
+		material: "brick",
+		rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+	},
+	{
+		id: 1,
+		kind: "finite",
+		position: [BOUND, -BOUND, BOUND],
+		size: LEAF_SIZE,
+		parameter: 0,
+		material: "leaf",
+		rotation: [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+	},
+	{ id: 2, kind: "sphere", position: [0, 0, 0], size: 1, parameter: 0 },
+];
+test("duplicate selected instances preserves pose/style, wraps IDs, selects copies and undoes once", () => {
+	const objects = COPY_SCENE;
+	const source = {
+		...createEditor(objects),
+		selection: { ids: [1, MAX_ID, 1, STALE_ID], active: 1 },
+	};
+	const copied = duplicateInstances(source);
+	const firstId = DEFAULT_COUNT;
+	expect(copied.objects.slice(0, objects.length)).toEqual([...objects]);
+	expect(copied.objects.slice(objects.length)).toEqual(
+		objects
+			.slice(0, 2)
+			.map((object, index) => ({ ...object, id: firstId + index })),
+	);
+	expect(copied.objects[objects.length]).not.toBe(objects[0]);
+	expect(copied.selection).toEqual({
+		ids: [firstId, NEXT_ID],
+		active: NEXT_ID,
+	});
+	expect(copied.nextId).toBe(NEXT_ID + 1);
+	expect(source.objects).toBe(objects);
+	expect(source.nextId).toBe(MAX_ID + 1);
+	const moved = updateObject(copied.objects, NEXT_ID, { position: [0, 0, 0] });
+	expect(moved.find((object) => object.id === 1)?.position).toEqual([
+		BOUND,
+		-BOUND,
+		BOUND,
+	]);
+	expect(
+		copied.objects.find((object) => object.id === NEXT_ID)?.position,
+	).toEqual([BOUND, -BOUND, BOUND]);
+	expect(
+		parseSnapshot(
+			serializeSnapshot({ ...DEFAULT_SNAPSHOT, objects: copied.objects }),
+		).objects,
+	).toEqual(copied.objects);
+	const undone = undoEdit(copied);
+	expect(undone.objects).toBe(objects);
+	expect(undone.selection).toEqual({ ids: [1, MAX_ID], active: 1 });
+	expect(undone.undo).toBeNull();
+	expect(undoEdit(undone)).toBe(undone);
+});
+
+test("duplicate handles empty/stale selection and keeps only the latest undo", () => {
+	const editor = createEditor(DEFAULT_SCENE);
+	expect(duplicateInstances(editor)).toEqual(editor);
+	const deleted = deleteInstances({
+		...editor,
+		selection: { ids: [1], active: 1 },
+	});
+	expect(duplicateInstances(deleted)).toEqual(deleted);
+	const stale = duplicateInstances({
+		...deleted,
+		selection: { ids: [1, STALE_ID], active: STALE_ID },
+	});
+	expect(stale.objects).toBe(deleted.objects);
+	expect(stale.selection).toEqual({ ids: [], active: null });
+	expect(stale.undo).toBe(deleted.undo);
+	const first = duplicateInstances({
+		...editor,
+		selection: { ids: [1], active: 1 },
+	});
+	const second = duplicateInstances(first);
+	expect(new Set(second.objects.map((object) => object.id)).size).toBe(
+		second.objects.length,
+	);
+	expect(undoEdit(second).objects).toBe(first.objects);
+	expect(undoEdit(second).selection).toEqual(first.selection);
+	expect(undoEdit(undoEdit(second)).objects).toBe(first.objects);
+});
+
 test("delete/undo is bounded, handles stale multi-selection and last object without reusing live geometry", () => {
 	let editor = createEditor(DEFAULT_SCENE);
 	editor = {
@@ -52,17 +154,17 @@ test("delete/undo is bounded, handles stale multi-selection and last object with
 	const deleted = deleteInstances(editor);
 	expect(deleted.objects.map((o) => o.id)).toEqual([DEFAULT_COUNT]);
 	expect(deleted.selection).toEqual({ ids: [], active: null });
-	const undone = undoDeletion(deleted);
+	const undone = undoEdit(deleted);
 	expect(undone.objects).toEqual(DEFAULT_SCENE);
 	expect(undone.selection).toEqual({ ids: [1, 2], active: 1 });
 	expect(undone.undo).toBeNull();
-	expect(undoDeletion(undone)).toBe(undone);
+	expect(undoEdit(undone)).toBe(undone);
 	const empty = deleteInstances({
 		...undone,
 		selection: { ids: [1, 2, DEFAULT_COUNT], active: 1 },
 	});
 	expect(empty.objects).toEqual([]);
-	expect(undoDeletion(empty).objects).toEqual(DEFAULT_SCENE);
+	expect(undoEdit(empty).objects).toEqual(DEFAULT_SCENE);
 	const added = addInstance(empty, "sphere", DEFAULT_SNAPSHOT.camera);
 	expect(added.undo).toBeNull();
 	expect(added.objects).toHaveLength(1);
@@ -78,9 +180,25 @@ test("capacity is explicit, maximum IDs wrap safely and spawning near bounds sta
 		parameter: 0,
 		id: i + 1,
 	}));
+	const fullEditor = createEditor(full);
 	expect(() =>
-		addInstance(createEditor(full), "sphere", DEFAULT_SNAPSHOT.camera),
+		addInstance(fullEditor, "sphere", DEFAULT_SNAPSHOT.camera),
 	).toThrow("capacity");
+	expect(duplicateInstances(fullEditor)).toEqual(fullEditor);
+	expect(() =>
+		duplicateInstances({
+			...fullEditor,
+			selection: { ids: [1], active: 1 },
+		}),
+	).toThrow("capacity");
+	expect(() =>
+		duplicateInstances({
+			...fullEditor,
+			objects: full.slice(1),
+			selection: { ids: [2, DEFAULT_COUNT], active: 2 },
+		}),
+	).toThrow("capacity");
+	expect(fullEditor.objects).toHaveLength(MAX_OBJECTS);
 	const exhausted = createEditor([
 		{
 			kind: "sphere",

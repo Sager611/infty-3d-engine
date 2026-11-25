@@ -239,7 +239,8 @@ test("scene actions delegate buttons, guard typing and menus, and dispose", () =
 		() => menuOpen,
 		(action) => actions.push(action),
 	);
-	const click = (): void => {
+	const click = (action: string): void => {
+		button.dataset.sceneAction = action;
 		const e = new Event("click");
 		Object.defineProperty(e, "target", { value: button });
 		root.dispatchEvent(e);
@@ -254,15 +255,14 @@ test("scene actions delegate buttons, guard typing and menus, and dispose", () =
 		return e.defaultPrevented;
 	};
 	try {
-		click();
-		button.dataset.sceneAction = "delete";
-		click();
+		click("sphere");
+		click("delete");
+		click("duplicate");
 		button.disabled = true;
-		click();
+		click("duplicate");
 		button.disabled = false;
-		button.dataset.sceneAction = "unknown";
-		click();
-		expect(actions).toEqual(["sphere", "delete"]);
+		click("unknown");
+		expect(actions).toEqual(["sphere", "delete", "duplicate"]);
 		expect(key(null)).toBe(true);
 		menuOpen = true;
 		expect(key(null)).toBe(false);
@@ -274,10 +274,9 @@ test("scene actions delegate buttons, guard typing and menus, and dispose", () =
 		expect(deleteShortcut("Backspace", null, false, false)).toBe(true);
 		expect(deleteShortcut("Delete", null, true, false)).toBe(false);
 		dispose();
-		button.dataset.sceneAction = "undo";
-		click();
+		click("undo");
 		expect(key(null)).toBe(false);
-		expect(actions).toEqual(["sphere", "delete", "delete"]);
+		expect(actions).toEqual(["sphere", "delete", "duplicate", "delete"]);
 	} finally {
 		dispose();
 		restoreElement();

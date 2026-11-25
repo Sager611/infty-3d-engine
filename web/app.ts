@@ -23,8 +23,9 @@ import {
 	cleanSelection,
 	createEditor,
 	deleteInstances,
+	duplicateInstances,
 	type Editor,
-	undoDeletion,
+	undoEdit,
 } from "./editing.ts";
 import { createFrames, type Frames } from "./frames.ts";
 import { createGizmo, type GizmoWidget } from "./gizmo-view.ts";
@@ -106,6 +107,8 @@ const inspector: HTMLElement = inspectorNode;
 const status: HTMLElement = statusNode;
 const toolsNode: HTMLElement | null = document.getElementById("scene-tools");
 const addMenu: HTMLElement | null = document.getElementById("add-menu");
+const duplicateButton: HTMLElement | null =
+	document.getElementById("duplicate-objects");
 const deleteButton: HTMLElement | null =
 	document.getElementById("delete-objects");
 const undoButton: HTMLElement | null = document.getElementById("undo-delete");
@@ -116,6 +119,7 @@ if (
 	!(
 		toolsNode instanceof HTMLElement &&
 		addMenu instanceof HTMLElement &&
+		duplicateButton instanceof HTMLButtonElement &&
 		deleteButton instanceof HTMLButtonElement &&
 		undoButton instanceof HTMLButtonElement &&
 		deleteCount instanceof HTMLElement &&
@@ -175,7 +179,8 @@ const stateForControls = (): ControlsState => ({
 const updateUi = (): void => {
 	modeNode.value = String(snapshot.mode);
 	renderControls(controls, stateForControls());
-	deleteButton.disabled = selection.ids.length === 0;
+	duplicateButton.disabled = selection.ids.length === 0;
+	deleteButton.disabled = duplicateButton.disabled;
 	undoButton.disabled = editor.undo === null;
 	deleteCount.textContent = String(selection.ids.length);
 	const label = `Delete ${selection.ids.length} selected objects`;
@@ -595,10 +600,12 @@ const handleSceneAction = (action: SceneAction): void => {
 	gizmo?.cancel(false);
 	try {
 		const current = { ...editor, selection };
-		if (action === "delete") {
+		if (action === "duplicate") {
+			editor = duplicateInstances(current);
+		} else if (action === "delete") {
 			editor = deleteInstances(current);
 		} else if (action === "undo") {
-			editor = undoDeletion(current);
+			editor = undoEdit(current);
 		} else {
 			editor = addInstance(current, action, {
 				...snapshot.camera,
@@ -613,7 +620,7 @@ const handleSceneAction = (action: SceneAction): void => {
 		setStatus("");
 		updateUi();
 		invalidate();
-		if (action !== "delete" && action !== "undo") {
+		if (action !== "duplicate" && action !== "delete" && action !== "undo") {
 			controls.properties.querySelector<HTMLInputElement>("input")?.focus();
 		} else {
 			canvas.focus();
