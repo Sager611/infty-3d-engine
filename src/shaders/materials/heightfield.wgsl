@@ -2,6 +2,24 @@
 struct HeightData {info:vec4u,amplitudes:vec4f,words:array<u32>};
 @group(0) @binding(9) var<storage,read> height_data:HeightData;
 const LEAF_REPEATS=vec4f(1.0,10.0,100.0,1000.0);
+// C1 phase variation, shared by fine height/color. Coarse shape and coverage stay unchanged.
+fn hf_phase_hash(ij:vec2u)->vec2f {
+  let word=(ij.x*0x9e3779b9u)^(ij.y*0x85ebca6bu);
+  var value=vec2u(word,word^0x68bc21ebu);
+  value=(value^(value>>vec2u(16u)))*vec2u(0x7feb352du);
+  value=(value^(value>>vec2u(15u)))*vec2u(0x846ca68bu);
+  return vec2f(value^(value>>vec2u(16u)))*(1.0/4294967296.0);
+}
+fn hf_phase(uv:vec2f,order:u32,repeats:f32)->vec2f {
+  let q=uv*repeats;if(order<2u||order>=4u){return q;}
+  let seed=select(vec2f(47.0,113.0),vec2f(13.0,71.0),order==2u);
+  let p=fma(q,vec2f(0.25),seed);let period=vec2u(u32(repeats*0.25));
+  let ij=vec2u(floor(p))%period;let next=(ij+vec2u(1u))%period;let f=fract(p);
+  let w=f*f*(vec2f(3.0)-2.0*f);
+  let lo=mix(hf_phase_hash(ij),hf_phase_hash(vec2u(next.x,ij.y)),w.x);
+  let hi=mix(hf_phase_hash(vec2u(ij.x,next.y)),hf_phase_hash(next),w.x);
+  return fma(mix(lo,hi,w.y),vec2f(1.25),q);
+}
 fn hf_byte(index:u32)->f32 {
   return f32((height_data.words[index>>2u]>>((index&3u)*8u))&255u);
 }
@@ -19,12 +37,12 @@ fn hf_bilinear(order:u32,uv:vec2f,repeats:f32)->f32 {
 }
 fn hf_height(uv:vec2f)->f32 {
   let h=vec4f(hf_bilinear(0u,uv,1.0),hf_bilinear(1u,uv,10.0),
-    hf_bilinear(2u,uv,100.0),hf_bilinear(3u,uv,1000.0))-vec4f(128.0);
+    hf_gradient_value(2u,uv,100.0),hf_gradient_value(3u,uv,1000.0))-vec4f(128.0);
   return dot(h,height_data.amplitudes/255.0);
 }
 // Bilinearly blend vertex slopes; subtexel differences expose faceted cell gradients.
 fn hf_gradient_value(order:u32,uv:vec2f,repeats:f32)->f32 {
-  let p=uv*repeats;
+  let p=hf_phase(uv,order,repeats);
   return hf_bilinear(order,select(fract(p),clamp(p,vec2f(0.0),vec2f(1.0)),order==0u),1.0);
 }
 fn hf_slope(order:u32,uv:vec2f,repeats:f32,footprint:f32)->vec2f {

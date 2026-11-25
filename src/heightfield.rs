@@ -1,6 +1,7 @@
-//! Immutable vertex-aligned bilinear heights; five independently bounded scalar maps.
+//! Immutable bilinear maps; four height bands, coarse coverage and bounded fine UV variation.
 use crate::{geometry::Error, math::interval::Interval as I};
 pub mod gpu;
+mod phase;
 mod ray;
 
 pub const STEPS: usize = 64;
@@ -203,7 +204,7 @@ impl<'a> Field<'a> {
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "Validated canonical point gives a texel index in 0..=512000"
+        reason = "Validated canonical or mapped fine coordinates fit the u32 texel grid"
     )]
     fn coordinate(self, order: usize, p: f64) -> Result<(u32, f64), Error> {
         let scale = f64::from(self.edge * repeat(order)) * 0.5;
@@ -229,8 +230,9 @@ impl<'a> Field<'a> {
             coverage: 0.0,
         };
         for order in 0..4 {
-            let (ix, fx) = self.coordinate(order, p[0])?;
-            let (iy, fy) = self.coordinate(order, p[1])?;
+            let mapped = phase::map(p, order);
+            let (ix, fx) = self.coordinate(order, mapped.point[0])?;
+            let (iy, fy) = self.coordinate(order, mapped.point[1])?;
             let coeff = self.coefficients(order, [ix, iy])?;
             let amplitude = self.amplitudes[order] / 255.0;
             value.height = amplitude.mul_add(
@@ -238,10 +240,16 @@ impl<'a> Field<'a> {
                 value.height,
             );
             let scale = f64::from(self.edge * repeat(order)) * 0.5;
-            value.gradient[0] =
-                (amplitude * scale).mul_add(coeff[3].mul_add(fy, coeff[1]), value.gradient[0]);
-            value.gradient[1] =
-                (amplitude * scale).mul_add(coeff[3].mul_add(fx, coeff[2]), value.gradient[1]);
+            let gradient = [
+                amplitude * scale * coeff[3].mul_add(fy, coeff[1]),
+                amplitude * scale * coeff[3].mul_add(fx, coeff[2]),
+            ];
+            for axis in 0..2 {
+                value.gradient[axis] = gradient[0].mul_add(
+                    mapped.jacobian[0][axis],
+                    gradient[1].mul_add(mapped.jacobian[1][axis], value.gradient[axis]),
+                );
+            }
         }
         let (ix, fx) = self.coordinate(4, p[0])?;
         let (iy, fy) = self.coordinate(4, p[1])?;
@@ -272,6 +280,13 @@ impl<'a> Field<'a> {
                 / f64::from(side);
             high[axis] = f64::from(u32::try_from(b % u64::from(side)).map_err(|_| Error::Numeric)?)
                 / f64::from(side);
+        }
+        if (2..4).contains(&order) {
+            let [lo, hi] = phase::region(node, order)?;
+            for axis in 0..2 {
+                (first[axis], low[axis]) = self.coordinate(order, lo[axis])?;
+                (last[axis], high[axis]) = self.coordinate(order, hi[axis])?;
+            }
         }
         let span = (last[0] - first[0] + 1).max(last[1] - first[1] + 1);
         let mut result: Option<[f64; 2]> = None;
@@ -341,12 +356,17 @@ impl<'a> Field<'a> {
         Ok(self.edge * highest)
     }
     pub fn roundoff(self) -> f64 {
-        (64.0 * f64::EPSILON).mul_add(
+        let base = (64.0 * f64::EPSILON).mul_add(
             self.amplitudes[0].abs()
                 + self.amplitudes[1].abs()
                 + self.amplitudes[2].abs()
                 + self.amplitudes[3].abs(),
             f64::from_bits(64),
+        );
+        let rounding = phase::ERROR * f64::from(self.edge);
+        (1000.0 * rounding).mul_add(
+            self.amplitudes[3].abs(),
+            (100.0 * rounding).mul_add(self.amplitudes[2].abs(), base),
         )
     }
     pub const fn anchor(self) -> [f64; 2] {

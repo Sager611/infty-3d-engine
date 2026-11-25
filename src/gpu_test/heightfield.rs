@@ -32,18 +32,12 @@ fn leaf_gpu_material_uses_carrier_normals_and_vertex_aligned_color()
     }
     assert!(!used_bindings("verify_leaf_material")?.contains(&9));
     let actual = run("verify_leaf_material", &inputs, inputs.len() * 16)?;
-    let coarse = Field::new(
-        crate::heightfield::DATA,
-        512,
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0; 2],
-    )?;
-    let finest = Field::new(
-        crate::heightfield::DATA,
-        512,
-        [0.0, 0.0, 0.0, 1.0],
-        [0.0; 2],
-    )?;
+    let plane = |order: usize| {
+        let mut amplitudes = [0.0; 4];
+        amplitudes[order] = 1.0;
+        Field::new(crate::heightfield::DATA, 512, amplitudes, [0.0; 2])
+    };
+    let fields = [plane(0)?, plane(3)?, plane(2)?, plane(1)?];
     for (input, row) in inputs.iter().zip(actual.chunks_exact(16)) {
         let xy = [f64::from(input[0]), f64::from(input[1])];
         let n = [4, 5, 6].map(|axis| -f64::from(input[axis]));
@@ -55,7 +49,8 @@ fn leaf_gpu_material_uses_carrier_normals_and_vertex_aligned_color()
                 "direct hit evaluated height shading: {row:?} {n:?}"
             );
         }
-        for (index, field) in [(12, coarse), (13, finest)] {
+        for (slot, field) in fields.into_iter().enumerate() {
+            let index = 12 + slot;
             let alpha = field.sample(xy)?.height + 128.0 / 255.0;
             assert!(
                 (f64::from(row[index]) - alpha).abs() < 0.005,

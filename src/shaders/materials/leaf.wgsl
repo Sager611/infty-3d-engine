@@ -5,7 +5,8 @@ fn leaf_uv_unit(uv:vec2f)->vec2f {
   return select(uv,fract(uv),uv!=clamp(uv,vec2f(0.0),vec2f(1.0)));
 }
 fn leaf_uv(uv:vec2f,order:u32)->vec2f {
-  return fma(uv,vec2f(LEAF_REPEATS[order]),vec2f(0.5/512.0));
+  if(order<2u){return fma(uv,vec2f(LEAF_REPEATS[order]),vec2f(0.5/512.0));}
+  return hf_phase(uv,order,LEAF_REPEATS[order])+vec2f(0.5/512.0);
 }
 fn leaf_fetch(uv:vec2f,order:u32,layer:i32,lod:f32)->vec4f {
   if(order==0u){return textureSampleLevel(material_tiles,leaf_clamp,uv,layer,lod);}

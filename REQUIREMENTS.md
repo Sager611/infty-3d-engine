@@ -11,12 +11,13 @@
 - Base ray queries always return a gap and matching surface witness with UV/normal; preserve explicit uncertainty and independent point queries.
 - Texh rendered hits: one shared, geometry-independent direct calculation. NO LOOPS or recursion; always prefer fast approximation over accurate displacement. No root search, traversal, ray marching or fitted geometry. Sample carrier height once for depth; update UV/RGB and texel-smooth per-level normals at shifted coordinates with a frozen carrier footprint/frame. Bound grazing offsets. No exact first-crossing or displaced-silhouette guarantee.
 - Preserve carrier queries/picking, independent point queries and the existing miss rule: one bilinear height sample at the witness accepts signed height reaching the gap. No new gap solver.
-- Scene → Leaf · relief and Red brick · relief: share texh, preserve matching source assets, cutouts, all four height bands and carrier cast-shadow behavior. Brick fine height gains are8× stronger; mortar and Leaf depth stay unchanged. Both localhost previews target60 warm FPS at1265×791; report measured limits.
+- Scene → Leaf · relief and Red brick · relief: share texh, preserve matching source assets, cutouts, all four height bands and carrier cast-shadow behavior. Brick fine height gains are8× stronger; mortar and Leaf depth stay unchanged. Break up visible repeats in the two finest Leaf bands without flattening them; manually approach/orbit both textures from normal through very close distances and several angles. Both localhost previews target60 warm FPS at1265×791; report measured limits.
 
 ## Changelog
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-25 | User | Require varied fine Leaf detail and approach/orbit QA | Remove visible micro-tiling and inspect moving close-ups |
 | 2026-11-25 | User | Require translation/rotation gizmo with Shift2× | Edit selected geometry directly |
 | 2026-11-25 | User | Require Shift boost, faster approach, stronger pores, smooth normals and precise wheelable positions | Improve close inspection and editing |
 | 2026-11-24 | User | Require shared direct, loop-free/nonrecursive displacement; speed over accuracy | Replace iterative search without changing carrier queries, gaps or assets |

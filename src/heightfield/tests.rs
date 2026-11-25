@@ -5,6 +5,128 @@ use super::*;
 fn leaf_preserves_fine_height_gains() {
     assert_eq!(AMPLITUDES[1..], [1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0]);
 }
+#[test]
+fn leaf_fine_bands_do_not_repeat_one_tile_apart() -> Result<(), Error> {
+    let pixels = data([
+        [128; 4],
+        [128; 4],
+        [16, 96, 208, 240],
+        [16, 96, 208, 240],
+        [255; 4],
+    ]);
+    for order in 2..4 {
+        let mut amplitudes = [0.0; 4];
+        amplitudes[order] = 1.0 / 1024.0;
+        let field = Field::new(&pixels, 2, amplitudes, [0.0; 2])?;
+        let mut different = 0.0_f64;
+        let mut low = f64::INFINITY;
+        let mut high = f64::NEG_INFINITY;
+        for n in 0..8 {
+            let p = [
+                f64::from(n).mul_add(0.137, -0.75),
+                f64::from(n).mul_add(0.073, -0.413),
+            ];
+            let a = field.sample(p)?;
+            let b = field.sample([p[0] + 2.0 / f64::from(repeat(order)), p[1]])?;
+            different = different.max((a.height - b.height).abs());
+            low = low.min(a.height);
+            high = high.max(a.height);
+            assert_eq!(a.coverage, 255.0);
+        }
+        assert!(
+            different > 1e-5,
+            "fine band {order} is still an exact tile: {different}"
+        );
+        assert!(high - low > 1e-4, "fine band {order} was flattened");
+    }
+    Ok(())
+}
+
+#[test]
+fn leaf_fine_phase_wraps_without_seams_and_differentiates_the_same_field() -> Result<(), Error> {
+    let pixels = data([
+        [128; 4],
+        [128; 4],
+        [16, 96, 208, 240],
+        [240, 32, 192, 64],
+        [255; 4],
+    ]);
+    for order in 2..4 {
+        let mut amplitudes = [0.0; 4];
+        amplitudes[order] = 0.125;
+        let field = Field::new(&pixels, 2, amplitudes, [0.0; 2])?;
+        for axis in 0..2 {
+            let mut a = [0.12345; 2];
+            let mut b = a;
+            a[axis] = -1.0;
+            b[axis] = 1.0;
+            let left = field.sample(a)?;
+            let right = field.sample(b)?;
+            assert!(
+                (left.height - right.height).abs() < 1e-11,
+                "fine seam {order}"
+            );
+            for component in 0..2 {
+                assert!((left.gradient[component] - right.gradient[component]).abs() < 1e-6);
+            }
+            let p = [-0.12733, 0.24534];
+            let step = 1e-5 / f64::from(repeat(order));
+            let mut lo = p;
+            let mut hi = p;
+            lo[axis] -= step;
+            hi[axis] += step;
+            let numerical = (field.sample(hi)?.height - field.sample(lo)?.height) / (2.0 * step);
+            assert!((field.sample(p)?.gradient[axis] - numerical).abs() < 1e-5);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn leaf_fine_nodes_enclose_samples_and_keep_refining() -> Result<(), Error> {
+    let pixels = data([
+        [128; 4],
+        [128; 4],
+        [16, 96, 208, 240],
+        [240, 32, 192, 64],
+        [255; 4],
+    ]);
+    let field = Field::new(&pixels, 2, [0.0, 0.0, 0.125, -0.125], [0.0; 2])?;
+    let mut seed = 17_u32;
+    for depth in [0, 4, 12, 18, 24] {
+        for _ in 0..32 {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let x = seed % (1 << depth);
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let node = Node {
+                ij: [x, seed % (1 << depth)],
+                depth,
+            };
+            let [lo, hi] = node.domain()?;
+            let bounds = field.bounds(node)?.ok_or(Error::Numeric)?;
+            for x in [0.0, 0.17, 0.5, 0.83, 1.0] {
+                for y in [0.0, 0.17, 0.5, 0.83, 1.0] {
+                    let p = [x, y];
+                    let at = [0, 1].map(|axis| (hi[axis] - lo[axis]).mul_add(p[axis], lo[axis]));
+                    let value = field.sample(at)?;
+                    assert!(
+                        bounds.lo[2] <= value.height && value.height <= bounds.hi[2],
+                        "{depth} {:?}: {} outside [{}, {}]",
+                        node.ij,
+                        value.height,
+                        bounds.lo[2],
+                        bounds.hi[2]
+                    );
+                }
+            }
+            if depth == 24 {
+                assert!(bounds.hi[2] - bounds.lo[2] < 0.0001);
+            }
+        }
+    }
+    Ok(())
+}
+
 const HALF_SIZE_MM: f64 = 70.0;
 
 #[test]

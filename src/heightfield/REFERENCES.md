@@ -3,8 +3,8 @@
 Try Scene controls → Scene → Leaf · relief; Add → Finite plane reuses the carrier.
 Axis0/1/2 means normalZ/X/Y. Kind5 is a double-sided square with a Leaf cutout.
 Leaf and brick share direct material-hit math; geometry supplies carrier-frame mapping.
-At reference half-size70mm, four vertex-aligned512² height fields span140/14/1.4/0.14mm.
-The macro field clamps; finer fields repeat. Raw bytes are centered at128, divided by255,
+At reference half-size70mm, four bilinearly sampled512² maps span140/14/1.4/0.14mm.
+The macro field clamps; finer maps repeat. The two finest share a smooth coordinate warp across height/RGBA/filtered slopes, varying fine tiles while preserving the whole-UV seam. A periodic hashed cubic grid offsets up to1.25 tiles over four-tile cells; its Jacobian row bound31/16 encloses independent point-query nodes. Coarse mapping, cutout, bytes, gains and the frozen carrier footprint stay unchanged. Raw bytes are centered at128, divided by255,
 and multiplied by gains2^-3/2^-10/2^-13/2^-15 before summation.
 A separate512² opacity field clips coverage at127.5. It is not height or optical albedo.
 Uniform instance size scales the entire surface; peers still share their carrier definition.
@@ -13,7 +13,7 @@ Uniform instance size scales the entire surface; peers still share their carrier
 
 Carrier queries and picking stay on the base surface, with the Leaf cutout. The existing signed-height miss rule is unchanged; no new gap solver is provided.
 Rendered hits use one carrier-height evaluation and the direct local offset h·c/max(c²,0.0025), where c=N·ray. Below |c|=0.05, relief fades instead of producing an unbounded grazing slide. Shifted UV supplies RGB/cutout. Normals blend vertex slopes at shifted UVs: four fixed samples per band, a texel-sized minimum stencil, per-band footprint fading and the carrier UV Jacobian. Carrier frame/footprint stay frozen.
-All four bilinear bands, RGB, cutout, carrier cast shadows and the Leaf self-shadow exception remain. No asset is rebaked. Shader compilation expands level metadata into straight-line sample calls; displacement/shading have no loops, recursion or search.
+All four scalar bands, RGB, cutout, carrier cast shadows and the Leaf self-shadow exception remain. No asset is rebaked. Shader compilation expands level metadata into straight-line sample calls; displacement/shading have no loops, recursion or search.
 This deliberately favors speed over accuracy: no exact first crossing, normal-chart inversion, displaced silhouette or certified relief error. Strong slopes, grazing views and close-ups can distort or miss relief; an uncovered/backward candidate is discarded without searching again.
 Point queries still use the height pyramid and covered witnesses independently.
 Amber hatching marks unresolved ray or shadow work.
@@ -54,6 +54,7 @@ The retained macro asset blends source depth into offline polynomial matte paddi
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-25 | Assistant | Describe smooth shared fine-coordinate variation and query bounds | Break up micro-tiling without rebaking or flattening |
 | 2026-11-25 | Assistant | Smooth each height band's vertex slopes at shifted UVs | Remove blocky close-up highlights without changing depth |
 | 2026-11-24 | Assistant | Document shared direct approximation, fixed samples and unchanged assets | Favor speed over iterative displacement accuracy |
 | 2026-11-11 | Assistant | Documented Leaf usage, fixed surface, source derivatives and bake | Make geometry, limits and attribution explicit |

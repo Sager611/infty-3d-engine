@@ -23,7 +23,8 @@ fn verify_leaf_material(@builtin(global_invocation_id) id:vec3u) {
   let material=leaf_material(uv,normal,input.d.w,input.o.z);
   results[id.x]=ProbeResult(vec4f(material.normal,material.roughness),vec4f(material.albedo,material.metallic),
     vec4f(0.0),vec4f(leaf_fetch(leaf_uv(uv,0u),0u,8,0.0).a,
-      leaf_fetch(leaf_uv(uv,3u),3u,11,0.0).a,0.0,0.0));
+      leaf_fetch(leaf_uv(uv,3u),3u,11,0.0).a,leaf_fetch(leaf_uv(uv,2u),2u,10,0.0).a,
+      leaf_fetch(leaf_uv(uv,1u),1u,9,0.0).a));
 }
 @compute @workgroup_size(1)
 fn verify_finite_precise(@builtin(global_invocation_id) id:vec3u) {
