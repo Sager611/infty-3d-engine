@@ -16,8 +16,12 @@ impl Bounds {
         }
         let transform = object.transform();
         Some(Self {
-            min: transform.world_point([-radius; 3]),
-            max: transform.world_point([radius; 3]),
+            min: transform
+                .position()
+                .map(|p| (-radius).mul_add(transform.scale(), p).next_down()),
+            max: transform
+                .position()
+                .map(|p| radius.mul_add(transform.scale(), p).next_up()),
         })
     }
 

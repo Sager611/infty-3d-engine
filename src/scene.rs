@@ -10,9 +10,11 @@ pub mod packed;
 pub mod prepared;
 /// Deterministic analytic scene queries.
 pub mod query;
+/// Canonical quaternion rotations and bounded vector maps.
+pub mod rotation;
 /// Conservative finite-object hierarchy with explicit unbounded leaves.
 pub mod spatial;
-/// Validated uniform transforms and coordinate mapping.
+/// Validated rigid/uniform transforms and coordinate mapping.
 pub mod transform;
 
 #[cfg(target_arch = "wasm32")]

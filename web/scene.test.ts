@@ -19,6 +19,27 @@ const sideBySide = (left: Scene, right: Scene): void => {
 };
 
 describe("scene model", () => {
+	test("rotation packets preserve normalized immutable poses without changing legacy packets", () => {
+		const first = DEFAULT_SCENE[0];
+		if (first === undefined) {
+			throw new Error("Missing fixture");
+		}
+		const rotation = [0, Math.SQRT1_2, 0, Math.SQRT1_2] as const;
+		const posed = updateObject(DEFAULT_SCENE, first.id, { rotation });
+		const packet = packScene(posed);
+		expect(packet[0]).toBe(-1);
+		expect(packet.length).toBe(1 + posed.length * 12);
+		const restored = unpackScene(packet);
+		expect(restored[0]?.rotation).toEqual(rotation);
+		expect(Object.isFrozen(restored[0]?.rotation)).toBe(true);
+		expect(packScene(restored)).toEqual(packet);
+		expect(first.rotation).toBeUndefined();
+		expect(packScene(DEFAULT_SCENE)).toHaveLength(DEFAULT_SCENE.length * 8);
+		expect(() =>
+			updateObject(DEFAULT_SCENE, first.id, { rotation: [0, 0, 0, 0] }),
+		).toThrow();
+		expect(() => unpackScene(new Float64Array([-1, 1, 5]))).toThrow();
+	});
 	test("round-trips the default scene and keeps its locked values", () => {
 		const packet = packScene(DEFAULT_SCENE);
 		expect(packet).toHaveLength(24);

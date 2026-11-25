@@ -9,7 +9,7 @@ use wgpu::util::DeviceExt;
 use crate::api::PreparedScene;
 use crate::device_state::DeviceState;
 use crate::material::gpu::resources::{Demand, Resources};
-use crate::scene::packed::pack_prepared;
+use crate::scene::packed::{Record, pack_prepared};
 use crate::scene::parse_camera;
 use crate::upload::Upload;
 
@@ -69,7 +69,7 @@ impl Renderer {
         let (compute_pipeline, present_pipeline) = create_pipelines(&device, config.format).await?;
         state.check().map_err(js_error)?;
         let uniform = create_uniform(&device, width, height);
-        let objects = create_objects_buffer(&device, 48);
+        let objects = create_objects_buffer(&device, std::mem::size_of::<Record>() as u64);
         let output = create_output(&device, width, height);
         let resources = Resources::empty(&device);
         let (compute_bind_group, present_bind_group) = create_bind_groups(
@@ -135,8 +135,7 @@ impl Renderer {
         Ok(())
     }
 
-    /// Renders one frame from a six-value camera packet and an eight-value
-    /// packet per scene object.
+    /// Renders a six-value camera packet and legacy or quaternion-posed scene records.
     ///
     /// # Errors
     ///

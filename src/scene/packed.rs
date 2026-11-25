@@ -11,9 +11,10 @@ pub struct Record {
     pub identity: [u32; 4],
     pub position_size: [f32; 4],
     pub params: [f32; 4],
+    pub rotation: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<Record>() == 48);
+const _: () = assert!(std::mem::size_of::<Record>() == 64);
 
 pub struct Packet {
     pub records: Vec<Record>,
@@ -41,6 +42,7 @@ pub fn pack_prepared(scene: &Prepared, selected: &[u32]) -> Result<Packet, &'sta
     for &node in &tree.nodes {
         records.push(match node {
             Node::Branch { bounds, escape } => Record {
+                rotation: [0.0, 0.0, 0.0, 1.0],
                 identity: [
                     0,
                     u32::try_from(escape).map_err(|_| "too many nodes")?,
@@ -78,6 +80,7 @@ pub fn pack_prepared(scene: &Prepared, selected: &[u32]) -> Result<Packet, &'sta
                     0
                 };
                 Record {
+                    rotation: transform.rotation().components().map(|v| v as f32),
                     identity: [
                         instance.id(),
                         geometry.kind().tag(),
@@ -104,6 +107,7 @@ pub fn pack_prepared(scene: &Prepared, selected: &[u32]) -> Result<Packet, &'sta
             identity: [0, geometry.kind().tag(), 0, 0],
             position_size: [0.0; 4],
             params: [geometry.parameter() as f32, 0.0, 0.0, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
         });
     }
     // WebGPU storage bindings cannot be empty.

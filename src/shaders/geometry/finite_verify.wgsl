@@ -2,7 +2,7 @@
 @compute @workgroup_size(1)
 fn verify_finite_branch(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}let input=rays[id.x];
-  let node=SceneObject(vec4u(0u),vec4f(-1.0),vec4f(1.0));
+  let node=SceneObject(vec4u(0u),vec4f(-1.0),vec4f(1.0),POSE_IDENTITY);
   results[id.x]=ProbeResult(vec4f(f32(branch_intersects(node,input.o.xyz,input.d.xyz,0.0)),0.0,0.0,0.0),
     vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
@@ -47,7 +47,7 @@ fn verify_finite_pending(@builtin(global_invocation_id) id:vec3u) {
 fn verify_finite_scene(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let input=rays[id.x];
-  let object=SceneObject(vec4u(7u,5u,u32(input.o.w)<<8u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,input.d.w));
+  let object=SceneObject(vec4u(7u,5u,u32(input.o.w)<<8u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,input.d.w),POSE_IDENTITY);
   let direction=normalize(input.d.xyz);let sample=scene_object(input.o.xyz,direction,object);let q=sample.query;
   let at=input.o.xyz+q.t*direction;
   results[id.x*2u]=ProbeResult(vec4f(7.0,5.0,f32(q.hit),q.t),vec4f(sample.gap_lower,q.gap,q.p.xy),
@@ -61,7 +61,7 @@ fn verify_finite_scene(@builtin(global_invocation_id) id:vec3u) {
 fn verify_texh(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let r=rays[id.x];
-  let object=SceneObject(vec4u(7u,u32(r.o.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.d.w));
+  let object=SceneObject(vec4u(7u,u32(r.o.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.d.w),POSE_IDENTITY);
   let sample=scene_canonical(r.o.xyz,r.d.xyz,object);let q=sample.query;
   results[id.x]=ProbeResult(vec4f(f32(q.hit),q.t,q.gap,f32(sample.status)),
     vec4f(q.p,sample.gap_lower),vec4f(q.n,0.0),vec4f(q.uv,0.0,0.0));

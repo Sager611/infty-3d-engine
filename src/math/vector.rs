@@ -16,7 +16,7 @@ pub(super) fn scale(a: V, factor: f64) -> V {
     [a[0] * factor, a[1] * factor, a[2] * factor]
 }
 
-pub(super) fn cross(a: V, b: V) -> V {
+pub fn cross(a: V, b: V) -> V {
     [
         a[2].mul_add(-b[1], a[1] * b[2]),
         a[0].mul_add(-b[2], a[2] * b[0]),

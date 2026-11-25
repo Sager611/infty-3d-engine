@@ -5,6 +5,7 @@
 // biome-ignore-all lint/complexity/useSimplifiedLogicExpression: Validation names both conditions.
 import {
 	DEFAULT_SCENE,
+	POSE_PACKET_TAG,
 	packScene,
 	type SceneObject,
 	unpackScene,
@@ -149,7 +150,7 @@ const parseSnapshot = (hash: string): Snapshot => {
 		return DEFAULT_SNAPSHOT;
 	}
 	const parts = hash.slice(3).split(";");
-	if (parts.length !== 4 || parts[0] !== "1") {
+	if (parts.length !== 4 || (parts[0] !== "1" && parts[0] !== "2")) {
 		throw new Error("invalid snapshot");
 	}
 	const camera = strictCamera((parts[1] ?? "").split(","));
@@ -170,6 +171,9 @@ const parseSnapshot = (hash: string): Snapshot => {
 					}
 					return Number(field);
 				});
+	if ((parts[0] === "2") !== (sceneValues[0] === POSE_PACKET_TAG)) {
+		throw new Error("invalid snapshot version");
+	}
 	const objects = unpackScene(sceneValues);
 	return Object.freeze({ camera, mode: modeValue, objects });
 };
@@ -179,8 +183,9 @@ const serializeSnapshot = (snapshot: Snapshot): string => {
 		throw new Error("invalid mode");
 	}
 	const camera = cameraPacket(snapshot.camera);
-	const scene = packScene(snapshot.objects).join(",");
-	return `#s=1;${camera.join(",")};${snapshot.mode};${scene}`;
+	const packet = packScene(snapshot.objects);
+	const version = packet[0] === POSE_PACKET_TAG ? "2" : "1";
+	return `#s=${version};${camera.join(",")};${snapshot.mode};${packet.join(",")}`;
 };
 
 const DEFAULT_SNAPSHOT: Snapshot = Object.freeze({

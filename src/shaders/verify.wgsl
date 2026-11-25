@@ -56,12 +56,25 @@ fn verify_material_variance(@builtin(global_invocation_id) id: vec3u) {
   results[id.x]=ProbeResult(q,vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)
+fn verify_instance_pose(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}
+  let input=rays[id.x];let object=resolved_object(u32(input.o.w));let d=normalize(input.d.xyz);
+  let base=scene_object(input.o.xyz,d,object);
+  let delta=scene_origin_delta(input.o.xyz,vec3f(0.0),object);
+  let span=0.001*abs(dot(d,base.query.n))/max(1e-20,base.query.t);
+  let sample=material_texh(base,d,object,delta,span);
+  let material=texh_surface(sample,base,d,object,delta,span);
+  results[id.x]=ProbeResult(vec4f(f32(base.query.hit),base.query.t,f32(sample.query.hit),sample.query.t),
+    vec4f(sample.query.n,f32(outline_eligible(sample,true,0.01))),
+    vec4f(sample.query.uv,0.0,0.0),vec4f(material.albedo,sample.query.gap));
+}
+@compute @workgroup_size(1)
 fn verify_material_hit(@builtin(global_invocation_id) id: vec3u) {
   if (id.x>=arrayLength(&rays)) { return; }
   let r=rays[id.x];let d=normalize(r.d.xyz);
   var parameter=0.0;
   if(u32(r.d.w)==2u){parameter=select(1.5,16.0*fract(r.d.w),fract(r.d.w)>0.0);}
-  let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(parameter,0.0,0.0,r.o.w));
+  let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(parameter,0.0,0.0,r.o.w),POSE_IDENTITY);
   let base=scene_object(r.o.xyz,d,object);
   let sample=material_texh(base,d,object,r.o.xyz,0.001);let q=sample.query;
   let footprint=texh_footprint(base,d,0.001);
@@ -74,7 +87,7 @@ fn verify_material_hit(@builtin(global_invocation_id) id: vec3u) {
 fn verify_material_color(@builtin(global_invocation_id) id: vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let r=rays[id.x];let d=normalize(r.d.xyz);
-  let object=SceneObject(vec4u(1u,5u,0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w));
+  let object=SceneObject(vec4u(1u,5u,0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w),POSE_IDENTITY);
   let base=scene_object(r.o.xyz,d,object);let sample=material_texh(base,d,object,r.o.xyz,0.001);
   let material=texh_surface(sample,base,d,object,r.o.xyz,0.001);let footprint=texh_footprint(base,d,0.001);
   var expected=layered_material(u32(r.o.w),vec3f(sample.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint,vec3f(0.0));
@@ -145,7 +158,7 @@ fn verify_scene(@builtin(global_invocation_id) id: vec3u) {
   let kind = u32(ray.o.w);
   let object = SceneObject(vec4u(7u, kind, 0u, 0u),
     vec4f(0.0, 1.0, 0.0, ray.d.w),
-    vec4f(select(0.0, 1.5, kind == 2u), 0.0, 0.0, 0.0));
+    vec4f(select(0.0, 1.5, kind == 2u), 0.0, 0.0, 0.0),POSE_IDENTITY);
   let direction = normalize(ray.d.xyz);
   let sample = scene_object(ray.o.xyz, direction, object);
   let q = sample.query;

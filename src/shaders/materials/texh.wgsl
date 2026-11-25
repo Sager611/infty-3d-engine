@@ -36,20 +36,20 @@ fn texh_normal(point:vec3f,foot:SurfacePoint,context:TexhContext)->vec3f {
 }
 fn material_texh(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->SceneSample {
   if(!base.base_hit){return base;}
-  let context=TexhContext(base,object,origin_delta+d*base.query.t,texh_footprint(base,d,pixel_span));
+  let context=TexhContext(base,object,scene_local_vector(object,origin_delta+d*base.query.t),texh_footprint(base,d,pixel_span));
   let height=texh_height(geometry_surface(base.local,base,object),context);
   let incidence=dot(d,base.query.n);
   // Reciprocal incidence above |cos|=.05; fade instead of exploding at grazing angles.
   let offset=height*incidence/max(0.0025,incidence*incidence);
   var result=base;result.query.t+=offset*object.position_size.w;
   result.query.p=fma(vec3f(offset*object.position_size.w),d,base.query.p);
-  result.local=fma(vec3f(offset),d,base.local);
+  result.local=fma(vec3f(offset),scene_local_vector(object,d),base.local);
   let foot=geometry_surface(result.local,base,object);
   result.query.hit=result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
   result.query.uv=foot.uv;
   if(object.params.w==2.0){result.query.hit=result.query.hit&&leaf_covered(leaf_uv_unit(foot.uv));}
   if(result.query.hit){
-    result.query.n=texh_normal(result.local,foot,context);
+    result.query.n=scene_world_vector(object,texh_normal(result.local,foot,context));
     result.query.gap=0.0;result.gap_lower=0.0;
   }
   return result;
@@ -57,7 +57,7 @@ fn material_texh(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,
 fn texh_surface(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->MaterialSurface {
   let footprint=texh_footprint(base,d,pixel_span);let normal=surface_normal(sample.query.n,d,sample.kind);
   if(object.params.w==2.0){return leaf_material(sample.query.uv,normal,object.position_size.w,footprint);}
-  let context=TexhContext(base,object,origin_delta+d*base.query.t,footprint);
+  let context=TexhContext(base,object,scene_local_vector(object,origin_delta+d*base.query.t),footprint);
   let foot=geometry_surface(sample.local,base,object);
   var material=layered_material(u32(object.params.w),texh_delta(foot,context),foot.n,footprint,object.position_size.xyz);
   material.normal=normal;return material;

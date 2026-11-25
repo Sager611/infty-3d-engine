@@ -7,7 +7,15 @@ import {
 	materialKind,
 } from "./material.ts";
 
-type Position = readonly [number, number, number];
+import {
+	IDENTITY_ROTATION,
+	normalizeRotation,
+	type Rotation,
+	type Vector,
+	validRotation,
+} from "./rotation.ts";
+
+type Position = Vector;
 type SceneKind = "sphere" | "goursat" | "plane" | "crystal" | "finite";
 
 type ReadonlySceneObject = Readonly<{
@@ -17,6 +25,7 @@ type ReadonlySceneObject = Readonly<{
 	size: number;
 	parameter: number;
 	material?: MaterialKind;
+	rotation?: Rotation;
 }>;
 
 type SceneObject = ReadonlySceneObject;
@@ -26,6 +35,7 @@ type ScenePatch = Readonly<{
 	size?: number;
 	parameter?: number;
 	material?: MaterialKind;
+	rotation?: Rotation;
 }>;
 
 type NumericRange = Readonly<{ min: number; max: number }>;
@@ -48,6 +58,8 @@ const MAX_SIZE = 4;
 const MIN_GOURSAT_PARAMETER = 1.05;
 const MAX_GOURSAT_PARAMETER = 1.95;
 const PACKET_STRIDE = 8;
+const POSE_PACKET_TAG = -1;
+const POSE_STRIDE = 12;
 
 const DESCRIPTORS: ShapeDescriptorMap = {
 	sphere: {
@@ -130,6 +142,22 @@ const materialFields = (
 	return { material };
 };
 
+const rotationFields = (
+	rotation: Rotation | undefined,
+): Readonly<{ rotation?: Rotation }> => {
+	if (rotation === undefined) {
+		return {};
+	}
+	if (!validRotation(rotation)) {
+		invalid("invalid rotation");
+	}
+	const value = normalizeRotation(rotation);
+	if (value.every((v, i) => v === IDENTITY_ROTATION[i])) {
+		return {};
+	}
+	return { rotation: value };
+};
+
 const sceneObject = ({
 	id,
 	kind,
@@ -137,6 +165,7 @@ const sceneObject = ({
 	size,
 	parameter,
 	material,
+	rotation,
 }: ReadonlySceneObject): ReadonlySceneObject =>
 	Object.freeze({
 		id,
@@ -145,6 +174,7 @@ const sceneObject = ({
 		size,
 		parameter,
 		...materialFields(material),
+		...rotationFields(rotation),
 	});
 
 class SceneValidationError extends Error {
@@ -195,6 +225,9 @@ const validateObject = (object: ReadonlySceneObject): void => {
 	}
 	if (object.material !== undefined && !isMaterial(object.material)) {
 		invalid("invalid material");
+	}
+	if (object.rotation !== undefined && !validRotation(object.rotation)) {
+		invalid("invalid rotation");
 	}
 	const descriptor = DESCRIPTORS[object.kind];
 	if (
@@ -252,11 +285,27 @@ const DEFAULT_SCENE: Scene = Object.freeze([
 	}),
 ]);
 
+const packetStride = (posed: boolean): number => {
+	if (posed) {
+		return POSE_STRIDE;
+	}
+	return PACKET_STRIDE;
+};
+
 const packScene = (scene: Scene): Float64Array => {
 	validateScene(scene);
-	const packet = new Float64Array(scene.length * PACKET_STRIDE);
+	const rotations = scene.map(
+		(object) => rotationFields(object.rotation).rotation,
+	);
+	const posed = rotations.some((rotation) => rotation !== undefined);
+	const start = Number(posed);
+	const stride = packetStride(posed);
+	const packet = new Float64Array(start + scene.length * stride);
+	if (posed) {
+		packet[0] = POSE_PACKET_TAG;
+	}
 	scene.forEach((object, index) => {
-		const offset = index * PACKET_STRIDE;
+		const offset = start + index * stride;
 		packet[offset] = object.id;
 		packet[offset + 1] = KIND_TAGS[object.kind];
 		packet[offset + 2] = object.position[0];
@@ -265,6 +314,9 @@ const packScene = (scene: Scene): Float64Array => {
 		packet[offset + 5] = object.size;
 		packet[offset + 6] = object.parameter;
 		packet[offset + 7] = MATERIALS[object.material ?? "steel"].tag;
+		if (posed) {
+			packet.set(rotations[index] ?? IDENTITY_ROTATION, offset + PACKET_STRIDE);
+		}
 	});
 	return packet;
 };
@@ -278,10 +330,14 @@ const packetValue = (packet: ArrayLike<number>, index: number): number => {
 };
 
 const unpackScene = (packet: ArrayLike<number>): Scene => {
+	const posed = packet[0] === POSE_PACKET_TAG;
+	const start = Number(posed);
+	const stride = packetStride(posed);
 	if (
 		!Number.isInteger(packet.length) ||
-		packet.length % PACKET_STRIDE !== 0 ||
-		packet.length / PACKET_STRIDE > MAX_OBJECTS
+		packet.length < start ||
+		(packet.length - start) % stride !== 0 ||
+		(packet.length - start) / stride > MAX_OBJECTS
 	) {
 		invalid("invalid length");
 	}
@@ -291,13 +347,9 @@ const unpackScene = (packet: ArrayLike<number>): Scene => {
 		}
 	}
 	const scene: ReadonlySceneObject[] = [];
-	const ids = new Set<number>();
-	for (let offset = 0; offset < packet.length; offset += PACKET_STRIDE) {
+	for (let offset: number = start; offset < packet.length; offset += stride) {
 		const id = packetValue(packet, offset);
 		const kind = tagKind(packetValue(packet, offset + 1));
-		if (!validId(id)) {
-			invalid("invalid id");
-		}
 		if (kind === undefined) {
 			throw new SceneValidationError("invalid kind");
 		}
@@ -316,14 +368,18 @@ const unpackScene = (packet: ArrayLike<number>): Scene => {
 			size: packetValue(packet, offset + 5),
 			parameter: packetValue(packet, offset + 6),
 			material,
+			...(posed && {
+				rotation: [
+					packetValue(packet, offset + 8),
+					packetValue(packet, offset + 9),
+					packetValue(packet, offset + 10),
+					packetValue(packet, offset + 11),
+				] as const,
+			}),
 		});
-		validateObject(object);
-		if (ids.has(id)) {
-			invalid("duplicate");
-		}
-		ids.add(id);
 		scene.push(object);
 	}
+	validateScene(scene);
 	return Object.freeze(scene);
 };
 
@@ -338,7 +394,8 @@ const updateObject = (scene: Scene, id: number, patch: ScenePatch): Scene => {
 			key !== "position" &&
 			key !== "size" &&
 			key !== "parameter" &&
-			key !== "material"
+			key !== "material" &&
+			key !== "rotation"
 		) {
 			invalid("invalid patch");
 		}
@@ -350,6 +407,7 @@ const updateObject = (scene: Scene, id: number, patch: ScenePatch): Scene => {
 		size: patch.size ?? current.size,
 		parameter: patch.parameter ?? current.parameter,
 		material: patch.material ?? current.material ?? "steel",
+		...rotationFields(patch.rotation ?? current.rotation),
 	});
 	validateObject(changed);
 	return Object.freeze(
@@ -374,6 +432,8 @@ export {
 	MIN_POSITION,
 	MIN_SIZE,
 	PACKET_STRIDE,
+	POSE_PACKET_TAG,
+	POSE_STRIDE,
 	SceneValidationError,
 	isSceneKind,
 	tagKind,

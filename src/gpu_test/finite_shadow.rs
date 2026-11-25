@@ -13,10 +13,19 @@ fn brick_carrier_shadow_skips_only_its_provably_outgoing_ray()
     let source =
         Object::new(7, Kind::FinitePlane, [0.0; 3], 1.0, 0.0)?.with_material(Material::Brick);
     let blocker = Object::new(8, Kind::FinitePlane, [0.5, 0.0, 0.125], 0.25, 1.0)?;
+    let half = std::f64::consts::FRAC_1_SQRT_2;
+    let rotation = [0.0, half, 0.0, half];
+    let posed =
+        Object::new(8, Kind::FinitePlane, [0.5, 0.0, 0.0], 0.25, 0.0)?.with_rotation(rotation)?;
     for (scene, light, blocked) in [
         (vec![source], [1.0, 1e-30, 1e-30], false),
         (vec![source], [0.0, 0.0, -1.0], true),
         (vec![source, blocker], [1.0, 0.0, 0.25], true),
+        (
+            vec![source.with_rotation(rotation)?, posed],
+            [1.0, 0.0, 0.0],
+            true,
+        ),
     ] {
         let packet = pack(&scene, &[])?;
         let slot = packet

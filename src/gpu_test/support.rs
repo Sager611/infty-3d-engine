@@ -94,12 +94,16 @@ fn material_tiles(
             | "verify_leaf_material"
             | "verify_material_hit"
             | "verify_material_color"
+            | "verify_instance_pose"
     ) {
         return Ok(None);
     }
     let mut tiles = crate::material::gpu::Tiles::empty(device);
     assert!(!tiles.ready());
-    let leaf = matches!(entry, "verify_leaf_material" | "verify_material_color");
+    let leaf = matches!(
+        entry,
+        "verify_leaf_material" | "verify_material_color" | "verify_instance_pose"
+    );
     assert!(tiles.ensure(device, queue, leaf)?);
     assert!(!tiles.ensure(device, queue, leaf)?);
     tiles.update(queue, [0.0; 3], leaf)?;

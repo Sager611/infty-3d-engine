@@ -2,7 +2,11 @@ use std::fmt;
 
 pub const MAX_OBJECTS: usize = 65_536;
 pub const OBJECT_STRIDE: usize = 8;
+const POSE_STRIDE: usize = 12;
+const POSE_TAG: f64 = -1.0;
 
+#[cfg(test)]
+use super::rotation::Rotation;
 use super::transform::Transform;
 use crate::geometry::Geometry;
 pub use crate::geometry::Kind;
@@ -43,6 +47,10 @@ impl Object {
     pub const fn with_material(mut self, material: Material) -> Self {
         self.material = material;
         self
+    }
+    pub fn with_rotation(mut self, rotation: [f64; 4]) -> Result<Self, SceneError> {
+        self.transform = self.transform.with_rotation(rotation)?;
+        Ok(self)
     }
     pub const fn material(self) -> Material {
         self.material
@@ -102,6 +110,7 @@ pub enum SceneError {
     InvalidKind,
     InvalidPosition,
     InvalidSize,
+    InvalidRotation,
     InvalidParameter,
     InvalidMaterial,
 }
@@ -117,6 +126,7 @@ impl fmt::Display for SceneError {
             Self::InvalidKind => "object packet contains an invalid kind",
             Self::InvalidPosition => "object position is out of bounds",
             Self::InvalidSize => "object size is out of bounds",
+            Self::InvalidRotation => "object rotation must be a finite nonzero quaternion",
             Self::InvalidParameter => "object parameter is invalid",
             Self::InvalidMaterial => "object material must be 0 (steel) or 1 (brick)",
         };
@@ -127,17 +137,20 @@ impl fmt::Display for SceneError {
 impl std::error::Error for SceneError {}
 
 pub fn parse_objects(packet: &[f64]) -> Result<Vec<Object>, SceneError> {
-    if !packet.len().is_multiple_of(OBJECT_STRIDE) {
+    let posed = packet.first() == Some(&POSE_TAG);
+    let stride = if posed { POSE_STRIDE } else { OBJECT_STRIDE };
+    let values = &packet[usize::from(posed)..];
+    if !values.len().is_multiple_of(stride) {
         return Err(SceneError::InvalidLength);
     }
-    let count = packet.len() / OBJECT_STRIDE;
+    let count = values.len() / stride;
     if count > MAX_OBJECTS {
         return Err(SceneError::TooManyObjects);
     }
 
     let mut objects = Vec::with_capacity(count);
     let mut ids = std::collections::BTreeSet::new();
-    for values in packet.chunks_exact(OBJECT_STRIDE) {
+    for values in values.chunks_exact(stride) {
         let id = values[0];
         let kind_tag = values[1];
         let position = [values[2], values[3], values[4]];
@@ -166,7 +179,10 @@ pub fn parse_objects(packet: &[f64]) -> Result<Vec<Object>, SceneError> {
         let kind = checked_u32(kind_tag)
             .and_then(Kind::from_tag)
             .ok_or(SceneError::InvalidKind)?;
-        let object = Object::new(id, kind, position, size, parameter)?.with_material(material);
+        let mut object = Object::new(id, kind, position, size, parameter)?.with_material(material);
+        if posed {
+            object = object.with_rotation([values[8], values[9], values[10], values[11]])?;
+        }
         objects.push(object);
     }
     Ok(objects)
@@ -175,7 +191,15 @@ pub fn parse_objects(packet: &[f64]) -> Result<Vec<Object>, SceneError> {
 #[cfg(test)]
 #[must_use]
 pub fn pack_objects(objects: &[Object]) -> Vec<f64> {
-    let mut packet = Vec::with_capacity(objects.len() * OBJECT_STRIDE);
+    let posed = objects
+        .iter()
+        .any(|o| o.transform().rotation() != Rotation::IDENTITY);
+    let mut packet = Vec::with_capacity(
+        usize::from(posed) + objects.len() * if posed { POSE_STRIDE } else { OBJECT_STRIDE },
+    );
+    if posed {
+        packet.push(POSE_TAG);
+    }
     for object in objects {
         packet.extend_from_slice(&[
             f64::from(object.id),
@@ -187,6 +211,9 @@ pub fn pack_objects(objects: &[Object]) -> Vec<f64> {
             object.parameter(),
             f64::from(object.material().tag()),
         ]);
+        if posed {
+            packet.extend_from_slice(&object.transform().rotation().components());
+        }
     }
     packet
 }
@@ -194,6 +221,49 @@ pub fn pack_objects(objects: &[Object]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rotated_packets_preserve_pose_queries_and_legacy_records()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let half = std::f64::consts::FRAC_1_SQRT_2;
+        let packet = [
+            -1.0, 7.0, 5.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, half, 0.0, half,
+        ];
+        let objects = parse_objects(&packet)?;
+        assert_eq!(pack_objects(&objects), packet);
+        let transform = objects[0].transform();
+        let point = transform.world_point([0.0, 0.0, 1.0]);
+        assert!((point[0] - 1.0).abs() < 1e-12 && point[1].abs() < 1e-12 && point[2].abs() < 1e-12);
+        let hit = crate::scene::query::query_object(
+            &objects[0],
+            crate::math::Ray {
+                o: [3.0, 0.3, 0.4],
+                d: [-1.0, 0.0, 0.0],
+            },
+        )?;
+        assert!(hit.sample.hit);
+        assert!((hit.sample.t - 3.0).abs() < 1e-12);
+        assert!(hit.sample.n[0] > 0.999_999);
+        let closest = transform.closest(
+            objects[0].geometry(),
+            [2.0, 0.3, 0.4],
+            crate::geometry::point::Request::default(),
+        )?;
+        assert!(closest.distance.lower <= 2.0 && closest.distance.upper >= 2.0);
+        assert!(closest.distance.upper - closest.distance.lower < 1e-10);
+        let other = Object::new(8, Kind::Sphere, [5.0, 0.0, 0.0], 0.1, 0.0)?;
+        let tree = crate::scene::spatial::Spatial::new(&[objects[0], other]);
+        assert!(
+            tree.candidates([3.0, 0.3, 0.4], [-1.0, 0.0, 0.0])
+                .contains(&0)
+        );
+        let legacy = valid_packet(1.0, 0.0);
+        assert_eq!(pack_objects(&parse_objects(&legacy)?), legacy);
+        let mut invalid = packet;
+        invalid[9..].fill(0.0);
+        assert!(parse_objects(&invalid).is_err());
+        Ok(())
+    }
 
     fn valid_packet(kind: f64, parameter: f64) -> Vec<f64> {
         vec![7.0, kind, -0.0, 2.0, -3.0, 1.0, parameter, 0.0]

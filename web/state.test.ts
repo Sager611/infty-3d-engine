@@ -12,9 +12,21 @@ import {
 	serializeSnapshot,
 	type Snapshot,
 } from "./state";
-import { DEFAULT_SCENE } from "./scene";
+import { DEFAULT_SCENE, updateObject } from "./scene";
 
 describe("snapshot codec", () => {
+	test("versioned rotation URLs preserve pose and keep unrotated URLs unchanged", () => {
+		const objects = updateObject(DEFAULT_SCENE, 1, {
+			rotation: [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+		});
+		const snapshot = { ...DEFAULT_SNAPSHOT, objects };
+		const hash = serializeSnapshot(snapshot);
+		expect(hash.startsWith("#s=2;")).toBe(true);
+		expect(parseSnapshot(hash)).toEqual(snapshot);
+		expect(serializeSnapshot(parseSnapshot(hash))).toBe(hash);
+		expect(serializeSnapshot(DEFAULT_SNAPSHOT).startsWith("#s=1;")).toBe(true);
+		expect(() => parseSnapshot(hash.replace("#s=2;", "#s=1;"))).toThrow();
+	});
 	test("defaults and round trips", () => {
 		expect(parseSnapshot("")).toEqual(DEFAULT_SNAPSHOT);
 		const snapshot: Snapshot = {

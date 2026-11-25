@@ -1,5 +1,18 @@
 // Canonical scene adapters; finite instance XYZ/unused uniform W retain low origin parts.
-struct SceneObject {identity:vec4u,position_size:vec4f,params:vec4f};
+struct SceneObject {identity:vec4u,position_size:vec4f,params:vec4f,rotation:vec4f};
+const POSE_IDENTITY=vec4f(0.0,0.0,0.0,1.0);
+fn scene_rotate(rotation:vec4f,point:vec3f)->vec3f {
+  if(all(rotation==POSE_IDENTITY)){return point;}
+  let crossed=cross(rotation.xyz,point);
+  return point+(2.0/dot(rotation,rotation))*(rotation.w*crossed+cross(rotation.xyz,crossed));
+}
+fn scene_world_vector(object:SceneObject,point:vec3f)->vec3f {return scene_rotate(object.rotation,point);}
+fn scene_local_vector(object:SceneObject,point:vec3f)->vec3f {return scene_rotate(vec4f(-object.rotation.xyz,object.rotation.w),point);}
+fn scene_origin_delta(o:vec3f,low:vec3f,object:SceneObject)->vec3f {
+  var delta=o-object.position_size.xyz;
+  if(object.identity.y==5u){delta+=low-object.params.xyz;}
+  return delta;
+}
 struct SceneSample {
   query:Query,local:vec3f,id:u32,kind:u32,gap_lower:f32,error:f32,status:u32,
   pending:Pending,local_error:f32,base_hit:bool,
@@ -10,11 +23,8 @@ fn scene_object(o:vec3f,d:vec3f,object:SceneObject)->SceneSample {
   return scene_object_precise(o,vec3f(0.0),d,object);
 }
 fn scene_object_precise(o:vec3f,low:vec3f,d:vec3f,object:SceneObject)->SceneSample {
-  var local=(o-object.position_size.xyz)/object.position_size.w;
-  if(object.identity.y==5u){
-    local=((o-object.position_size.xyz)+(low-object.params.xyz))/object.position_size.w;
-  }
-  return scene_canonical(local,d,object);
+  let local=scene_local_vector(object,scene_origin_delta(o,low,object)/object.position_size.w);
+  return scene_canonical(local,scene_local_vector(object,d),object);
 }
 fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
   let id=obj.identity.x;let kind=obj.identity.y;let position=obj.position_size.xyz;let size=obj.position_size.w;
@@ -39,15 +49,17 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
     query=texh(local_o,d,query,gap_lower,kind==5u);
     if(query.hit){gap_lower=0.0;}
   }
-  query.p=position+size*query.p;query.t*=size;query.gap*=size;gap_lower*=size;error*=size;
+  query.p=position+size*scene_world_vector(obj,query.p);query.n=scene_world_vector(obj,query.n);
+  query.t*=size;query.gap*=size;gap_lower*=size;error*=size;
   if(pending.valid){
     let bound=fi_scale(fi_exact(pending.lower),size);
     pending.lower=select(0.0,max(0.0,bound.v.x),bound.valid);
   }
   if(kind==5u){
     query.p+=obj.params.xyz;
-    let magnitude=abs(position)+abs(size*local)+abs(obj.params.xyz);
-    let transform_error=8.0*FI_U*max(1.0,max(magnitude.x,max(magnitude.y,magnitude.z)));
+    let magnitude=abs(position)+vec3f(size*length(local))+abs(obj.params.xyz);
+    let operations=select(32.0,8.0,all(obj.rotation==POSE_IDENTITY));
+    let transform_error=operations*FI_U*max(1.0,max(magnitude.x,max(magnitude.y,magnitude.z)));
     error+=transform_error;
     if(pending.valid){pending.lower=max(0.0,fi_down(pending.lower-transform_error));}
     if(status<2u&&!query.hit){

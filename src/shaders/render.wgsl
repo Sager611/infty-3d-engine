@@ -44,7 +44,7 @@ fn resolved_object(index: u32) -> SceneObject {
 
 fn outline_eligible(sample: SceneSample, selected: bool, thickness: f32) -> bool {
   return selected && (sample.kind == 1u || sample.kind == 2u || sample.kind == 4u || sample.kind==5u) &&
-    !sample.query.hit && sample.status<2u && sample.query.gap < thickness;
+    !sample.base_hit && !sample.query.hit && sample.status<2u && sample.query.gap < thickness;
 }
 
 @compute @workgroup_size(8, 8)
@@ -71,7 +71,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   var nearest = empty_sample();
   var nearest_hit = false;
   var nearest_t=0.0;
-  var nearest_object=SceneObject(vec4u(0u),vec4f(0.0),vec4f(0.0));
+  var nearest_object=SceneObject(vec4u(0u),vec4f(0.0),vec4f(0.0),POSE_IDENTITY);
   var pending=Pending(0.0,false);
   var nearest_size = 1.0;
   var nearest_carrier = empty_sample();
@@ -99,7 +99,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
 
       let carrier = scene_object_precise(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w), direction, object);
       var sample=carrier;
-      if(material_view||object.params.w==2.0){sample=material_texh(carrier,direction,object,vec3f(0.0),pixel_span);}
+      if(material_view||object.params.w==2.0){sample=material_texh(carrier,direction,object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),object),pixel_span);}
       pending=pending_min(pending,sample.pending);
       if (sample.query.hit && (!nearest_hit || sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
         nearest = sample;
@@ -136,12 +136,14 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     let visibility=scene_shadow(nearest_carrier,nearest_object,normal,light,count);
     let shadow=shadow_value(visibility);shadow_unknown=visibility.uncertain;
     if (material_view) {
-      let material=texh_surface(nearest,nearest_carrier,direction,nearest_object,vec3f(0.0),pixel_span);
+      let material=texh_surface(nearest,nearest_carrier,direction,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object),pixel_span);
       color=material_shade(material,nearest.query.p,direction,light,shadow);
     } else {
-      color = surface_shade(nearest.query, nearest.local, nearest.kind,
-        direction, height, nearest_size,
-        frame_params.screen.z, light, shadow);
+      var local_query=nearest.query;
+      local_query.p=nearest.local*nearest_size;local_query.n=scene_local_vector(nearest_object,nearest.query.n);
+      color = surface_shade(local_query, nearest.local, nearest.kind,
+        scene_local_vector(nearest_object,direction), height, nearest_size,
+        frame_params.screen.z, scene_local_vector(nearest_object,scene_origin_delta(light,vec3f(0.0),nearest_object)), shadow);
     }
   }
 

@@ -1,11 +1,83 @@
-use super::support::run;
+use super::support::{run, run_scene};
 use crate::{
     math::Ray,
     scene::{
         model::{Kind, Object},
+        packed::pack,
         query::query_object,
     },
 };
+
+#[test]
+fn posed_materials_keep_local_depth_uv_color_and_world_normals()
+-> Result<(), Box<dyn std::error::Error>> {
+    let half = std::f64::consts::FRAC_1_SQRT_2;
+    let first = Object::new(7, Kind::FinitePlane, [0.5, 1.0, 0.25], 1.0, 0.0)?
+        .with_material(crate::material::Material::Brick);
+    let second = Object::new(8, Kind::FinitePlane, [0.5, 1.0, 0.25], 1.0, 0.0)?
+        .with_material(crate::material::Material::Brick)
+        .with_rotation([0.0, half, 0.0, half])?;
+    let packet = pack(&[first, second], &[])?;
+    let slot = |id| -> Result<f32, Box<dyn std::error::Error>> {
+        Ok(f32::from(u16::try_from(
+            packet
+                .records
+                .iter()
+                .position(|r| r.identity[0] == id)
+                .ok_or("missing instance")?,
+        )?))
+    };
+    let inputs = [
+        [0.625, 1.0625, 3.25, slot(7)?, 0.0, 0.0, -1.0, 0.0],
+        [3.5, 1.0625, 0.125, slot(8)?, -1.0, 0.0, 0.0, 0.0],
+        [2.875, 1.0625, 3.25, slot(7)?, -0.6, 0.0, -0.8, 0.0],
+        [3.475, 1.0625, 4.05, slot(7)?, -0.6, 0.0, -0.8, 0.0],
+    ];
+    let q = run_scene("verify_instance_pose", &inputs, &packet.records)?;
+    for row in q.chunks_exact(16) {
+        assert!(
+            row.iter().all(|v| v.is_finite()) && row[0] > 0.5 && row[2] > 0.5,
+            "{row:?}"
+        );
+    }
+    for index in [1, 3, 8, 9, 12, 13, 14] {
+        assert!(
+            (q[index] - q[16 + index]).abs() < 0.002,
+            "pose frame mismatch {index}: {q:?}"
+        );
+    }
+    assert!(
+        (q[4] + q[22]).abs() < 0.002
+            && (q[5] - q[21]).abs() < 0.002
+            && (q[6] - q[20]).abs() < 0.002,
+        "world normal: {q:?}"
+    );
+    for index in [8, 9, 12, 13, 14] {
+        assert!(
+            (q[32 + index] - q[48 + index]).abs() < 0.002,
+            "camera moved material frame {index}: {q:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn leaf_cutout_is_not_a_solid_selection_carrier() -> Result<(), Box<dyn std::error::Error>> {
+    let object = Object::new(7, Kind::FinitePlane, [0.0; 3], 1.0, 0.0)?
+        .with_material(crate::material::Material::Leaf);
+    let packet = pack(&[object], &[7])?;
+    let q = run_scene(
+        "verify_instance_pose",
+        &[[0.99, 0.99, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0]],
+        &packet.records,
+    )?;
+    assert!(q[0] < 0.5 && q[2] < 0.5, "cutout became covered: {q:?}");
+    assert!(
+        q[7] < 0.5,
+        "transparent carrier filled by selection outline: {q:?}"
+    );
+    Ok(())
+}
 
 #[test]
 fn transformed_scene_packets_match_cpu() -> Result<(), Box<dyn std::error::Error>> {

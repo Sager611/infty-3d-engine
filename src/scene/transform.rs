@@ -1,5 +1,5 @@
-//! Translation and positive uniform scale; one instance adapter for every kernel.
-use super::model::SceneError;
+//! Rigid pose and positive uniform scale; bounded point/error adapter for every kernel.
+use super::{model::SceneError, rotation::Rotation};
 use crate::diagnostic::{Recorder, Tag};
 use crate::geometry::{
     Error, Geometry, checked,
@@ -18,12 +18,14 @@ use crate::math::{
 pub struct Transform {
     position: [f64; 3],
     scale: f64,
+    rotation: Rotation,
 }
 
 impl Transform {
     pub const IDENTITY: Self = Self {
         position: [0.0; 3],
         scale: 1.0,
+        rotation: Rotation::IDENTITY,
     };
     pub fn new(position: [f64; 3], scale: f64) -> Result<Self, SceneError> {
         if position.iter().any(|x| !x.is_finite()) {
@@ -41,7 +43,15 @@ impl Transform {
         Ok(Self {
             position: position.map(|x| if x == 0.0 { 0.0 } else { x }),
             scale,
+            rotation: Rotation::IDENTITY,
         })
+    }
+    pub fn with_rotation(mut self, rotation: [f64; 4]) -> Result<Self, SceneError> {
+        self.rotation = Rotation::new(rotation)?;
+        Ok(self)
+    }
+    pub const fn rotation(self) -> Rotation {
+        self.rotation
     }
     pub const fn position(self) -> [f64; 3] {
         self.position
@@ -50,9 +60,13 @@ impl Transform {
         self.scale
     }
     pub fn local_point(self, point: [f64; 3]) -> [f64; 3] {
+        self.rotation.inverse().apply(self.centered_point(point))
+    }
+    fn centered_point(self, point: [f64; 3]) -> [f64; 3] {
         std::array::from_fn(|axis| (point[axis] - self.position[axis]) / self.scale)
     }
     pub fn world_point(self, point: [f64; 3]) -> [f64; 3] {
+        let point = self.rotation.apply(point);
         std::array::from_fn(|axis| self.scale.mul_add(point[axis], self.position[axis]))
     }
     pub fn closest(
@@ -91,9 +105,10 @@ impl Transform {
         if self == Self::IDENTITY {
             return geometry.closest_traced(point, request, trace);
         }
-        let local = self.local_point(point);
+        let centered = self.centered_point(point);
+        let local = self.rotation.inverse().apply(centered);
         for i in 0..3 {
-            if !local[i].is_finite() || (local[i] == 0.0 && point[i] - self.position[i] != 0.0) {
+            if !local[i].is_finite() || (centered[i] == 0.0 && point[i] - self.position[i] != 0.0) {
                 return Err(Error::Numeric);
             }
         }
@@ -130,10 +145,10 @@ impl Transform {
         let [x, y, z] = std::array::from_fn(|i| {
             I::point(point[i])?
                 .sub(I::point(self.position[i])?)?
-                .divide(self.scale)?
-                .sub(I::point(local[i])?)
-                .map(I::abs)
+                .divide(self.scale)
         });
+        let bounded = self.rotation.inverse().bounds([x?, y?, z?])?;
+        let [x, y, z] = std::array::from_fn(|i| bounded[i].sub(I::point(local[i])?).map(I::abs));
         Ok(norm([x?, y?, z?])?.hi())
     }
     fn world_witness(
@@ -141,8 +156,10 @@ impl Transform {
         witness: crate::geometry::point::Witness,
     ) -> Result<crate::geometry::point::Witness, Error> {
         let point = self.world_point(witness.point);
+        let [x, y, z] = witness.point.map(I::point);
+        let bounded = self.rotation.bounds([x?, y?, z?])?;
         let [x, y, z] = std::array::from_fn(|i| {
-            I::point(witness.point[i])?
+            bounded[i]
                 .scale(self.scale)?
                 .add(I::point(self.position[i])?)?
                 .sub(I::point(point[i])?)
@@ -158,7 +175,7 @@ impl Transform {
     pub fn local_ray(self, ray: Ray) -> Ray {
         Ray {
             o: self.local_point(ray.o),
-            d: ray.d,
+            d: self.rotation.inverse().apply(ray.d),
         }
     }
     pub fn world_query(self, result: GoursatSample) -> Result<GoursatSample, Error> {
@@ -173,7 +190,7 @@ impl Transform {
                     sample.gap * self.scale
                 },
                 p: self.world_point(sample.p),
-                n: sample.n,
+                n: self.rotation.apply(sample.n),
                 uv: sample.uv,
             },
             gap_lower: if sample.hit {
