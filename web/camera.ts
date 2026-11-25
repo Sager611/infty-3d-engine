@@ -10,6 +10,7 @@ type Movement = Readonly<{
 	forward: number;
 	side: number;
 	onlyForward: boolean;
+	boost?: boolean;
 }>;
 const STOPPED: Movement = Object.freeze({
 	forward: 0,
@@ -19,7 +20,7 @@ const STOPPED: Movement = Object.freeze({
 const MIN_SPEED = 0.000_001;
 const MAX_SPEED = 100;
 const MAX_STEP = 0.05;
-const APPROACH_RANGE = 1;
+const APPROACH_RANGE = 0.25;
 const POINTER_SCALE = 0.008;
 const FOCAL_LENGTH = 1.8;
 const FRAME_MARGIN = 1.1;
@@ -214,7 +215,11 @@ function moveCamera(
 	if (length === 0 || seconds === 0) {
 		return camera;
 	}
-	const distance = (speed * Math.min(seconds, MAX_STEP)) / length;
+	const distance =
+		(speed *
+			(1 + Number(movement.boost === true)) *
+			Math.min(seconds, MAX_STEP)) /
+		length;
 	return normalizeCamera({
 		...camera,
 		target: [
@@ -294,7 +299,11 @@ function stepSpeed(
 	if (distance < 0) {
 		invalid("negative center hit distance");
 	}
-	return approachSpeed(speed, distance, Math.min(seconds, MAX_STEP));
+	return approachSpeed(
+		speed,
+		distance,
+		Math.min(seconds, MAX_STEP) * (1 + Number(movement.boost === true)),
+	);
 }
 function travelSpeed(speed: number, amount: number): number {
 	finite(speed, "travel speed");

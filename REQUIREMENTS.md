@@ -4,18 +4,19 @@
 - Extensible geometry; no ray marching.
 - Three intersecting ridged cones with genuine multiscale geometry, CPU/GPU queries and web creation. New cluster kernels use fixed direct analytic work: no iteration, recursion or traversal.
 - Materials view with selectable brushed steel and red brickwork/mortar. Each begins with four repeating512×512 albedo/relief levels,10× apart; finer levels reveal grooves, pores and mineral grains, not miniature bricks. Support additional coarser/finer scales; visually check sphere, plane and Goursat up close through microscopic distances. Ground appearance in inspected references; preserve carrier geometry, picking and navigation.
-- Intuitive web controls to add and delete geometry instances.
+- Intuitive add/delete controls. XYZ positions use numeric0.001 increments (10× finer), direct typing and wheel nudging.
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
-- Free-camera WASD movement and drag look; wheel changes travel speed. Only straight W approaches to nearby center-ray hits ease down to a minimum speed; reverse, strafe and diagonal movement retain normal speed. Minimum travel speed and the approach floor are0.000001 units/s for close inspection.
+- Free-camera WASD and drag look; wheel sets travel speed, held Shift temporarily doubles translation. Straight W eases within0.25 units (4× previous approach gain); reverse/strafe/diagonals keep base speed. Minimum speed/approach floor0.000001 units/s.
 - Base ray queries always return a gap and matching surface witness with UV/normal; preserve explicit uncertainty and independent point queries.
-- Texh rendered hits: one shared, geometry-independent direct calculation. NO LOOPS or recursion; always prefer fast approximation over accurate displacement. No root search, traversal, ray marching or fitted geometry. Sample carrier height once for depth; update UV/RGB and finite-difference normals with a frozen carrier footprint/frame. Bound grazing offsets. No exact first-crossing or displaced-silhouette guarantee.
+- Texh rendered hits: one shared, geometry-independent direct calculation. NO LOOPS or recursion; always prefer fast approximation over accurate displacement. No root search, traversal, ray marching or fitted geometry. Sample carrier height once for depth; update UV/RGB and texel-smooth per-level normals at shifted coordinates with a frozen carrier footprint/frame. Bound grazing offsets. No exact first-crossing or displaced-silhouette guarantee.
 - Preserve carrier queries/picking, independent point queries and the existing miss rule: one bilinear height sample at the witness accepts signed height reaching the gap. No new gap solver.
-- Scene → Leaf · relief and Red brick · relief: share texh, preserve matching source assets, cutouts, all four height bands and carrier cast-shadow behavior. Both localhost previews target60 warm FPS at1265×791; report measured limits.
+- Scene → Leaf · relief and Red brick · relief: share texh, preserve matching source assets, cutouts, all four height bands and carrier cast-shadow behavior. Brick fine height gains are8× stronger; mortar and Leaf depth stay unchanged. Both localhost previews target60 warm FPS at1265×791; report measured limits.
 
 ## Changelog
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-25 | User | Require Shift boost, faster approach, stronger pores, smooth normals and precise wheelable positions | Improve close inspection and editing |
 | 2026-11-24 | User | Require shared direct, loop-free/nonrecursive displacement; speed over accuracy | Replace iterative search without changing carrier queries, gaps or assets |
 | 2026-11-08 | Assistant | Recorded the complete two-item requirements | Keep project scope explicit |
 | 2026-11-08 | User | Required intuitive add/delete controls | Create and remove instances in the visualization |

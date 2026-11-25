@@ -16,6 +16,7 @@ type Fields = Readonly<{
 	ctrlKey?: boolean;
 	altKey?: boolean;
 	metaKey?: boolean;
+	shiftKey?: boolean;
 }>;
 class Key extends Event {
 	readonly key: string;
@@ -161,6 +162,29 @@ test("blur, hidden pages, editable focus, menus and cleanup release held keys", 
 	expect(f.state.moves.length).toBe(count);
 });
 
+test("Shift release cannot restart movement while hidden, blocked or editing", () => {
+	for (const guard of ["hidden", "blocked"] as const) {
+		const f = fixture();
+		send(f, "w");
+		send(f, "Shift", { shiftKey: true });
+		f.state[guard] = true;
+		send(f, "Shift", { type: "keyup", shiftKey: false });
+		expect(f.state.moves.at(-1)?.forward).toBe(0);
+		expect(f.state.moves.at(-1)?.boost).not.toBe(true);
+		f.state[guard] = false;
+		send(f, "w", { repeat: true });
+		expect(f.state.moves.at(-1)?.forward).toBe(0);
+		f.controller.dispose();
+	}
+	const f = fixture();
+	send(f, "w");
+	send(f, "Shift", { shiftKey: true });
+	const focus = Object.assign(new EventTarget(), { tagName: "INPUT" });
+	send(f, "Shift", { type: "keyup", focus });
+	expect(f.state.moves.at(-1)?.forward).toBe(0);
+	f.controller.dispose();
+});
+
 test("modifiers preserve browser shortcuts; look, speed, reset and frame stay guarded", () => {
 	const f = fixture();
 	for (const fields of [
@@ -187,6 +211,46 @@ test("modifiers preserve browser shortcuts; look, speed, reset and frame stay gu
 	expect(f.state.resets).toBe(1);
 	expect(f.state.frames).toBe(1);
 	expect(f.state.moves.at(-1)?.forward).toBe(0);
+	f.controller.dispose();
+});
+
+test("held Shift doubles movement temporarily, including mid-move and both Shift keys", () => {
+	const f = fixture();
+	send(f, "w");
+	send(f, "Shift", { shiftKey: true });
+	expect(f.state.moves.at(-1)).toEqual({
+		forward: 1,
+		side: 0,
+		onlyForward: true,
+		boost: true,
+	});
+	const count = f.state.moves.length;
+	send(f, "Shift", { shiftKey: true, repeat: true });
+	expect(f.state.moves).toHaveLength(count);
+	send(f, "Shift", { type: "keyup", shiftKey: true });
+	expect(f.state.moves).toHaveLength(count);
+	send(f, "Shift", { type: "keyup", shiftKey: false });
+	expect(f.state.moves.at(-1)).toEqual({
+		forward: 1,
+		side: 0,
+		onlyForward: true,
+	});
+	send(f, "d", { shiftKey: true });
+	expect(f.state.moves.at(-1)).toEqual({
+		forward: 1,
+		side: 1,
+		onlyForward: false,
+		boost: true,
+	});
+	f.keyboard.dispatchEvent(new Event("blur"));
+	expect(f.state.moves.at(-1)?.forward).toBe(0);
+	expect(f.state.moves.at(-1)?.boost).not.toBe(true);
+	send(f, "w", { repeat: true, shiftKey: true });
+	expect(f.state.moves.at(-1)?.forward).toBe(0);
+	send(f, "w");
+	expect(f.state.moves.at(-1)?.boost).not.toBe(true);
+	expect(f.state.speeds).toHaveLength(0);
+	expect(f.state.errors).toHaveLength(0);
 	f.controller.dispose();
 });
 

@@ -54,7 +54,7 @@ pub fn presets_with_leaf(leaf: bool) -> Vec<Level> {
         .flat_map(|material| {
             let relief = match material {
                 Material::Steel => [0.000_05, 0.000_01, 0.000_002, 0.000_000_4],
-                Material::Brick => [0.006, 0.000_8, 0.000_08, 0.000_006],
+                Material::Brick => [0.006, 0.006_4, 0.000_64, 0.000_048],
                 Material::Leaf => [
                     0.002_187_5,
                     0.000_068_359_375,

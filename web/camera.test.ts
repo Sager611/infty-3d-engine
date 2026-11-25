@@ -13,6 +13,7 @@ import {
 	MIN_SPEED,
 	moveCamera,
 	STOPPED,
+	stepSpeed,
 	travelSpeed,
 	type Movement,
 } from "./camera";
@@ -152,6 +153,30 @@ describe("free camera", () => {
 			moveCamera(front, movement(1, 0), 4, 0.05).target,
 		);
 	});
+});
+
+test("Shift doubles every direction and eased/floor speed without changing the camera contract", () => {
+	for (const input of [
+		movement(1, 0),
+		movement(-1, 0),
+		movement(0, 1),
+		movement(1, 1),
+	]) {
+		for (const gap of [null, 0, 0.2]) {
+			const speed = stepSpeed(input, 4, 0.025, () => gap);
+			const normal = moveCamera(front, input, speed, 0.025);
+			const boosted = { ...input, boost: true };
+			const fast = moveCamera(front, boosted, speed, 0.025);
+			closePosition(
+				fast.target,
+				normal.target.map((value) => 2 * value),
+			);
+			expect(fast.distance).toBe(front.distance);
+			expect(fast.yaw).toBe(front.yaw);
+			expect(moveCamera(front, input, speed, 0.025)).toEqual(normal);
+		}
+	}
+	expect(moveCamera(front, { ...STOPPED, boost: true }, 4, 0.05)).toBe(front);
 });
 
 test("absolute drag preserves translation occurring between pointer events", () => {

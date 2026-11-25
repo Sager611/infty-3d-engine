@@ -122,6 +122,24 @@ fn texh_shares_shifted_uv_rgb_and_normals_without_geometry_switches() -> TestRes
 }
 
 #[test]
+fn displaced_leaf_normals_blend_across_bilinear_texel_boundaries() -> TestResult {
+    let bytes = data([128, 255, 128, 255], [255; 4]);
+    let field = Field::new(&bytes, 2, [255.0 / 1024.0, 0.0, 0.0, 0.0], [0.0; 2])?;
+    let rays = [
+        [-1.0 / 1024.0, 0.0, 0.3, 2.0, 0.0, 0.0, -1.0, 5.0],
+        [1.0 / 1024.0, 0.0, 0.3, 2.0, 0.0, 0.0, -1.0, 5.0],
+    ];
+    let q = run_field("verify_material_hit", &rays, 32, field)?;
+    assert!(q[0] > 0.5 && q[16] > 0.5, "{q:?}");
+    assert!(
+        q[12] < -0.02 && q[28] < -0.02,
+        "lost interpolated slope: {q:?}"
+    );
+    let jump = (q[12] - q[28]).hypot(q[13] - q[29]).hypot(q[14] - q[30]);
+    assert!(jump < 0.001, "faceted normal jump: {jump}; {q:?}");
+    Ok(())
+}
+#[test]
 fn direct_texh_preserves_zero_and_constant_height_on_distinct_carriers() -> TestResult {
     let rays = [
         [0.0, 0.0, 2.0, 2.0, 0.0, 0.0, -1.0, 1.0],

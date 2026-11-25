@@ -15,9 +15,9 @@ if (sphere === undefined || goursat === undefined || plane === undefined) {
 describe("property controls", () => {
 	test("maps common and shape-specific fields from descriptors", () => {
 		expect(fieldsForObject(sphere)).toEqual([
-			{ key: "x", label: "X", value: -1.65, min: -20, max: 20, step: 0.01 },
-			{ key: "y", label: "Y", value: 1, min: -20, max: 20, step: 0.01 },
-			{ key: "z", label: "Z", value: 0, min: -20, max: 20, step: 0.01 },
+			{ key: "x", label: "X", value: -1.65, min: -20, max: 20, step: 0.001 },
+			{ key: "y", label: "Y", value: 1, min: -20, max: 20, step: 0.001 },
+			{ key: "z", label: "Z", value: 0, min: -20, max: 20, step: 0.001 },
 			{ key: "size", label: "Radius", value: 1, min: 0.01, max: 4, step: 0.01 },
 		]);
 		expect(fieldsForObject(goursat)).toContainEqual({

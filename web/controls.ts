@@ -13,6 +13,7 @@ import {
 } from "./scene.ts";
 
 const CONTROL_STEP = 0.01;
+const POSITION_STEP: number = CONTROL_STEP / 10;
 
 type ControlKey = "x" | "y" | "z" | "size" | "parameter" | "material";
 
@@ -107,13 +108,16 @@ const positionValue = (
 const fieldsForObject = (object: SceneObject): readonly ControlField[] => {
 	const descriptor = DESCRIPTORS[object.kind];
 	const fields: ControlField[] = positionKeys.map((key) =>
-		field({
-			key,
-			label: key.toUpperCase(),
-			value: positionValue(object, key),
-			min: MIN_POSITION,
-			max: MAX_POSITION,
-		}),
+		field(
+			{
+				key,
+				label: key.toUpperCase(),
+				value: positionValue(object, key),
+				min: MIN_POSITION,
+				max: MAX_POSITION,
+			},
+			POSITION_STEP,
+		),
 	);
 	let sizeLabel = "Size";
 	if (object.kind === "sphere") {
@@ -249,7 +253,12 @@ const updateFieldValues = (
 	for (const controlField of fieldsForObject(object)) {
 		const input = form.elements.namedItem(controlField.key);
 		if (input instanceof HTMLInputElement) {
-			input.value = String(controlField.value);
+			if (
+				input.type !== "number" ||
+				Number(input.value) !== controlField.value
+			) {
+				input.value = String(controlField.value);
+			}
 			const output = form.querySelector<HTMLOutputElement>(
 				`[data-control-value="${controlField.key}"]`,
 			);
@@ -299,11 +308,16 @@ const createPropertyForm = (object: SceneObject): HTMLFormElement => {
 		output.value = String(controlField.value);
 		output.textContent = String(controlField.value);
 		output.title = String(controlField.value);
-		label.append(" ", output);
+		if (positionIndex(controlField.key) < 0) {
+			label.append(" ", output);
+		}
 		const input = document.createElement("input");
 		input.id = inputId;
 		input.name = controlField.key;
 		input.type = "range";
+		if (positionIndex(controlField.key) >= 0) {
+			input.type = "number";
+		}
 		input.min = String(controlField.min);
 		input.max = String(controlField.max);
 		input.step = String(controlField.step);
@@ -411,6 +425,67 @@ const controlKey = (key: string | undefined): ControlKey | undefined => {
 	return;
 };
 
+const applyProperty = (
+	event: Event,
+	state: ControlsState,
+	onEvent: ControlsEventHandler,
+): void => {
+	const target = event.target;
+	if (
+		!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)
+	) {
+		return;
+	}
+	if (state.selection.active === null) {
+		return;
+	}
+	const key = controlKey(target.dataset.controlKey);
+	if (key === undefined) {
+		return;
+	}
+	const value = Number(target.value);
+	if (target.value.trim() === "" || !Number.isFinite(value)) {
+		return;
+	}
+	onEvent(
+		{
+			kind: "property",
+			id: state.selection.active,
+			key,
+			value,
+		},
+		state,
+	);
+};
+
+const stepPositionWheel = (event: Event): boolean => {
+	const target = event.target;
+	if (
+		!(target instanceof HTMLInputElement) ||
+		target.type !== "number" ||
+		positionIndex(target.dataset.controlKey ?? "") < 0 ||
+		target.value.trim() === "" ||
+		!Number.isFinite(Number(target.value)) ||
+		!("deltaY" in event) ||
+		typeof event.deltaY !== "number" ||
+		!Number.isFinite(event.deltaY) ||
+		event.deltaY === 0 ||
+		("ctrlKey" in event && event.ctrlKey === true) ||
+		("metaKey" in event && event.metaKey === true) ||
+		("altKey" in event && event.altKey === true)
+	) {
+		return false;
+	}
+	event.preventDefault();
+	const previous = target.value;
+	if (event.deltaY < 0) {
+		target.stepUp();
+	} else {
+		target.stepDown();
+	}
+	return target.value !== previous;
+};
+
 const listenControls = (
 	nodes: Readonly<{
 		objectSelect: EventTarget & { readonly value: string };
@@ -441,39 +516,20 @@ const listenControls = (
 		);
 	};
 	const property = (event: Event): void => {
-		const target = event.target;
-		if (
-			!(
-				target instanceof HTMLInputElement ||
-				target instanceof HTMLSelectElement
-			)
-		) {
-			return;
-		}
-		const state = getState();
-		if (state.selection.active === null) {
-			return;
-		}
-		const key = controlKey(target.dataset.controlKey);
-		if (key === undefined) {
-			return;
-		}
-		const value = Number(target.value);
-		onEvent(
-			{
-				kind: "property",
-				id: state.selection.active,
-				key,
-				value,
-			},
-			state,
-		);
+		applyProperty(event, getState(), onEvent);
 	};
+	const wheel = (event: Event): void => {
+		if (getState().selection.active !== null && stepPositionWheel(event)) {
+			property(event);
+		}
+	};
+	nodes.properties.addEventListener("wheel", wheel, { passive: false });
 	nodes.properties.addEventListener("submit", submit);
 	nodes.objectSelect.addEventListener("change", select);
 	nodes.pickAll.addEventListener("click", pickAll);
 	nodes.properties.addEventListener("input", property);
 	return (): void => {
+		nodes.properties.removeEventListener("wheel", wheel);
 		nodes.properties.removeEventListener("submit", submit);
 		nodes.objectSelect.removeEventListener("change", select);
 		nodes.pickAll.removeEventListener("click", pickAll);

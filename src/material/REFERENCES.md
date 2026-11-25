@@ -14,12 +14,13 @@ Assets are zlib-compressed, row-major512×512 RGBA8: linear RGB then normalized 
 
 Initial tile extents420/42/4.2/0.42mm remain10× apart; finest texels are0.82µm. Coarse layers depict courses/manufacturing variation; fine layers depict porous clay/minerals or abrasion, never tiny bricks. Subpixel structure belongs in filtered roughness, not aliased lines. Mirrored stochastic sampling preserves brush direction, bond and camera phase; packed identity repeats after256 tiles. Directional diffuse fill and anisotropic studio lobes are artistic lighting approximations, not measured BRDF/environment data. Tone-mapped linear output is sRGB-encoded for an unorm display target. Validate both distant appearance and zoom transitions against the images above; screenshots remain separate from numerical tests.
 
-Scene → Red brick · relief shares Leaf's direct hit approximation. One carrier-height evaluation determines depth; reciprocal incidence fades below |N·ray|=0.05. Hardware-filtered RGBA shares phase, carrier mapping and frozen footprint; shifted coordinates drive RGB, and four fixed height neighbors drive normals. Displacement and shading have no loops, recursion or root search. This favors speed over exact first crossings, silhouettes, occlusion and certified error; steep/close views can distort or miss relief. Carrier picking/cast shadows and the old miss rule remain; no new gap solver.
+Scene → Red brick · relief shares Leaf's direct hit approximation. One carrier-height evaluation determines depth; reciprocal incidence fades below |N·ray|=0.05. Hardware-filtered RGBA shares phase, carrier mapping and frozen footprint; shifted coordinates drive RGB and per-level, texel-width normal stencils. Fine brick relief gains are8× stronger; mortar and source assets are unchanged. Displacement and shading have no loops, recursion or root search. This favors speed over exact first crossings, silhouettes, occlusion and certified error; steep/close views can distort or miss relief. Carrier picking/cast shadows and the old miss rule remain; no new gap solver.
 
 ## Changelog
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-25 | Assistant | Amplify pore gains8×; filter normals per level | Make fine relief visible without subtexel lighting facets |
 | 2026-11-24 | Assistant | Document shared loop-free hits, hardware RGBA and approximation limits | Replace iterative search with fast direct math |
 | 2026-11-09 | Assistant | Recorded inspected microscopy, scales, exclusions and rendering limits | Ground material detail in actual samples without misusing SEM as height/albedo |
 | 2026-11-09 | Assistant | Credited photo/SEM asset derivatives, transformations and bounded decoding | Replace regular generated stamps; retain licenses and honest physical limits |

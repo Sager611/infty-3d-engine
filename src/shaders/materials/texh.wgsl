@@ -28,15 +28,11 @@ fn texh_height(foot:SurfacePoint,context:TexhContext)->f32 {
   return height/context.object.position_size.w;
 }
 fn texh_normal(point:vec3f,foot:SurfacePoint,context:TexhContext)->vec3f {
-  let n=foot.n;
-  let tangent=material_unit(cross(n,select(vec3f(1.0,0.0,0.0),vec3f(0.0,1.0,0.0),abs(n.x)>0.9)),vec3f(0.0,1.0,0.0));
-  let bitangent=cross(n,tangent);
-  let step=max(0x1p-14,0.5*context.footprint/context.object.position_size.w);
-  let x=texh_height(geometry_surface(point+tangent*step,context.base,context.object),context)
-    -texh_height(geometry_surface(point-tangent*step,context.base,context.object),context);
-  let y=texh_height(geometry_surface(point+bitangent*step,context.base,context.object),context)
-    -texh_height(geometry_surface(point-bitangent*step,context.base,context.object),context);
-  return material_unit(n-(tangent*x+bitangent*y)/(2.0*step),n);
+  if(context.object.params.w==2.0){
+    let slope=hf_gradient(leaf_uv_unit(foot.uv),0.5*context.footprint/context.object.position_size.w);
+    return material_unit(foot.n-geometry_uv_axes(point,context.base,context.object)*slope,foot.n);
+  }
+  return layered_material(u32(context.object.params.w),texh_delta(foot,context),foot.n,context.footprint,context.object.position_size.xyz).normal;
 }
 fn material_texh(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->SceneSample {
   if(!base.base_hit){return base;}

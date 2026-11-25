@@ -61,6 +61,18 @@ fn four_physical_orders_per_finish_not_a_shader_level_limit() -> Result<(), &'st
     Ok(())
 }
 #[test]
+fn brick_pore_relief_is_eight_times_stronger_without_deepening_mortar() {
+    let relief: Vec<_> = presets()
+        .into_iter()
+        .filter(|level| level.material == Material::Brick)
+        .map(|level| level.relief.to_bits())
+        .collect();
+    assert_eq!(
+        relief,
+        [0.006_f32, 0.0064, 0.00064, 0.000_048].map(f32::to_bits)
+    );
+}
+#[test]
 fn baked_assets_reject_corruption_and_wrong_pixel_counts() {
     for bytes in [&[][..], &[0][..], &[120, 156, 3, 0, 0, 0, 0, 1][..]] {
         assert!(super::texture::decode(bytes).is_err());

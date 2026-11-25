@@ -22,6 +22,27 @@ fn hf_height(uv:vec2f)->f32 {
     hf_bilinear(2u,uv,100.0),hf_bilinear(3u,uv,1000.0))-vec4f(128.0);
   return dot(h,height_data.amplitudes/255.0);
 }
+// Bilinearly blend vertex slopes; subtexel differences expose faceted cell gradients.
+fn hf_gradient_value(order:u32,uv:vec2f,repeats:f32)->f32 {
+  let p=uv*repeats;
+  return hf_bilinear(order,select(fract(p),clamp(p,vec2f(0.0),vec2f(1.0)),order==0u),1.0);
+}
+fn hf_slope(order:u32,uv:vec2f,repeats:f32,footprint:f32)->vec2f {
+  let edge=f32(height_data.info.x);
+  let visible=material_visible(clamp(log2(max(1e-30,footprint)*edge*repeats),0.0,9.0));
+  if(visible==0.0){return vec2f(0.0);}
+  let step=max(1.0/(edge*repeats),0.5*footprint);
+  let x=hf_gradient_value(order,uv+vec2f(step,0.0),repeats)-hf_gradient_value(order,uv-vec2f(step,0.0),repeats);
+  let y=hf_gradient_value(order,uv+vec2f(0.0,step),repeats)-hf_gradient_value(order,uv-vec2f(0.0,step),repeats);
+  return vec2f(x,y)*(visible/(2.0*step));
+}
+fn hf_gradient(uv:vec2f,footprint:f32)->vec2f {
+  if(height_data.info.x<2u){return vec2f(0.0);}
+  return (hf_slope(0u,uv,1.0,footprint)*height_data.amplitudes.x
+    +hf_slope(1u,uv,10.0,footprint)*height_data.amplitudes.y
+    +hf_slope(2u,uv,100.0,footprint)*height_data.amplitudes.z
+    +hf_slope(3u,uv,1000.0,footprint)*height_data.amplitudes.w)/255.0;
+}
 fn leaf_covered(uv:vec2f)->bool {
   return height_data.info.x<2u||hf_bilinear(4u,uv,1.0)>=127.5;
 }

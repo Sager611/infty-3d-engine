@@ -84,6 +84,114 @@ test("delegated property input follows input and material select targets and cle
 	}
 });
 
+class PositionInput extends EventTarget {
+	dataset = { controlKey: "y" };
+	value = "1.04";
+	type = "number";
+	up = 0;
+	down = 0;
+	stepUp(): void {
+		this.up += 1;
+		this.value = "1.041";
+	}
+	stepDown(): void {
+		this.down += 1;
+		this.value = "1.04";
+	}
+}
+type WheelHarness = Readonly<{
+	input: PositionInput;
+	events: ControlsEvent[];
+	wheel: (deltaY: number, ctrlKey?: boolean) => boolean;
+	dispose: () => void;
+	close: () => void;
+}>;
+const positionWheelHarness = (): WheelHarness => {
+	// biome-ignore lint/security/noSecrets: Native DOM class name.
+	const restore = installElement("HTMLInputElement", PositionInput);
+	const properties = new EventTarget();
+	const input = new PositionInput();
+	const events: ControlsEvent[] = [];
+	const dispose = listenControls(
+		{
+			objectSelect: Object.assign(new EventTarget(), { value: "2" }),
+			pickAll: new EventTarget(),
+			properties,
+		},
+		() => ({
+			objects: DEFAULT_SNAPSHOT.objects,
+			selection: { ids: [2], active: 2 },
+			pickAll: false,
+		}),
+		(event) => {
+			events.push(event);
+		},
+	);
+	const wheel = (deltaY: number, ctrlKey?: boolean): boolean => {
+		const event = new Event("wheel", { cancelable: true });
+		Object.defineProperties(event, {
+			target: { value: input },
+			deltaY: { value: deltaY },
+			ctrlKey: { value: ctrlKey },
+		});
+		properties.dispatchEvent(event);
+		return event.defaultPrevented;
+	};
+	return {
+		input,
+		events,
+		wheel,
+		dispose,
+		close: () => {
+			dispose();
+			restore();
+		},
+	};
+};
+const WHEEL_DELTA = 100;
+test("position wheels nudge one fine step and dispose", () => {
+	const h = positionWheelHarness();
+	try {
+		expect(h.wheel(-WHEEL_DELTA)).toBe(true);
+		expect(h.events[0]).toEqual({
+			kind: "property",
+			id: 2,
+			key: "y",
+			value: 1.041,
+		});
+		expect(h.wheel(WHEEL_DELTA)).toBe(true);
+		expect(h.events[1]).toEqual({
+			kind: "property",
+			id: 2,
+			key: "y",
+			value: 1.04,
+		});
+		h.dispose();
+		expect(h.wheel(-WHEEL_DELTA)).toBe(false);
+		expect(h.input.up).toBe(1);
+		expect(h.input.down).toBe(1);
+		expect(h.events).toHaveLength(2);
+	} finally {
+		h.close();
+	}
+});
+test("position wheels ignore zero, invalid, modified and nonposition input", () => {
+	const h = positionWheelHarness();
+	try {
+		expect(h.wheel(0)).toBe(false);
+		expect(h.wheel(Number.NaN)).toBe(false);
+		expect(h.wheel(-WHEEL_DELTA, true)).toBe(false);
+		h.input.dataset.controlKey = "size";
+		expect(h.wheel(-WHEEL_DELTA)).toBe(false);
+		h.input.dataset.controlKey = "y";
+		h.input.value = "";
+		expect(h.wheel(-WHEEL_DELTA)).toBe(false);
+		expect(h.events).toHaveLength(0);
+	} finally {
+		h.close();
+	}
+});
+
 test("property forms cannot navigate away on submit", () => {
 	const properties = new EventTarget();
 	const dispose = listenControls(

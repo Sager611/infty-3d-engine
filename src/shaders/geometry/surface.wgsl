@@ -11,3 +11,13 @@ fn geometry_surface(point:vec3f,base:SceneSample,object:SceneObject)->SurfacePoi
   let valid=kind!=5u||(all(uv>=vec2f(0.0))&&all(uv<=vec2f(1.0)));
   return SurfacePoint(p,n,uv,valid);
 }
+// Carrier-tangent UV derivatives at the displaced point; unwrap spherical seams.
+fn geometry_uv_axes(point:vec3f,base:SceneSample,object:SceneObject)->mat2x3f {
+  let n=base.query.n;
+  let t=material_unit(cross(n,select(vec3f(1.0,0.0,0.0),vec3f(0.0,1.0,0.0),abs(n.x)>0.9)),vec3f(0.0,1.0,0.0));
+  let b=cross(n,t);let step=0x1p-10;
+  var x=geometry_surface(point+t*step,base,object).uv-geometry_surface(point-t*step,base,object).uv;
+  var y=geometry_surface(point+b*step,base,object).uv-geometry_surface(point-b*step,base,object).uv;
+  if(object.identity.y==1u){x.x-=round(x.x);y.x-=round(y.x);}
+  return mat2x3f((t*x.x+b*y.x)/(2.0*step),(t*x.y+b*y.y)/(2.0*step));
+}

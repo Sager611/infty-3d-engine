@@ -94,7 +94,7 @@ fn material_value(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32) -> v
   return material_compensate(a,b,level.mean,t);
 }
 fn material_tile(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32) -> MaterialTile {
-  let step=0.5*exp2(lod)/f32(textureDimensions(material_tiles,0).x);
+  let step=exp2(lod)/f32(textureDimensions(material_tiles,0).x);
   let center=material_value(uv,origin,level,lod);
   let right=material_value(uv+vec2f(step,0.0),origin,level,lod).a;
   let left=material_value(uv-vec2f(step,0.0),origin,level,lod).a;

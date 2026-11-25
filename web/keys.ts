@@ -20,6 +20,7 @@ type KeyBindings = Readonly<{
 type KeyController = Readonly<{ stop(): void; dispose(): void }>;
 interface KeyState {
 	held: Set<string>;
+	boost: boolean;
 	closed: boolean;
 }
 
@@ -38,19 +39,48 @@ function editableTarget(target: EditableTarget | null): boolean {
 		target.isContentEditable === true
 	);
 }
-function movementFor(held: ReadonlySet<string>): Movement {
+function movementFor(held: ReadonlySet<string>, boost: boolean): Movement {
 	return Object.freeze({
 		forward: Number(held.has("w")) - Number(held.has("s")),
 		side: Number(held.has("d")) - Number(held.has("a")),
 		onlyForward: held.size === 1 && held.has("w"),
+		...(boost && { boost: true }),
 	});
 }
 function stopKeys(bindings: KeyBindings, state: KeyState): void {
-	if (state.held.size === 0) {
+	if (state.held.size === 0 && !state.boost) {
 		return;
 	}
 	state.held.clear();
+	state.boost = false;
 	bindings.movement(STOPPED);
+}
+function updateMovement(
+	bindings: KeyBindings,
+	state: KeyState,
+	event: Event,
+	down: boolean,
+): boolean {
+	if (!("key" in event) || typeof event.key !== "string") {
+		return false;
+	}
+	const key = event.key.toLowerCase();
+	const moving = MOVEMENT_KEYS.includes(key);
+	const boost = "shiftKey" in event && event.shiftKey === true;
+	const size = state.held.size;
+	if (moving) {
+		if (down && !("repeat" in event && event.repeat === true)) {
+			state.held.add(key);
+		} else if (!down) {
+			state.held.delete(key);
+		}
+	}
+	const changed = size !== state.held.size || boost !== state.boost;
+	state.boost = boost;
+	if (changed) {
+		bindings.movement(movementFor(state.held, boost));
+	}
+	return moving;
 }
 function shortcut(bindings: KeyBindings, key: string): boolean {
 	switch (key) {
@@ -113,15 +143,7 @@ function keydown(bindings: KeyBindings, state: KeyState, event: Event): void {
 	const key = event.key.toLowerCase();
 	const repeat = "repeat" in event && event.repeat === true;
 	try {
-		if (MOVEMENT_KEYS.includes(key)) {
-			if (repeat) {
-				event.preventDefault();
-				return;
-			}
-			if (!state.held.has(key)) {
-				state.held.add(key);
-				bindings.movement(movementFor(state.held));
-			}
+		if (updateMovement(bindings, state, event, true)) {
 			event.preventDefault();
 			return;
 		}
@@ -140,7 +162,7 @@ function keydown(bindings: KeyBindings, state: KeyState, event: Event): void {
 	}
 }
 function listenKeys(bindings: KeyBindings): KeyController {
-	const state: KeyState = { held: new Set(), closed: false };
+	const state: KeyState = { held: new Set(), boost: false, closed: false };
 	function stop(): void {
 		stopKeys(bindings, state);
 	}
@@ -148,13 +170,14 @@ function listenKeys(bindings: KeyBindings): KeyController {
 		keydown(bindings, state, event);
 	}
 	function up(event: Event): void {
-		if (
-			"key" in event &&
-			typeof event.key === "string" &&
-			state.held.delete(event.key.toLowerCase())
-		) {
-			bindings.movement(movementFor(state.held));
+		if (state.closed) {
+			return;
 		}
+		if (ignored(bindings, event)) {
+			stop();
+			return;
+		}
+		updateMovement(bindings, state, event, false);
 	}
 	function visibility(): void {
 		if (bindings.hidden()) {

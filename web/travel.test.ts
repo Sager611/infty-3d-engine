@@ -63,10 +63,10 @@ test("micro-unit inspection slows before contact without raising the positive fl
 	const floor = 0.000_001;
 	const gap = 0.000_001;
 	const seconds = 0.05;
-	const gain = 3 - floor;
+	const gain = (3 - floor) / 0.25;
 	const distance = stepSpeed(FORWARD, 3, seconds, () => gap) * seconds;
 	const oracle = (gap + floor / gain) * (1 - Math.exp(-gain * seconds));
-	expect(distance).toBeLessThan(gap / 4);
+	expect(distance).toBeGreaterThan(gap / 4);
 	expect(Math.abs(distance - oracle)).toBeLessThan(1e-16);
 	expect(stepSpeed(FORWARD, 3, seconds, () => 0)).toBe(floor);
 });
@@ -74,7 +74,7 @@ test("micro-unit inspection slows before contact without raising the positive fl
 test("closed-form easing cannot skip its band at high speed and agrees across time partitions", () => {
 	const speed = 3;
 	const gap = 0.2;
-	const gain = speed - MIN_SPEED;
+	const gain = (speed - MIN_SPEED) / 0.25;
 	const full = stepSpeed(FORWARD, speed, 0.04, () => gap) * 0.04;
 	const oracle = (gap + MIN_SPEED / gain) * (1 - Math.exp(-gain * 0.04));
 	expect(Math.abs(full - oracle)).toBeLessThan(1e-12);
@@ -82,9 +82,9 @@ test("closed-form easing cannot skip its band at high speed and agrees across ti
 	const second = stepSpeed(FORWARD, speed, 0.02, () => gap - first) * 0.02;
 	expect(Math.abs(first + second - full)).toBeLessThan(1e-12);
 	const fast = stepSpeed(FORWARD, 100, 0.05, () => 1.25) * 0.05;
-	const highGain = 100 - MIN_SPEED;
+	const highGain = (100 - MIN_SPEED) / 0.25;
 	const highOracle =
-		0.25 + (1 + MIN_SPEED / highGain) * (1 - Math.exp(-highGain * 0.0475));
+		1 + (0.25 + MIN_SPEED / highGain) * (1 - Math.exp(-highGain * 0.04));
 	expect(Math.abs(fast - highOracle)).toBeLessThan(1e-12);
 	expect(fast).toBeLessThan(1.25);
 	expect(stepSpeed(FORWARD, 3, 1000, () => gap)).toBe(
@@ -92,11 +92,28 @@ test("closed-form easing cannot skip its band at high speed and agrees across ti
 	);
 });
 
+test("Shift integrates the faster approach continuously across frame partitions", () => {
+	const boosted: Movement = { ...FORWARD, boost: true };
+	const speed = 3;
+	const seconds = 0.04;
+	const gap = 0.2;
+	const full = 2 * stepSpeed(boosted, speed, seconds, () => gap) * seconds;
+	const first =
+		(2 * stepSpeed(boosted, speed, seconds / 2, () => gap) * seconds) / 2;
+	const second =
+		(2 * stepSpeed(boosted, speed, seconds / 2, () => gap - first) * seconds) /
+		2;
+	const gain = (speed - MIN_SPEED) / 0.25;
+	const oracle = (gap + MIN_SPEED / gain) * (1 - Math.exp(-gain * seconds * 2));
+	expect(Math.abs(full - oracle)).toBeLessThan(1e-12);
+	expect(Math.abs(full - first - second)).toBeLessThan(1e-12);
+});
+
 test("one analytic query per active W step; misses keep speed and unresolved or invalid requests throw", () => {
 	let calls = 0;
 	function hit(): number {
 		calls += 1;
-		return 0.5;
+		return 0.125;
 	}
 	expect(stepSpeed(FORWARD, 3, 0.02, hit)).toBeLessThan(3);
 	expect(calls).toBe(1);
