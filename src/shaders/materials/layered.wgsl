@@ -103,13 +103,9 @@ fn material_tile(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32) -> Ma
   return MaterialTile(center.rgb,vec2f(right-left,up-down)/(2.0*step),center.a);
 }
 struct MaterialCoords {uv:vec3f,cells:vec3f};
-fn material_coords(level:MaterialLevel,delta:vec3f,anchor:vec3f)->MaterialCoords {
-  // Do not reconstruct large absolute hit coordinates from f32 camera motion.
-  let extent=level.surface.x;
-  let bits=u32(level.phase.w);
-  let cells=vec3f(f32(bits&255u),f32((bits>>8u)&255u),f32((bits>>16u)&255u))
-    -256.0*fract(floor(anchor/extent)/256.0);
-  return MaterialCoords(level.phase.xyz-fract(anchor/extent)+delta/extent,cells);
+fn material_coords(level:MaterialLevel,delta:vec3f)->MaterialCoords {
+  // delta is already object-local, not a camera-to-hit offset.
+  return MaterialCoords(delta/level.surface.x,vec3f(0.0));
 }
 fn material_weights(n:vec3f)->vec3f {
   let projection=pow(abs(n),vec3f(8.0));
@@ -120,7 +116,7 @@ fn material_lod(footprint:f32,extent:f32)->f32 {
 }
 fn material_visible(lod:f32)->f32 {return 1.0-smoothstep(4.0,8.0,lod);}
 struct MaterialLayers {base:vec3f,modulation:vec3f,gradient:vec3f,variance:f32,occlusion:f32};
-fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weights:vec3f,footprint:f32,anchor:vec3f)->MaterialLayers {
+fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weights:vec3f,footprint:f32)->MaterialLayers {
   var state=input;
   if(index>=arrayLength(&material_levels)){return state;}
   let level=material_levels[index];if(level.identity.x!=material){return state;}
@@ -129,7 +125,7 @@ fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weight
   state.variance+=level.surface.w*(1.0-visible);
   if(base_order&&lod>=9.0){state.base=level.mean.rgb;return state;}
   if(!base_order&&visible==0.0){return state;}
-  let coords=material_coords(level,delta,anchor);let p=coords.uv;let cells=coords.cells;
+  let coords=material_coords(level,delta);let p=coords.uv;let cells=coords.cells;
   var color=vec3f(0.0);var height=0.0;var slope=vec3f(0.0);
   if(weights.x>0.0){
     let q=material_tile(p.yz,cells.yz,level,lod);
@@ -149,7 +145,7 @@ fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weight
   if(material==1u&&!base_order){state.occlusion*=mix(1.0,0.08+0.92*smoothstep(0.12,0.56,height),visible);}
   return state;
 }
-fn layered_material(material:u32,delta:vec3f,normal:vec3f,footprint:f32,anchor:vec3f)->MaterialSurface {
+fn layered_material(material:u32,delta:vec3f,normal:vec3f,footprint:f32)->MaterialSurface {
   let n=material_unit(normal,vec3f(0.0,1.0,0.0));let weights=material_weights(n);
   let roughness=select(0.26,0.86,material==1u);
   var state=MaterialLayers(vec3f(0.5),vec3f(1.0),vec3f(0.0),roughness*roughness,1.0);

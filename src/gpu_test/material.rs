@@ -1,6 +1,32 @@
-use super::support::{run, run_scene};
+use super::support::{run, run_material_origin, run_scene};
 use crate::scene::{model::parse_objects, packed::pack};
 
+#[test]
+fn material_relief_and_color_do_not_follow_camera_phase() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut inputs = Vec::new();
+    for material in [0.0, 1.0] {
+        for [x, y] in [[0.105, 0.035], [0.105, 0.0], [0.117, 0.073]] {
+            for [px, py, pz, angle] in [[0.0; 4], [1.0, 1.0, 0.0, 0.73]] {
+                inputs.push([x, y, 0.1, material, px, py, pz, angle]);
+            }
+        }
+    }
+    let expected = run_material_origin("verify_material_anchor", &inputs, [0.0; 3])?;
+    assert!(expected.iter().all(|v| v.is_finite()));
+    for origin in [[0.02, -0.01, 0.23], [-0.3, 0.4, 1.6], [3.0, 1.0, 2.0]] {
+        let actual = run_material_origin("verify_material_anchor", &inputs, origin)?;
+        for (channel, (&a, &b)) in actual.iter().zip(&expected).enumerate() {
+            assert!(
+                a.is_finite() && (a - b).abs() < 0.000_001,
+                "camera {origin:?} moved material sample {} channel {}: {a} != {b}",
+                channel / 16,
+                channel % 16
+            );
+        }
+    }
+    Ok(())
+}
 #[test]
 fn diffuse_environment_retains_normals_when_the_key_light_faces_away()
 -> Result<(), Box<dyn std::error::Error>> {

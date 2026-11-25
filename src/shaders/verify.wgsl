@@ -28,7 +28,7 @@ fn verify_crystal_render(@builtin(global_invocation_id) id: vec3u) {
 fn verify_material(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let input=rays[id.x];
-  let q=layered_material(u32(input.o.w),input.o.xyz,normalize(input.d.xyz),input.d.w,vec3f(0.0));
+  let q=layered_material(u32(input.o.w),input.o.xyz,normalize(input.d.xyz),input.d.w);
   results[id.x]=ProbeResult(vec4f(q.albedo,q.roughness),vec4f(q.normal,q.metallic),
     vec4f(f32(arrayLength(&material_levels)),q.occlusion,
       clamp(log2(max(1e-30,input.d.w*512.0/material_levels[2u+4u*u32(input.o.w)].surface.x)),0.0,9.0),
@@ -90,14 +90,30 @@ fn verify_material_color(@builtin(global_invocation_id) id: vec3u) {
   let object=SceneObject(vec4u(1u,5u,0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w),POSE_IDENTITY);
   let base=scene_object(r.o.xyz,d,object);let sample=material_texh(base,d,object,r.o.xyz,0.001);
   let material=texh_surface(sample,base,d,object,r.o.xyz,0.001);let footprint=texh_footprint(base,d,0.001);
-  var expected=layered_material(u32(r.o.w),vec3f(sample.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint,vec3f(0.0));
-  var original=layered_material(u32(r.o.w),vec3f(base.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint,vec3f(0.0));
+  var expected=layered_material(u32(r.o.w),vec3f(sample.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint);
+  var original=layered_material(u32(r.o.w),vec3f(base.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint);
   if(r.o.w==2.0){
     expected=leaf_material(sample.query.uv,material.normal,1.0,footprint);
     original=leaf_material(base.query.uv,material.normal,1.0,footprint);
   }
   results[id.x]=ProbeResult(vec4f(material.albedo,f32(sample.query.hit)),vec4f(expected.albedo,sample.query.t),
     vec4f(original.albedo,0.0),vec4f(sample.query.uv,base.query.uv));
+}
+// Fixed object-local normal rays: camera metadata must not move relief or colour.
+@compute @workgroup_size(1)
+fn verify_material_anchor(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}
+  let r=rays[id.x];let half=0.5*r.d.w;
+  let object=SceneObject(vec4u(1u,5u,0u,0u),vec4f(r.d.xyz,1.0),vec4f(0.0,0.0,0.0,r.o.w),vec4f(0.0,sin(half),0.0,cos(half)));
+  let d=scene_world_vector(object,vec3f(0.0,0.0,-1.0));
+  let origin=object.position_size.xyz+scene_world_vector(object,r.o.xyz);
+  let delta=scene_origin_delta(origin,vec3f(0.0),object);
+  let base=scene_object(origin,d,object);
+  let sample=material_texh(base,d,object,delta,0.0);
+  let material=texh_surface(sample,base,d,object,delta,0.0);
+  results[id.x]=ProbeResult(vec4f(material.albedo,sample.query.t-base.query.t),
+    vec4f(material.normal,material.occlusion),vec4f(sample.query.uv,base.query.uv),
+    vec4f(f32(sample.query.hit),sample.local));
 }
 @compute @workgroup_size(1)
 fn verify_material_display(@builtin(global_invocation_id) id: vec3u) {

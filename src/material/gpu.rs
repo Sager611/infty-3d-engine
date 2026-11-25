@@ -1,4 +1,4 @@
-//! Lazy immutable texture array; only camera-phase metadata changes per frame.
+//! Lazy immutable texture array and material metadata.
 use super::{EDGE, Level, mip, phase, presets, presets_with_leaf, texture, validate};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
@@ -22,6 +22,7 @@ pub struct Tiles {
     pub clamp: wgpu::Sampler,
     pub buffer: wgpu::Buffer,
     levels: Vec<Level>,
+    #[cfg(test)]
     means: Vec<[f32; 4]>,
 }
 fn image(device: &wgpu::Device, edge: u32, layers: u32, mips: u32) -> wgpu::Texture {
@@ -64,6 +65,7 @@ impl Tiles {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             }),
             levels: Vec::new(),
+            #[cfg(test)]
             means: Vec::new(),
         }
     }
@@ -149,9 +151,11 @@ impl Tiles {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             }),
             levels: levels.to_vec(),
+            #[cfg(test)]
             means,
         })
     }
+    #[cfg(test)]
     pub fn update(
         &self,
         queue: &wgpu::Queue,

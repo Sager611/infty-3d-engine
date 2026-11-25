@@ -188,16 +188,6 @@ impl Renderer {
                 &self.resources,
             );
         }
-        if params.screen[2] == 3 {
-            let origin = parse_camera(camera)
-                .map_err(|e| js_error(e.to_string()))?
-                .basis()
-                .origin;
-            self.resources
-                .tiles
-                .update(&self.queue, origin, scene.core.has_leaf_finish())
-                .map_err(js_error)?;
-        }
         self.queue
             .write_buffer(&self.uniform, 0, bytemuck::bytes_of(&params));
 

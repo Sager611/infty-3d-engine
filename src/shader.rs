@@ -51,7 +51,7 @@ pub fn source() -> String {
         let _ = writeln!(height, "height+=texh_level({index}u,foot,context);");
         let _ = writeln!(
             material,
-            "state=material_layer(state,{index}u,material,delta,weights,footprint,anchor);"
+            "state=material_layer(state,{index}u,material,delta,weights,footprint);"
         );
         let _ = writeln!(leaf, "color=leaf_level(color,{index}u,p,size,footprint);");
     }

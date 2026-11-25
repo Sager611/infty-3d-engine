@@ -12,7 +12,7 @@ fn texh_level(index:u32,foot:SurfacePoint,context:TexhContext)->f32 {
   if(level.identity.x!=material){return 0.0;}
   let lod=material_lod(context.footprint,level.surface.x);let visible=material_visible(lod);
   if(visible==0.0){return 0.0;}
-  let coords=material_coords(level,texh_delta(foot,context),context.object.position_size.xyz);
+  let coords=material_coords(level,texh_delta(foot,context));
   let weights=material_weights(foot.n);var alpha=0.0;
   if(weights.x>0.0){alpha+=weights.x*material_value(coords.uv.yz,coords.cells.yz,level,lod).a;}
   if(weights.y>0.0){alpha+=weights.y*material_value(coords.uv.xz,coords.cells.xz,level,lod).a;}
@@ -32,7 +32,7 @@ fn texh_normal(point:vec3f,foot:SurfacePoint,context:TexhContext)->vec3f {
     let slope=hf_gradient(leaf_uv_unit(foot.uv),0.5*context.footprint/context.object.position_size.w);
     return material_unit(foot.n-geometry_uv_axes(point,context.base,context.object)*slope,foot.n);
   }
-  return layered_material(u32(context.object.params.w),texh_delta(foot,context),foot.n,context.footprint,context.object.position_size.xyz).normal;
+  return layered_material(u32(context.object.params.w),texh_delta(foot,context),foot.n,context.footprint).normal;
 }
 fn material_texh(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->SceneSample {
   if(!base.base_hit){return base;}
@@ -59,6 +59,6 @@ fn texh_surface(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,o
   if(object.params.w==2.0){return leaf_material(sample.query.uv,normal,object.position_size.w,footprint);}
   let context=TexhContext(base,object,scene_local_vector(object,origin_delta+d*base.query.t),footprint);
   let foot=geometry_surface(sample.local,base,object);
-  var material=layered_material(u32(object.params.w),texh_delta(foot,context),foot.n,footprint,object.position_size.xyz);
+  var material=layered_material(u32(object.params.w),texh_delta(foot,context),foot.n,footprint);
   material.normal=normal;return material;
 }

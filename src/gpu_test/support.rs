@@ -14,6 +14,7 @@ pub(super) fn run(
         output_floats,
         None,
         crate::heightfield::LEAF,
+        [0.0; 3],
     ))
 }
 
@@ -28,6 +29,7 @@ pub(super) fn run_scene(
         rays.len() * 16,
         Some(records),
         crate::heightfield::LEAF,
+        [0.0; 3],
     ))
 }
 
@@ -43,6 +45,7 @@ pub(super) fn run_scene_field(
         rays.len() * 16,
         Some(records),
         field,
+        [0.0; 3],
     ))
 }
 pub(super) fn run_field(
@@ -51,7 +54,21 @@ pub(super) fn run_field(
     output_floats: usize,
     field: crate::heightfield::Field<'_>,
 ) -> Result<Vec<f32>, Box<dyn Error>> {
-    pollster::block_on(run_async(entry, rays, output_floats, None, field))
+    pollster::block_on(run_async(entry, rays, output_floats, None, field, [0.0; 3]))
+}
+pub(super) fn run_material_origin(
+    entry: &str,
+    rays: &[[f32; 8]],
+    origin: [f64; 3],
+) -> Result<Vec<f32>, Box<dyn Error>> {
+    pollster::block_on(run_async(
+        entry,
+        rays,
+        rays.len() * 16,
+        None,
+        crate::heightfield::LEAF,
+        origin,
+    ))
 }
 pub(super) fn used_bindings(
     entry: &str,
@@ -86,10 +103,12 @@ fn material_tiles(
     entry: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
+    origin: [f64; 3],
 ) -> Result<Option<crate::material::gpu::Tiles>, Box<dyn Error>> {
     if !matches!(
         entry,
         "verify_material"
+            | "verify_material_anchor"
             | "verify_material_mapping"
             | "verify_leaf_material"
             | "verify_material_hit"
@@ -106,7 +125,7 @@ fn material_tiles(
     );
     assert!(tiles.ensure(device, queue, leaf)?);
     assert!(!tiles.ensure(device, queue, leaf)?);
-    tiles.update(queue, [0.0; 3], leaf)?;
+    tiles.update(queue, origin, leaf)?;
     Ok(Some(tiles))
 }
 
@@ -137,6 +156,7 @@ async fn run_async(
     output_floats: usize,
     records: Option<&[crate::scene::packed::Record]>,
     field: crate::heightfield::Field<'_>,
+    origin: [f64; 3],
 ) -> Result<Vec<f32>, Box<dyn Error>> {
     let (device, queue) = test_device().await?;
     let ray_buffer = input_buffer(&device, "test rays", cast_slice(rays));
@@ -173,7 +193,7 @@ async fn run_async(
     } else {
         None
     };
-    let tiles = material_tiles(entry, &device, &queue)?;
+    let tiles = material_tiles(entry, &device, &queue, origin)?;
     let material_view = tiles.as_ref().map(crate::material::gpu::Tiles::view);
     let mut entries = vec![
         wgpu::BindGroupEntry {
