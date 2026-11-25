@@ -32,13 +32,18 @@ fn surface_base(uv: vec2f, scale: f32, a: vec3f, b: vec3f) -> vec3f {
   return mix(a, b, surface_cell(uv, scale));
 }
 
-fn surface_normal(normal: vec3f, ray: vec3f, kind: u32) -> vec3f {
+// A byte of height uncertainty must not become a large shading-slope jump.
+fn surface_slope_step(step:f32,quantum:f32)->f32 {return max(step,16.0*abs(quantum));}
+
+// Face the carrier, not individual bumps crossing the view tangent.
+fn surface_normal(normal: vec3f, carrier: vec3f, ray: vec3f, kind: u32) -> vec3f {
   let n = normalize(normal);
-  return select(n, -n, (kind == 4u || kind==5u) && dot(n, ray) > 0.0);
+  return select(n, -n, (kind == 4u || kind==5u) && dot(carrier, ray) > 0.0);
 }
 
 fn surface_shade(
   q: Query,
+  carrier: vec3f,
   local: vec3f,
   kind: u32,
   ray: vec3f,
@@ -48,7 +53,7 @@ fn surface_shade(
   light: vec3f,
   shadow: f32
 ) -> vec3f {
-  let n = surface_normal(q.n, ray, kind);
+  let n = surface_normal(q.n, carrier, ray, kind);
   let l = normalize(light - q.p);
   let diffuse = max(dot(n, l), 0.0);
   let sphere = kind == 1u;

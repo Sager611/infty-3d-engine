@@ -30,6 +30,122 @@ fn carrier_flag_has_no_metal_partial_word_padding() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn material_bumps_keep_the_carrier_side_across_view_tangencies() -> TestResult {
+    let mut rays = Vec::new();
+    let mut expected = Vec::new();
+    for kind in 1_u8..=5 {
+        for side in [-1.0, 1.0] {
+            for axis in 0..2 {
+                for z in [-0.0001, 0.0001] {
+                    let mut ray = [0.0; 8];
+                    ray[0] = f32::from(kind);
+                    ray[1 + axis] = 0.6 * side;
+                    ray[3] = -0.8 * side;
+                    ray[4 + axis] = 1.0;
+                    ray[6] = z;
+                    rays.push(ray);
+                    expected.push((axis, if kind >= 4 { side } else { 1.0 }));
+                }
+            }
+        }
+    }
+    let q = run("verify_crystal_render", &rays, rays.len() * 16)?;
+    for (i, (row, (axis, side))) in q.chunks_exact(16).zip(expected).enumerate() {
+        assert!(row[axis + 1] * side > 0.9999, "flipped bump {i}: {row:?}");
+        assert!(row[3].abs() < 0.0002, "lost detail {i}: {row:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn relief_normal_stencils_bound_byte_error_without_blurring_color() -> TestResult {
+    let fine = (0.0064 / 0.042) * std::f32::consts::SQRT_2 / 255.0;
+    let coarse = (0.125 * 0.5) / 255.0;
+    let rays = [
+        [1.0 / 512.0, fine, 0.17, 0.31, 5.0, 0.0, 0.0, 0.0],
+        [1.0 / 512.0, -fine, 0.13, 0.53, 5.0, 0.0, 0.0, 0.0],
+        [1.0 / 512.0, coarse, 0.71, 0.77, 4.0, 0.0, 0.0, 0.0],
+        [1.0 / 512.0, 0.0, 0.32, 0.27, 4.0, 0.0, 0.0, 0.0],
+        [1.0 / 32.0, fine, 0.14, 0.88, 5.0, 4.0, 0.0, 0.0],
+        [1.0 / 512.0, fine, 0.13, 0.23, 2.0, 0.0, 0.0, 0.0],
+        [0.5, fine, 0.17, 0.31, 5.0, 9.0, 0.0, 0.0],
+    ];
+    let q = run("verify_slope_precision", &rays, rays.len() * 16)?;
+    let mut changed = false;
+    for (row, ray) in q.chunks_exact(16).zip(rays) {
+        let support = row[0];
+        assert!(support >= ray[0]);
+        assert!(support <= ray[0].max(16.0 * ray[1].abs()) * (1.0 + 1e-6));
+        assert!(
+            ray[1].abs() / (2.0 * support) <= 1.0 / 32.0 + 1e-6,
+            "quantized height still jumps the shading slope: {ray:?}, {row:?}"
+        );
+        assert_eq!(
+            row[4..8].iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            row[8..12].iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            "normal precision changed color or height"
+        );
+        changed |= (row[12] - row[13]).abs() > 1e-3;
+    }
+    assert!(changed, "shading still uses the raw height differential");
+    Ok(())
+}
+
+#[test]
+fn shading_footprint_covers_direct_relief_depth_and_warp() -> TestResult {
+    let rays = [
+        [0.001, -0.006, 0.6, 0.0, 0.001, 0.0, 0.0, 0.0],
+        [0.001, -0.006, 0.6, 2.0, 0.001, 0.0, 0.0, 0.0],
+        [0.001, 0.006, -0.6, -2.0, 0.001, 3.0, 0.0, 0.0],
+        [0.01, 0.0, 1.0, 20.0, 0.001, 0.0, 0.0, 0.0],
+        [0.001, -0.006, 0.02, 2.0, 0.001, 3.0, 0.0, 0.0],
+        [0.001, -0.000_006, 0.002, 2.0, 0.001, 3.0, 0.0, 0.0],
+        [0.001, 0.0001, 0.6, 0.0, 0.001, 0.0, 0.0, 0.0],
+        [0.001, -0.006, 0.6, 2.0, 0.0, 0.0, 0.0, 0.0],
+    ];
+    let q = run("verify_texh_filter", &rays, rays.len() * 16)?;
+    for (i, (row, ray)) in q.chunks_exact(16).zip(rays).enumerate() {
+        let [distance, height, cosine, slope_x, pixel, slope_y, ..] = ray.map(f64::from);
+        let sine = cosine.mul_add(-cosine, 1.0).max(0.0).sqrt();
+        let direction = [sine, 0.0, -cosine];
+        // Independent finite differences of the direct map of a sloped height field.
+        let map = |vector: [f64; 3]| {
+            let length = vector.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let vector = vector.map(|v| v / length);
+            let carrier = -distance * cosine / vector[2];
+            let height = (slope_y * carrier).mul_add(
+                vector[1],
+                slope_x.mul_add(distance.mul_add(-sine, carrier * vector[0]), height),
+            );
+            let depth = height.mul_add(vector[2] / (vector[2] * vector[2]).max(0.0025), carrier);
+            [depth * vector[0], depth * vector[1]]
+        };
+        let difference = |axis: [f64; 3]| {
+            let plus = map(std::array::from_fn(|j| axis[j].mul_add(1e-6, direction[j])));
+            let minus = map(std::array::from_fn(|j| {
+                axis[j].mul_add(-1e-6, direction[j])
+            }));
+            [(plus[0] - minus[0]) / 2e-6, (plus[1] - minus[1]) / 2e-6]
+        };
+        let dx = difference([cosine.abs(), 0.0, cosine.signum() * sine]);
+        let dy = difference([0.0, 1.0, 0.0]);
+        let xx = dx[1].mul_add(dx[1], dx[0] * dx[0]);
+        let xy = dx[1].mul_add(dy[1], dx[0] * dy[0]);
+        let yy = dy[1].mul_add(dy[1], dy[0] * dy[0]);
+        let stretch = (0.5 * (xx + yy + (4.0 * xy).mul_add(xy, (xx - yy).powi(2)).sqrt())).sqrt();
+        let depth = height.mul_add(-cosine / (cosine * cosine).max(0.0025), distance);
+        let expected = (pixel * stretch)
+            .max(pixel * distance.max(depth) / cosine.abs().max(0.01))
+            .max(1e-30);
+        assert!(
+            (f64::from(row[0]) / expected - 1.0).abs() < 1e-5,
+            "wrong direct-warp filter {i}: {row:?}, expected {expected}"
+        );
+    }
+    Ok(())
+}
+
 fn data(height: [u8; 4], coverage: [u8; 4]) -> [u8; 40] {
     let mut result = [0; 40];
     for (i, pixels) in [height, [128; 4], [128; 4], [128; 4], coverage]
@@ -194,7 +310,13 @@ fn displacement_and_shading_are_direct_loop_free_and_nonrecursive() -> TestResul
             !candidate
                 || !matches!(
                     function.name.as_deref(),
-                    Some("hf_slope" | "hf_gradient_lod" | "layered_material" | "leaf_material")
+                    Some(
+                        "hf_slope"
+                            | "hf_gradient_lod"
+                            | "material_layers"
+                            | "layered_material"
+                            | "leaf_material"
+                    )
                 ),
             "candidate shades before nearest-hit selection: {:?}",
             function.name

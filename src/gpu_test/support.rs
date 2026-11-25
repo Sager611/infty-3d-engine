@@ -115,6 +115,7 @@ fn material_tiles(
             | "verify_material_hit_full"
             | "verify_leaf_culling"
             | "verify_material_color"
+            | "verify_slope_precision"
             | "verify_instance_pose"
     ) {
         return Ok(None);

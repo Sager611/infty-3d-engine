@@ -143,6 +143,39 @@
 			font-weight: 700;
 			letter-spacing: 0.04em;
 		}
+		.velocity {
+			left: 14px;
+			top: 50%;
+			transform: translateY(-50%);
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			gap: 6px;
+			width: 44px;
+			height: min(500px, 56dvh);
+			max-height: calc(100dvh - 144px);
+			padding: 8px 0;
+			border-radius: 999px;
+		}
+		.velocity > span {
+			line-height: 1;
+			color: var(--muted-foreground);
+		}
+		.velocity:has([data-boosted="true"]) > span:first-child::before {
+			content: "⇧";
+		}
+		.velocity input {
+			flex: 1;
+			min-height: 0;
+			margin: 0;
+			padding: 0;
+			border: 0;
+			background: transparent;
+			writing-mode: vertical-lr;
+			direction: rtl;
+			touch-action: none;
+			cursor: ns-resize;
+		}
 		.actions {
 			z-index: 2;
 			top: 14px;
@@ -384,6 +417,9 @@
 				top: 10px;
 				left: 10px;
 			}
+			.velocity {
+				left: 10px;
+			}
 			.actions {
 				top: 10px;
 				right: 10px;
@@ -496,6 +532,26 @@
 		></canvas>
 
 		<div class="glass brand" aria-label="Infty 3D">∞ infty</div>
+		<div class="glass velocity" role="group" aria-label="Travel speed control">
+			<span
+				role="img"
+				aria-label="Maximum speed"
+				title="Maximum speed; Shift expands the range"
+				>＋</span
+			>
+			<input
+				id="velocity"
+				type="range"
+				min="0"
+				max="1"
+				step="any"
+				value="0.8096401568399578"
+				aria-label="Travel speed"
+				aria-orientation="vertical"
+				title="Travel speed (logarithmic)"
+			>
+			<span role="img" aria-label="Minimum speed" title="Minimum speed">−</span>
+		</div>
 
 		<nav class="glass actions" aria-label="View actions">
 			<button
@@ -532,11 +588,13 @@
 			<p>
 				<strong>Controls</strong>Click an object to inspect it. Alt-click or use
 				Pick all for every ray intersection on the next click. WASD moves; drag
-				or arrows look. Wheel up/down and +/− change travel speed, not zoom. W
-				eases near the surface ahead but can still pass through. F frames; R
-				resets. Selected XYZ arrows move; arcs rotate. Shift doubles movement or
-				rotation. Focus a handle and use arrows/Enter for 0.001 or 1° nudges;
-				Escape cancels a drag. Turn the view to drag an end-on handle.
+				or arrows look. The left slider, wheel and +/− set travel speed, not
+				zoom. The logarithmic slider follows Shift and surface slowing; at rest
+				it shows the available rate. Shift expands its maximum. W eases near the
+				surface ahead but can still pass through. F frames; R resets. Selected
+				XYZ arrows move; arcs rotate. Shift doubles movement or rotation. Focus
+				a handle and use arrows/Enter for 0.001 or 1° nudges; Escape cancels a
+				drag. Turn the view to drag an end-on handle.
 			</p>
 			<p>
 				<strong>Scene</strong>Sphere and infinite-plane intersections are exact

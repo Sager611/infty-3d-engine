@@ -136,20 +136,22 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   let unknown=pending_before(pending,nearest_hit,nearest_t,nearest.error);
   var shadow_unknown=false;
   if (nearest_hit&&!unknown) {
-    if(material_view||nearest_object.params.w==2.0){
+    var material:MaterialSurface;
+    if(material_view){
+      material=texh_surface(nearest,nearest_carrier,direction,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object),pixel_span);
+    }else if(nearest_object.params.w==2.0){
       nearest.query.n=texh_shade_normal(nearest,nearest_carrier,direction,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object),pixel_span);
     }
-    let normal=surface_normal(nearest.query.n,direction,nearest.kind);
+    let normal=select(surface_normal(nearest.query.n,nearest_carrier.query.n,direction,nearest.kind),material.normal,material_view);
     // Carrier shadows avoid treating a recessed brick face as inside its own occluder.
     let visibility=scene_shadow(nearest_carrier,nearest_object,normal,light,count);
     let shadow=shadow_value(visibility);shadow_unknown=visibility.uncertain;
     if (material_view) {
-      let material=texh_surface(nearest,nearest_carrier,direction,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object),pixel_span);
       color=material_shade(material,nearest.query.p,direction,light,shadow);
     } else {
       var local_query=nearest.query;
       local_query.p=nearest.local*nearest_size;local_query.n=scene_local_vector(nearest_object,nearest.query.n);
-      color = surface_shade(local_query, nearest.local, nearest.kind,
+      color = surface_shade(local_query, scene_local_vector(nearest_object,nearest_carrier.query.n), nearest.local, nearest.kind,
         scene_local_vector(nearest_object,direction), height, nearest_size,
         frame_params.screen.z, scene_local_vector(nearest_object,scene_origin_delta(light,vec3f(0.0),nearest_object)), shadow);
     }

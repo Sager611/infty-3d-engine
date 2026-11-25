@@ -93,13 +93,17 @@ fn material_value(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32) -> v
   let t=0.3+0.4*material_noise(uv+origin,level.identity.y+317u);
   return material_compensate(a,b,level.mean,t);
 }
-fn material_tile(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32) -> MaterialTile {
-  let step=exp2(lod)/f32(textureDimensions(material_tiles,0).x);
+// Zero keeps raw height differentials; one limits byte noise in shading normals.
+fn material_tile(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32, normal_filter:f32) -> MaterialTile {
+  let edge=f32(textureDimensions(material_tiles,0).x);
+  let support=surface_slope_step(exp2(lod)/edge,normal_filter*sqrt(2.0)*level.surface.y/(255.0*level.surface.x));
+  let gradient_lod=select(lod,max(lod,min(9.0,log2(support*edge))),normal_filter>0.0);
+  let step=exp2(gradient_lod)/edge;
   let center=material_value(uv,origin,level,lod);
-  let right=material_value(uv+vec2f(step,0.0),origin,level,lod).a;
-  let left=material_value(uv-vec2f(step,0.0),origin,level,lod).a;
-  let up=material_value(uv+vec2f(0.0,step),origin,level,lod).a;
-  let down=material_value(uv-vec2f(0.0,step),origin,level,lod).a;
+  let right=material_value(uv+vec2f(step,0.0),origin,level,gradient_lod).a;
+  let left=material_value(uv-vec2f(step,0.0),origin,level,gradient_lod).a;
+  let up=material_value(uv+vec2f(0.0,step),origin,level,gradient_lod).a;
+  let down=material_value(uv-vec2f(0.0,step),origin,level,gradient_lod).a;
   return MaterialTile(center.rgb,vec2f(right-left,up-down)/(2.0*step),center.a);
 }
 struct MaterialCoords {uv:vec3f,cells:vec3f};
@@ -116,7 +120,7 @@ fn material_lod(footprint:f32,extent:f32)->f32 {
 }
 fn material_visible(lod:f32)->f32 {return 1.0-smoothstep(4.0,8.0,lod);}
 struct MaterialLayers {base:vec3f,modulation:vec3f,gradient:vec3f,variance:f32,occlusion:f32};
-fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weights:vec3f,footprint:f32)->MaterialLayers {
+fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weights:vec3f,footprint:f32,normal_filter:f32)->MaterialLayers {
   var state=input;
   if(index>=arrayLength(&material_levels)){return state;}
   let level=material_levels[index];if(level.identity.x!=material){return state;}
@@ -128,15 +132,15 @@ fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weight
   let coords=material_coords(level,delta);let p=coords.uv;let cells=coords.cells;
   var color=vec3f(0.0);var height=0.0;var slope=vec3f(0.0);
   if(weights.x>0.0){
-    let q=material_tile(p.yz,cells.yz,level,lod);
+    let q=material_tile(p.yz,cells.yz,level,lod,normal_filter);
     color+=q.color*weights.x;height+=q.height*weights.x;slope+=vec3f(0.0,q.gradient)*weights.x;
   }
   if(weights.y>0.0){
-    let q=material_tile(p.xz,cells.xz,level,lod);
+    let q=material_tile(p.xz,cells.xz,level,lod,normal_filter);
     color+=q.color*weights.y;height+=q.height*weights.y;slope+=vec3f(q.gradient.x,0.0,q.gradient.y)*weights.y;
   }
   if(weights.z>0.0){
-    let q=material_tile(p.xy,cells.xy,level,lod);
+    let q=material_tile(p.xy,cells.xy,level,lod,normal_filter);
     color+=q.color*weights.z;height+=q.height*weights.z;slope+=vec3f(q.gradient,0.0)*weights.z;
   }
   if(base_order){state.base=color;}
@@ -145,15 +149,19 @@ fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weight
   if(material==1u&&!base_order){state.occlusion*=mix(1.0,0.08+0.92*smoothstep(0.12,0.56,height),visible);}
   return state;
 }
-fn layered_material(material:u32,delta:vec3f,normal:vec3f,footprint:f32)->MaterialSurface {
-  let n=material_unit(normal,vec3f(0.0,1.0,0.0));let weights=material_weights(n);
-  let roughness=select(0.26,0.86,material==1u);
+fn material_layers(material:u32,delta:vec3f,n:vec3f,footprint:f32,normal_filter:f32)->MaterialLayers {
+  let weights=material_weights(n);let roughness=select(0.26,0.86,material==1u);
   var state=MaterialLayers(vec3f(0.5),vec3f(1.0),vec3f(0.0),roughness*roughness,1.0);
   // @material-levels
+  return state;
+}
+fn layered_material(material:u32,delta:vec3f,normal:vec3f,footprint:f32)->MaterialSurface {
+  let n=material_unit(normal,vec3f(0.0,1.0,0.0));
+  let state=material_layers(material,delta,n,footprint,1.0);
   let tangent=state.gradient-n*dot(n,state.gradient);
   let bumped=material_unit(n-tangent/max(1.0,length(tangent)/2.0),n);
   return MaterialSurface(clamp(state.base*state.modulation,vec3f(0.004),vec3f(0.98)),bumped,
-    clamp(sqrt(state.variance),0.05,0.98),select(0.0,1.0,material==0u),state.occlusion,weights.z);
+    clamp(sqrt(state.variance),0.05,0.98),select(0.0,1.0,material==0u),state.occlusion,material_weights(n).z);
 }
 
 // Analytic studio lobes/ground, not a photographed environment or area-light integral.

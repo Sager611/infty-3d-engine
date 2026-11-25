@@ -62,24 +62,24 @@ fn hf_gradient_value(order:u32,uv:vec2f,repeats:f32)->f32 {
   let p=hf_phase(uv,order,repeats);
   return hf_bilinear(order,select(fract(p),clamp(p,vec2f(0.0),vec2f(1.0)),order==0u),1.0);
 }
-fn hf_slope(order:u32,uv:vec2f,repeats:f32,footprint:f32,span:f32)->vec2f {
+fn hf_slope(order:u32,uv:vec2f,repeats:f32,footprint:f32,span:f32,quantum_axes:f32)->vec2f {
   let detail=hf_detail_weight(order,span);if(detail==0.0){return vec2f(0.0);}
   let edge=f32(height_data.info.x);
   let visible=detail*material_visible(clamp(log2(max(1e-30,footprint)*edge*repeats),0.0,9.0));
   if(visible==0.0){return vec2f(0.0);}
-  let step=max(1.0/(edge*repeats),0.5*footprint);
+  let step=surface_slope_step(max(1.0/(edge*repeats),0.5*footprint),height_data.amplitudes[order]*quantum_axes/255.0);
   let x=hf_gradient_value(order,uv+vec2f(step,0.0),repeats)-hf_gradient_value(order,uv-vec2f(step,0.0),repeats);
   let y=hf_gradient_value(order,uv+vec2f(0.0,step),repeats)-hf_gradient_value(order,uv-vec2f(0.0,step),repeats);
   return vec2f(x,y)*(visible/(2.0*step));
 }
-fn hf_gradient_lod(uv:vec2f,footprint:f32,span:f32)->vec2f {
+fn hf_gradient_lod(uv:vec2f,footprint:f32,span:f32,quantum_axes:f32)->vec2f {
   if(height_data.info.x<2u){return vec2f(0.0);}
-  return (hf_slope(0u,uv,1.0,footprint,span)*height_data.amplitudes.x
-    +hf_slope(1u,uv,10.0,footprint,span)*height_data.amplitudes.y
-    +hf_slope(2u,uv,100.0,footprint,span)*height_data.amplitudes.z
-    +hf_slope(3u,uv,1000.0,footprint,span)*height_data.amplitudes.w)/255.0;
+  return (hf_slope(0u,uv,1.0,footprint,span,quantum_axes)*height_data.amplitudes.x
+    +hf_slope(1u,uv,10.0,footprint,span,quantum_axes)*height_data.amplitudes.y
+    +hf_slope(2u,uv,100.0,footprint,span,quantum_axes)*height_data.amplitudes.z
+    +hf_slope(3u,uv,1000.0,footprint,span,quantum_axes)*height_data.amplitudes.w)/255.0;
 }
-fn hf_gradient(uv:vec2f,footprint:f32)->vec2f {return hf_gradient_lod(uv,footprint,0.0);}
+fn hf_gradient(uv:vec2f,footprint:f32)->vec2f {return hf_gradient_lod(uv,footprint,0.0,0.0);}
 fn leaf_covered(uv:vec2f)->bool {
   return height_data.info.x<2u||hf_bilinear(4u,uv,1.0)>=127.5;
 }

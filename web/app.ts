@@ -69,6 +69,7 @@ import {
 	type Status,
 	statusMessage,
 } from "./status.ts";
+import { listenVelocity, renderVelocity } from "./velocity.ts";
 import { MATERIAL_MODE, type ViewMode } from "./view.ts";
 
 const INITIAL_SPEED = 3;
@@ -81,6 +82,7 @@ const MAX_PIXELS = 1_000_000;
 const HASH_DELAY = 150;
 const canvas: HTMLElement | null = document.getElementById("viewport");
 const modeNode: HTMLElement | null = document.getElementById("mode");
+const velocityNode: HTMLElement | null = document.getElementById("velocity");
 const presetNode: HTMLElement | null = document.getElementById("scene-preset");
 const resetNode: HTMLElement | null = document.getElementById("reset");
 const focusNode: HTMLElement | null = document.getElementById("focus");
@@ -91,6 +93,7 @@ if (
 	!(
 		canvas instanceof HTMLCanvasElement &&
 		modeNode instanceof HTMLSelectElement &&
+		velocityNode instanceof HTMLInputElement &&
 		presetNode instanceof HTMLSelectElement &&
 		resetNode instanceof HTMLButtonElement &&
 		focusNode instanceof HTMLButtonElement &&
@@ -148,9 +151,17 @@ let meter: Meter | undefined;
 let movement: Movement = STOPPED;
 let movementTime: number | undefined;
 let baseSpeed: number = INITIAL_SPEED;
+let motionSpeed: number | undefined;
 let saveTimer: number | undefined;
 let disposed = false;
 let outputStatus: Status = EMPTY_STATUS;
+
+const updateVelocity = (): void =>
+	renderVelocity(
+		velocityNode,
+		motionSpeed ?? baseSpeed,
+		movement.boost === true,
+	);
 
 const errorMessage = (error: unknown): string => {
 	if (error instanceof Error) {
@@ -177,6 +188,7 @@ const stateForControls = (): ControlsState => ({
 });
 
 const updateUi = (): void => {
+	updateVelocity();
 	modeNode.value = String(snapshot.mode);
 	renderControls(controls, stateForControls());
 	duplicateButton.disabled = selection.ids.length === 0;
@@ -225,10 +237,12 @@ const setMovement = (value: Movement): void => {
 	}
 	if (!hasMovement(value)) {
 		movementTime = undefined;
+		motionSpeed = undefined;
 	} else if (!hasMovement(movement)) {
 		movementTime = performance.now();
 	}
 	movement = value;
+	updateVelocity();
 	if (hasMovement(value)) {
 		setStatus("");
 	}
@@ -421,11 +435,14 @@ const centerHitDistance = (): number | null => {
 	return result?.t ?? null;
 };
 
-const speed = (amount: number): void => {
-	baseSpeed = travelSpeed(baseSpeed, amount);
+const setBaseSpeed = (value: number): void => {
+	baseSpeed = travelSpeed(value, 0);
+	updateVelocity();
 	setStatus("");
 	metrics.title = `Base travel speed ${baseSpeed.toPrecision(SPEED_DIGITS)} units/s`;
 };
+const speed = (amount: number): void =>
+	setBaseSpeed(travelSpeed(baseSpeed, amount));
 
 const frame = (): void => {
 	removeInput?.stop();
@@ -495,15 +512,13 @@ const renderFrame = (now: number): void => {
 				seconds = Math.max(0, (now - movementTime) / MILLISECONDS_PER_SECOND);
 			}
 			movementTime = now;
+			const rate = stepSpeed(movement, baseSpeed, seconds, centerHitDistance);
 			snapshot = {
 				...snapshot,
-				camera: moveCamera(
-					snapshot.camera,
-					movement,
-					stepSpeed(movement, baseSpeed, seconds, centerHitDistance),
-					seconds,
-				),
+				camera: moveCamera(snapshot.camera, movement, rate, seconds),
 			};
+			motionSpeed = rate;
+			updateVelocity();
 			scheduleHash();
 		}
 		phase = "render";
@@ -582,6 +597,7 @@ const cleanup = (): void => {
 	renderer?.free();
 	prepared = releaseScene(prepared);
 	removeControls?.();
+	removeVelocity?.();
 	removeSceneActions?.();
 	presetNode.removeEventListener("change", loadScenePreset);
 	addMenu.removeEventListener("toggle", focusShape);
@@ -631,6 +647,7 @@ const handleSceneAction = (action: SceneAction): void => {
 };
 let removeSceneActions: (() => void) | undefined;
 let removeControls: (() => void) | undefined;
+let removeVelocity: (() => void) | undefined;
 let removeInput: InputController | undefined;
 
 const acceptRenderer = (value: Renderer): boolean => {
@@ -693,6 +710,15 @@ removeSceneActions = listenSceneActions(
 );
 removeControls = listenControls(controls, stateForControls, handleControls);
 removeInput = bindInput(inputBindings);
+removeVelocity = listenVelocity(velocityNode, {
+	boost: () => movement.boost === true,
+	set: setBaseSpeed,
+	error: (error: unknown): void => {
+		removeInput?.stop();
+		updateVelocity();
+		setStatus(`Speed control failed: ${errorMessage(error)}`);
+	},
+});
 gizmo = createGizmo({
 	canvas,
 	camera: (): Snapshot["camera"] => snapshot.camera,

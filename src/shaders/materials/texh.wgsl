@@ -40,12 +40,39 @@ fn texh_height(foot:SurfacePoint,context:TexhContext)->f32 {
   if(context.object.params.w==1.0){height=min(0.0,height);}
   return height/context.object.position_size.w;
 }
-fn texh_normal(point:vec3f,foot:SurfacePoint,context:TexhContext)->vec3f {
+fn texh_gradient(point:vec3f,foot:SurfacePoint,context:TexhContext,normal_filter:f32)->vec3f {
   if(context.object.params.w==2.0){
-    let slope=hf_gradient_lod(leaf_uv_unit(foot.uv),0.5*context.footprint/context.object.position_size.w,context.span);
-    return material_unit(foot.n-geometry_uv_axes(point,context.base,context.object)*slope,foot.n);
+    let axes=geometry_uv_axes(point,context.base,context.object);let error=abs(axes[0])+abs(axes[1]);
+    let quantum_axes=normal_filter*max(error.x,max(error.y,error.z));
+    let slope=hf_gradient_lod(leaf_uv_unit(foot.uv),0.5*context.footprint/context.object.position_size.w,context.span,quantum_axes);
+    return axes*slope;
   }
-  return layered_material(u32(context.object.params.w),texh_delta(foot,context),foot.n,context.footprint).normal;
+  let n=material_unit(foot.n,vec3f(0.0,1.0,0.0));
+  let g=material_layers(u32(context.object.params.w),texh_delta(foot,context),n,context.footprint,normal_filter).gradient;
+  return g-n*dot(n,g);
+}
+fn texh_normal(point:vec3f,foot:SurfacePoint,context:TexhContext)->vec3f {
+  let g=texh_gradient(point,foot,context,1.0);let n=material_unit(foot.n,vec3f(0.0,1.0,0.0));
+  return material_unit(n-g/select(max(1.0,length(g)/2.0),1.0,context.object.params.w==2.0),n);
+}
+// Largest ray-cone stretch of the frozen-frame direct map, including grazing fade.
+// Only shading uses it; carrier height/LOD and depth are never resampled.
+fn texh_filter_footprint(base:SceneSample,depth:f32,d:vec3f,g:vec3f,pixel_span:f32)->f32 {
+  let c=dot(base.query.n,d);let sine2=max(0.0,1.0-c*c);let along=dot(g,d);
+  let kt=base.query.t*c/max(0.0025,c*c);
+  let fade=select(0.0,2.0*(depth-base.query.t)*sine2,c*c<0.0025);
+  let a=(depth+kt*along-fade)/max(1e-6,abs(c));
+  let b=kt*sqrt(max(0.0,sine2*dot(g,g)-along*along));
+  let stretch=0.5*(length(vec2f(a+depth,b))+length(vec2f(a-depth,b)));
+  return max(1e-30,pixel_span*max(max(base.query.t,depth)/max(0.01,abs(c)),stretch));
+}
+fn texh_shading_context(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->TexhContext {
+  var context=texh_context(base,d,object,origin_delta,pixel_span);
+  if(pixel_span>0.0&&sample.query.hit&&base.base_hit!=0u){
+    let g=texh_gradient(base.local,geometry_surface(base.local,base,object),context,0.0);
+    context.footprint=texh_filter_footprint(base,sample.query.t,d,scene_world_vector(object,g),pixel_span);
+  }
+  return context;
 }
 fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->SceneSample {
   if(base.base_hit==0u){return base;}
@@ -69,7 +96,7 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
 // Normals are needed only after nearest-hit selection; probes retain the full adapter.
 fn texh_shade_normal(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->vec3f {
   if(!sample.query.hit||base.base_hit==0u){return sample.query.n;}
-  let context=texh_context(base,d,object,origin_delta,pixel_span);
+  let context=texh_shading_context(sample,base,d,object,origin_delta,pixel_span);
   return scene_world_vector(object,texh_normal(sample.local,geometry_surface(sample.local,base,object),context));
 }
 fn material_texh(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->SceneSample {
@@ -78,10 +105,13 @@ fn material_texh(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,
   return sample;
 }
 fn texh_surface(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->MaterialSurface {
-  let footprint=texh_footprint(base,d,pixel_span);let normal=surface_normal(sample.query.n,d,sample.kind);
-  if(object.params.w==2.0){return leaf_material(sample.query.uv,normal,object.position_size.w,footprint);}
-  let context=texh_context(base,d,object,origin_delta,pixel_span);
+  let context=texh_shading_context(sample,base,d,object,origin_delta,pixel_span);
   let foot=geometry_surface(sample.local,base,object);
-  var material=layered_material(u32(object.params.w),texh_delta(foot,context),foot.n,footprint);
-  material.normal=normal;return material;
+  if(object.params.w==2.0){
+    let n=scene_world_vector(object,texh_normal(sample.local,foot,context));
+    return leaf_material(sample.query.uv,surface_normal(n,base.query.n,d,sample.kind),object.position_size.w,context.footprint);
+  }
+  var material=layered_material(u32(object.params.w),texh_delta(foot,context),foot.n,context.footprint);
+  material.normal=surface_normal(scene_world_vector(object,material.normal),base.query.n,d,sample.kind);
+  return material;
 }

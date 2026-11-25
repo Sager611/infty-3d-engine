@@ -19,9 +19,31 @@ fn verify_crystal_render(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let input = rays[id.x];
   let kind = u32(input.o.x);
-  let normal = surface_normal(input.d.xyz, vec3f(0.0, 0.0, 1.0), kind);
+  let carrier=select(input.d.xyz,input.o.yzw,any(input.o.yzw!=vec3f(0.0)));
+  let normal = surface_normal(input.d.xyz, carrier, vec3f(0.0, 0.0, 1.0), kind);
   results[id.x] = ProbeResult(vec4f(0.0, normal),
     vec4f(0.0), vec4f(0.0), vec4f(0.0));
+}
+
+@compute @workgroup_size(1)
+fn verify_slope_precision(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}let input=rays[id.x];
+  let level=material_levels[u32(input.d.x)];
+  let raw=material_tile(input.o.zw,vec2f(0.0),level,input.d.y,0.0);
+  let filtered=material_tile(input.o.zw,vec2f(0.0),level,input.d.y,1.0);
+  results[id.x]=ProbeResult(vec4f(surface_slope_step(input.o.x,input.o.y),0.0,0.0,0.0),
+    vec4f(raw.color,raw.height),vec4f(filtered.color,filtered.height),
+    vec4f(length(raw.gradient),length(filtered.gradient),0.0,0.0));
+}
+
+@compute @workgroup_size(1)
+fn verify_texh_filter(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}let input=rays[id.x];
+  let c=input.o.z;let d=vec3f(sqrt(max(0.0,1.0-c*c)),0.0,-c);
+  var base:SceneSample;base.query.t=input.o.x;base.query.n=vec3f(0.0,0.0,1.0);
+  let depth=max(0.0,input.o.x-input.o.y*c/max(0.0025,c*c));
+  let span=texh_filter_footprint(base,depth,d,vec3f(input.o.w,input.d.y,0.0),input.d.x);
+  results[id.x]=ProbeResult(vec4f(span,depth,0.0,0.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 
 @compute @workgroup_size(1)
@@ -107,7 +129,8 @@ fn verify_material_color(@builtin(global_invocation_id) id: vec3u) {
   let r=rays[id.x];let d=normalize(r.d.xyz);
   let object=SceneObject(vec4u(1u,5u,0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w),POSE_IDENTITY);
   let base=scene_object(r.o.xyz,d,object);let sample=material_texh(base,d,object,r.o.xyz,0.001);
-  let material=texh_surface(sample,base,d,object,r.o.xyz,0.001);let footprint=texh_footprint(base,d,0.001);
+  let material=texh_surface(sample,base,d,object,r.o.xyz,0.001);
+  let footprint=texh_shading_context(sample,base,d,object,r.o.xyz,0.001).footprint;
   var expected=layered_material(u32(r.o.w),vec3f(sample.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint);
   var original=layered_material(u32(r.o.w),vec3f(base.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint);
   if(r.o.w==2.0){
@@ -142,7 +165,7 @@ fn verify_material_display(@builtin(global_invocation_id) id: vec3u) {
 fn verify_material_mapping(@builtin(global_invocation_id) id: vec3u) {
   if (id.x>=arrayLength(&rays)) { return; }
   let input=rays[id.x];let level=material_levels[u32(input.o.z)];
-  let q=material_tile(input.o.xy,input.d.xy,level,input.o.w);
+  let q=material_tile(input.o.xy,input.d.xy,level,input.o.w,0.0);
   let raw=textureSampleLevel(material_tiles,material_sampler,input.o.xy+input.d.xy,i32(level.identity.y),input.o.w);
   results[id.x]=ProbeResult(vec4f(q.color,q.height),vec4f(q.gradient,0.0,0.0),raw,vec4f(0.0));
 }
@@ -242,7 +265,7 @@ fn verify_surface(@builtin(global_invocation_id) id: vec3u) {
     vec3f(0.0, 1.0, 0.0), vec2f(0.6, 0.2));
   let direction = vec3f(0.0, -1.0, 0.0);
   let rho = surface_rho(q, vec3f(0.6, 0.0, 0.2), direction, 100.0, ray.d.w, false);
-  let color = surface_shade(q, vec3f(0.6, 0.0, 0.2), 3u, direction, 100.0,
+  let color = surface_shade(q, q.n, vec3f(0.6, 0.0, 0.2), 3u, direction, 100.0,
     ray.d.w, u32(ray.o.w), q.p + vec3f(0.0, 1.0, 0.0), 1.0);
   results[id.x] = ProbeResult(vec4f(rho, color), vec4f(0.0), vec4f(0.0), vec4f(0.0));
 }

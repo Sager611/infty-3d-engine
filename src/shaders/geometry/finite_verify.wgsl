@@ -19,7 +19,8 @@ fn verify_leaf_material(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let input=rays[id.x];let axis=u32(input.o.w);
   let uv=fma(input.o.xy,vec2f(0.5),vec2f(0.5));
-  let normal=surface_normal(plane_unframe(vec3f(0.0,0.0,1.0),axis),input.d.xyz,5u);
+  let carrier=plane_unframe(vec3f(0.0,0.0,1.0),axis);
+  let normal=surface_normal(carrier,carrier,input.d.xyz,5u);
   let material=leaf_material(uv,normal,input.d.w,input.o.z);
   results[id.x]=ProbeResult(vec4f(material.normal,material.roughness),vec4f(material.albedo,material.metallic),
     vec4f(0.0),vec4f(leaf_fetch(leaf_uv(uv,0u),0u,8,0.0).a,
@@ -41,7 +42,7 @@ fn verify_finite_pending(@builtin(global_invocation_id) id:vec3u) {
   let input=rays[id.x];
   let unknown=pending_before(Pending(input.o.x,input.o.y>0.0),input.o.z>0.0,input.o.w,input.d.x);
   results[id.x]=ProbeResult(vec4f(f32(unknown),0.0,0.0,0.0),
-    vec4f(0.0,0.0,0.0,surface_normal(vec3f(0.0,0.0,1.0),vec3f(0.0,0.0,1.0),5u).z),
+    vec4f(0.0,0.0,0.0,surface_normal(vec3f(0.0,0.0,1.0),vec3f(0.0,0.0,1.0),vec3f(0.0,0.0,1.0),5u).z),
     vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)
