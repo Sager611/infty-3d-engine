@@ -27,6 +27,7 @@ import {
 	undoDeletion,
 } from "./editing.ts";
 import { createFrames, type Frames } from "./frames.ts";
+import { createGizmo, type GizmoWidget } from "./gizmo-view.ts";
 import {
 	bindInput,
 	type InputBindings,
@@ -51,7 +52,7 @@ import {
 	type Selection,
 	selectionFromHits,
 } from "./query.ts";
-import { updateObject } from "./scene.ts";
+import { type SceneObject, type ScenePatch, updateObject } from "./scene.ts";
 import { listenSceneActions, type SceneAction } from "./scene-actions.ts";
 import {
 	cameraPacket,
@@ -136,6 +137,7 @@ let selection: Selection = EMPTY_SELECTION;
 let editor: Editor = createEditor(snapshot.objects);
 let pickAll = false;
 let renderer: Renderer | undefined;
+let gizmo: GizmoWidget | undefined;
 let prepared: SceneCache<PreparedScene> = emptySceneCache<PreparedScene>();
 let wasmMemory: WebAssembly.Memory | undefined;
 let meter: Meter | undefined;
@@ -180,6 +182,7 @@ const updateUi = (): void => {
 	deleteButton.ariaLabel = label;
 	deleteButton.title = label;
 	deleteButton.dataset.tip = label;
+	gizmo?.update();
 };
 
 const scheduleHash = (): void => {
@@ -227,7 +230,10 @@ const setMovement = (value: Movement): void => {
 	invalidate();
 };
 
-const setSnapshot = (next: Snapshot): void => {
+const setSnapshot = (next: Snapshot, transformed?: boolean): void => {
+	if (transformed !== true) {
+		gizmo?.cancel(false);
+	}
 	if (snapshot.objects !== next.objects) {
 		editor = { ...editor, objects: next.objects, undo: null };
 		selection = cleanSelection(next.objects, selection);
@@ -497,6 +503,7 @@ const renderFrame = (now: number): void => {
 		}
 		phase = "render";
 		resizeCanvas();
+		gizmo?.update();
 		renderer.render_scene(
 			cameraValues(),
 			preparedScene(),
@@ -522,6 +529,7 @@ const frames: Frames = createFrames({
 });
 
 const hashChanged = (): void => {
+	gizmo?.cancel(false);
 	removeInput?.stop();
 	try {
 		snapshot = parseSnapshot(location.hash);
@@ -565,6 +573,7 @@ const cleanup = (): void => {
 	}
 	frames.dispose();
 	meter?.dispose();
+	gizmo?.dispose();
 	renderer?.free();
 	prepared = releaseScene(prepared);
 	removeControls?.();
@@ -583,6 +592,7 @@ const focusShape = (): void => {
 	}
 };
 const handleSceneAction = (action: SceneAction): void => {
+	gizmo?.cancel(false);
 	try {
 		const current = { ...editor, selection };
 		if (action === "delete") {
@@ -643,6 +653,8 @@ const start = async (): Promise<void> => {
 	}
 };
 
+const uiBlocked = (): boolean =>
+	disposed || renderer === undefined || addMenu.matches(":popover-open");
 const inputBindings: InputBindings = {
 	canvas,
 	getCamera: () => snapshot.camera,
@@ -652,8 +664,7 @@ const inputBindings: InputBindings = {
 	keyboard: window,
 	visibility: document,
 	hidden: () => document.hidden,
-	blocked: () =>
-		disposed || renderer === undefined || addMenu.matches(":popover-open"),
+	blocked: () => uiBlocked() || gizmo?.dragging() === true,
 	onError: (error: unknown) => {
 		removeInput?.stop();
 		setStatus(`Camera control failed: ${errorMessage(error)}`);
@@ -675,6 +686,24 @@ removeSceneActions = listenSceneActions(
 );
 removeControls = listenControls(controls, stateForControls, handleControls);
 removeInput = bindInput(inputBindings);
+gizmo = createGizmo({
+	canvas,
+	camera: (): Snapshot["camera"] => snapshot.camera,
+	object: (): SceneObject | undefined =>
+		snapshot.objects.find((object) => object.id === selection.active),
+	blocked: uiBlocked,
+	start: (): void => removeInput?.stop(),
+	change: (id: number, patch: ScenePatch): void =>
+		setSnapshot(
+			{
+				...snapshot,
+				objects: updateObject(snapshot.objects, id, patch),
+			},
+			true,
+		),
+	error: (error: unknown): void =>
+		setStatus(`Transform failed: ${errorMessage(error)}`),
+});
 modeNode.addEventListener("change", () => {
 	try {
 		setSnapshot({ ...snapshot, mode: readMode() });
