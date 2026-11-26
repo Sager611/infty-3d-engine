@@ -59,6 +59,23 @@ fn material_bumps_keep_the_carrier_side_across_view_tangencies() -> TestResult {
 }
 
 #[test]
+fn relief_and_shading_rules_come_from_material_data() {
+    for source in [
+        include_str!("../shaders/materials/texh.wgsl"),
+        include_str!("../shaders/materials/layered.wgsl"),
+    ] {
+        for rule in [
+            "params.w==1.0",
+            "material==0u",
+            "material==1u",
+            "min(0.0,height)",
+        ] {
+            assert!(!source.contains(rule), "material-specific rule: {rule}");
+        }
+    }
+}
+
+#[test]
 fn close_brick_relief_draws_shown_spots_near_their_own_depth() -> TestResult {
     let (sin, cos) = 0.87_f32.sin_cos();
     let mut rays = Vec::new();

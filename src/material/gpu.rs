@@ -218,11 +218,8 @@ fn rows(
                     u32::from(level.material.tag()),
                     u32::try_from(index).map_err(|_| "material layer")?,
                     u32::from(level.order == 0)
-                        | if level.material == super::Material::Leaf {
-                            u32::try_from(level.order).map_err(|_| "leaf order")? << 8
-                        } else {
-                            median << 16
-                        },
+                        | u32::try_from(level.order).map_err(|_| "material order")? << 8
+                        | median << 16,
                     level
                         .atlas
                         .map_or(0, |a| u32::from(a.cells[0]) | (u32::from(a.cells[1]) << 16)),

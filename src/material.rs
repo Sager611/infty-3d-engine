@@ -10,7 +10,30 @@ pub enum Material {
     Brick,
     Leaf,
 }
+/// Material-wide shading/relief data; shaders read it from a generated table.
+#[derive(Clone, Copy, Debug)]
+pub struct Spec {
+    pub roughness: f32,
+    pub metallic: f32,
+    pub occlusion: f32,
+    /// Relief is cut into the carrier: the base order is measured from its top.
+    pub carve: bool,
+}
 impl Material {
+    pub const ALL: [Self; 3] = [Self::Steel, Self::Brick, Self::Leaf];
+    pub const fn spec(self) -> Spec {
+        let (roughness, metallic, occlusion, carve) = match self {
+            Self::Steel => (0.26, 1.0, 0.0, false),
+            Self::Brick => (0.86, 0.0, 1.0, true),
+            Self::Leaf => (0.45, 0.0, 0.0, false),
+        };
+        Spec {
+            roughness,
+            metallic,
+            occlusion,
+            carve,
+        }
+    }
     pub const fn tag(self) -> u8 {
         match self {
             Self::Steel => 0,
@@ -48,7 +71,7 @@ pub fn presets() -> Vec<Level> {
     presets_with_leaf(false)
 }
 pub fn presets_with_leaf(leaf: bool) -> Vec<Level> {
-    [Material::Steel, Material::Brick, Material::Leaf]
+    Material::ALL
         .into_iter()
         .take(if leaf { 3 } else { 2 })
         .flat_map(|material| {

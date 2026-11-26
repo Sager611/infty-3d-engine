@@ -55,7 +55,21 @@ pub fn source() -> String {
         );
         let _ = writeln!(leaf, "color=leaf_level(color,{index}u,p,size,footprint);");
     }
+    let mut specs = String::new();
+    for m in crate::material::Material::ALL {
+        let s = m.spec();
+        let _ = writeln!(
+            specs,
+            "case {}u:{{return MaterialSpec({:?},{:?},{:?},{}u);}}",
+            m.tag(),
+            s.roughness,
+            s.metallic,
+            s.occlusion,
+            u32::from(s.carve)
+        );
+    }
     SOURCE
+        .replace("// @material-specs", &specs)
         .replace("// @texh-levels", &height)
         .replace("// @material-levels", &material)
         .replace("// @leaf-levels", &leaf)

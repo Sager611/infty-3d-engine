@@ -1,6 +1,6 @@
 // RGBA8 linear reflectance + relief. Explicit mip footprints for compute shading.
 struct MaterialLevel {
-  identity: vec4u, // material, layer, base bit + leaf order<<8 or median height byte<<16, optional atlas columns/rows
+  identity: vec4u, // material, layer, base bit + order<<8 + median height byte<<16, optional atlas columns/rows
   surface: vec4f, // metres/tile, relief metres, colour gain, unresolved roughness
   phase: vec4f,   // f64-origin fractions + exact packed 8-bit XYZ tile identities
   mean: vec4f,    // linear RGB/height mean; fine layers modulate around one
@@ -119,6 +119,14 @@ fn material_lod(footprint:f32,extent:f32)->f32 {
   return clamp(log2(max(1e-30,footprint)*512.0/extent),0.0,9.0);
 }
 fn material_visible(lod:f32)->f32 {return 1.0-smoothstep(4.0,8.0,lod);}
+// Material-wide data generated from the Rust material table.
+struct MaterialSpec {roughness:f32,metallic:f32,occlusion:f32,carve:u32};
+fn material_spec(material:u32)->MaterialSpec {
+  switch material {
+    // @material-specs
+    default:{return MaterialSpec(0.5,0.0,0.0,0u);}
+  }
+}
 struct MaterialLayers {base:vec3f,modulation:vec3f,gradient:vec3f,variance:f32,occlusion:f32};
 fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weights:vec3f,footprint:f32,normal_filter:f32)->MaterialLayers {
   var state=input;
@@ -146,11 +154,11 @@ fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weight
   if(base_order){state.base=color;}
   else{state.modulation*=mix(vec3f(1.0),color/max(level.mean.rgb,vec3f(1.0/255.0)),level.surface.z*visible);}
   state.gradient+=slope*(level.surface.y/extent)*visible;
-  if(material==1u&&!base_order){state.occlusion*=mix(1.0,0.08+0.92*smoothstep(0.12,0.56,height),visible);}
+  if(!base_order){state.occlusion*=mix(1.0,0.08+0.92*smoothstep(0.12,0.56,height),visible*material_spec(material).occlusion);}
   return state;
 }
 fn material_layers(material:u32,delta:vec3f,n:vec3f,footprint:f32,normal_filter:f32)->MaterialLayers {
-  let weights=material_weights(n);let roughness=select(0.26,0.86,material==1u);
+  let weights=material_weights(n);let roughness=material_spec(material).roughness;
   var state=MaterialLayers(vec3f(0.5),vec3f(1.0),vec3f(0.0),roughness*roughness,1.0);
   // @material-levels
   return state;
@@ -161,7 +169,7 @@ fn layered_material(material:u32,delta:vec3f,normal:vec3f,footprint:f32)->Materi
   let tangent=state.gradient-n*dot(n,state.gradient);
   let bumped=material_unit(n-tangent/max(1.0,length(tangent)/2.0),n);
   return MaterialSurface(clamp(state.base*state.modulation,vec3f(0.004),vec3f(0.98)),bumped,
-    clamp(sqrt(state.variance),0.05,0.98),select(0.0,1.0,material==0u),state.occlusion,material_weights(n).z);
+    clamp(sqrt(state.variance),0.05,0.98),material_spec(material).metallic,state.occlusion,material_weights(n).z);
 }
 
 // Analytic studio lobes/ground, not a photographed environment or area-light integral.

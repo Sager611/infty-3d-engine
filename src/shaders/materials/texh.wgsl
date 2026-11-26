@@ -24,8 +24,8 @@ fn texh_level(index:u32,foot:SurfacePoint,context:TexhContext,typical:bool)->f32
   let level=material_levels[index];let material=u32(context.object.params.w);
   if(level.identity.x!=material){return 0.0;}
   let lod=material_lod(context.footprint,level.surface.x);let visible=material_visible(lod);
-  let top=material==1u&&(level.identity.z&1u)!=0u;let datum=select(level.mean.a,1.0,top);
-  if(typical){return select(0.0,f32(level.identity.z>>16u)/255.0-1.0,top)*level.surface.y*visible;}
+  let datum=select(level.mean.a,1.0,(level.identity.z&1u)!=0u&&material_spec(material).carve!=0u);
+  if(typical){return (f32((level.identity.z>>16u)&255u)/255.0-datum)*level.surface.y*visible;}
   if(visible==0.0){return 0.0;}
   let coords=material_coords(level,texh_delta(foot,context));
   let weights=material_weights(foot.n);var alpha=0.0;
@@ -41,7 +41,6 @@ fn texh_height(foot:SurfacePoint,context:TexhContext,typical:bool)->f32 {
   }
   var height=0.0;
   // @texh-levels
-  if(context.object.params.w==1.0){height=min(0.0,height);}
   return height/context.object.position_size.w;
 }
 // Sample depth where the ray meets the median-height plane: brick tops sit ~1 mm above the face.
