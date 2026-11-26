@@ -30,9 +30,9 @@ fn material_display(linear: vec3f) -> vec3f {
   let c=clamp(linear,vec3f(0.0),vec3f(1.0));
   return select(12.92*c,1.055*pow(c,vec3f(1.0/2.4))-vec3f(0.055),c>vec3f(0.0031308));
 }
-fn material_compensate(a: vec4f, b: vec4f, mean: vec4f, t: f32) -> vec4f {
-  let scale=inverseSqrt(t*t+(1.0-t)*(1.0-t));
-  let value=mean+mix(a-mean,b-mean,t)*scale;
+// Variance-preserving blend keeps relief contrast for any weights.
+fn material_compensate(a: vec4f, b: vec4f, c: vec4f, mean: vec4f, w: vec3f) -> vec4f {
+  let value=mean+((a-mean)*w.x+(b-mean)*w.y+(c-mean)*w.z)*inverseSqrt(dot(w,w));
   return vec4f(clamp(value.rgb,vec3f(0.0),vec3f(1.0)),value.a);
 }
 fn material_unit(v: vec3f, fallback: vec3f) -> vec3f {
@@ -50,18 +50,16 @@ fn material_hash(cell: vec2f, seed: u32) -> u32 {
 fn material_random(cell: vec2f, seed: u32) -> f32 {
   return f32(material_hash(cell,seed)>>8u)/16777216.0;
 }
-fn material_noise(p: vec2f, seed: u32) -> f32 {
-  let cell=floor(p*0.25)*4.0;
-  let f=fract(p*0.25);let t=f*f*(3.0-2.0*f);
-  return mix(mix(material_random(cell,seed),material_random(cell+vec2f(4.0,0.0),seed),t.x),
-    mix(material_random(cell+vec2f(0.0,4.0),seed),material_random(cell+vec2f(4.0),seed),t.x),t.y);
-}
 fn material_sample(uv:vec2f,layer:i32,level:f32)->vec4f {
   return textureSampleLevel(material_tiles,material_sampler,uv,layer,clamp(level,0.0,9.0));
 }
 fn material_mirror_uv(uv:vec2f,origin:vec2f)->vec2f {
   // Keep precise fractions separate from cell identity; address mode supplies reflection.
   return fract(uv)+2.0*fract((floor(uv)+origin)*0.5);
+}
+fn material_shift(vertex:vec2f,seed:u32)->vec2f {
+  let h=material_hash(vertex,seed);
+  return vec2f(vec2u(h,h>>16u)&vec2u(65535u))/32768.0;
 }
 fn material_mirrored(uv: vec2f, origin: vec2f, layer: i32, lod: f32) -> vec4f {
   return material_sample(material_mirror_uv(uv,origin),layer,lod);
@@ -88,10 +86,14 @@ fn material_value(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32) -> v
     value=mix(level.border,value,smoothstep(0.0,1.0,min(distance.x,distance.y)));
     return mix(value,level.mean,smoothstep(4.0,8.0,lod));
   }
-  let a=material_mirrored(uv,origin,layer,lod);
-  let b=material_mirrored(uv+vec2f(0.371,0.613),origin,layer,lod);
-  let t=0.3+0.4*material_noise(uv+origin,level.identity.y+317u);
-  return material_compensate(a,b,level.mean,t);
+  // Half-tile triangle-grid vertices pick random offsets; cubed weights keep patches crisp: no period or mirror axis shows.
+  let grid=(uv+origin)*2.0;let cell=floor(grid);let f=grid-cell;let upper=f.x+f.y>1.0;
+  let w=select(vec3f(1.0-f.x-f.y,f.x,f.y),vec3f(f.x+f.y-1.0,1.0-f.y,1.0-f.x),upper);
+  let seed=level.identity.y+317u;
+  let a=material_mirrored(uv+material_shift(cell+f32(upper),seed),origin,layer,lod);
+  let b=material_mirrored(uv+material_shift(cell+vec2f(1.0,0.0),seed),origin,layer,lod);
+  let c=material_mirrored(uv+material_shift(cell+vec2f(0.0,1.0),seed),origin,layer,lod);
+  return material_compensate(a,b,c,level.mean,w*w*w);
 }
 // Zero keeps raw height differentials; one limits byte noise in shading normals.
 fn material_tile(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32, normal_filter:f32) -> MaterialTile {

@@ -74,7 +74,7 @@ fn verify_material_fill(@builtin(global_invocation_id) id: vec3u) {
 fn verify_material_variance(@builtin(global_invocation_id) id: vec3u) {
   if (id.x>=arrayLength(&rays)) { return; }
   let r=rays[id.x].o;
-  let q=material_compensate(vec4f(0.0,0.0,0.0,r.x),vec4f(0.0,0.0,0.0,r.y),vec4f(0.5,0.5,0.5,r.z),r.w);
+  let q=material_compensate(vec4f(0.0,0.0,0.0,r.x),vec4f(0.0,0.0,0.0,r.y),vec4f(0.0),vec4f(0.5,0.5,0.5,r.z),vec3f(1.0-r.w,r.w,0.0));
   results[id.x]=ProbeResult(q,vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)

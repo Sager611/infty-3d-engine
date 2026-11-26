@@ -209,6 +209,54 @@ fn material_mirrors_reflect_source_height_without_periodic_stamps()
     Ok(())
 }
 #[test]
+fn tiled_relief_shows_no_period_or_mirror_axis() -> Result<(), Box<dyn std::error::Error>> {
+    // Mirror tiling repeats every 2 tiles and reflects about integer lines.
+    let partners = [[2.0_f32, 0.0, 1.0], [0.0, 2.0, 1.0], [2.0, 0.0, -1.0]];
+    let mut levels = Vec::new();
+    let mut inputs = Vec::new();
+    for (index, level) in crate::material::presets_with_leaf(false).iter().enumerate() {
+        if level.atlas.is_some() {
+            continue;
+        }
+        levels.push(index);
+        let layer = f32::from(u16::try_from(index)?);
+        let mut n = 0.0_f32;
+        for _ in 0..1024 {
+            n += 1.0;
+            let [u, v] = [
+                (n * 0.754_877_7).fract() * 4.0,
+                (n * 0.569_840_3).fract() * 4.0,
+            ];
+            inputs.push([u, v, layer, 0.0, 0.0, 0.0, 0.0, 0.0]);
+            for [du, dv, sign] in partners {
+                inputs.push([sign.mul_add(u, du), dv + v, layer, 0.0, 0.0, 0.0, 0.0, 0.0]);
+            }
+        }
+    }
+    let q = run("verify_material_mapping", &inputs, inputs.len() * 16)?;
+    for (level, samples) in levels.iter().zip(q.chunks_exact(1024 * 64)) {
+        for partner in 1..4 {
+            let [mut n, mut sx, mut sy, mut sxx, mut syy, mut sxy] = [0.0_f64; 6];
+            for s in samples.chunks_exact(64) {
+                let (x, y) = (f64::from(s[3]), f64::from(s[16 * partner + 3]));
+                n += 1.0;
+                sx += x;
+                sy += y;
+                sxx = x.mul_add(x, sxx);
+                syy = y.mul_add(y, syy);
+                sxy = x.mul_add(y, sxy);
+            }
+            let correlation = n.mul_add(sxy, -sx * sy)
+                / (n.mul_add(sxx, -sx * sx) * n.mul_add(syy, -sy * sy)).sqrt();
+            assert!(
+                correlation.abs() < 0.15,
+                "level {level} repeats with partner {partner}: correlation {correlation}"
+            );
+        }
+    }
+    Ok(())
+}
+#[test]
 fn material_mapping_is_continuous_across_camera_and_atlas_boundaries()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut inputs = vec![

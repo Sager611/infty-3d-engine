@@ -4,7 +4,7 @@
 - Extensible geometry; no ray marching.
 - Materials are data: any material, texture, texh relief or order count runs through shared code; material rules come from the material table, never material-specific branches.
 - Three intersecting ridged cones with genuine multiscale geometry, CPU/GPU queries and web creation. New cluster kernels use fixed direct analytic work: no iteration, recursion or traversal.
-- Materials view with selectable brushed steel and red brickwork/mortar. Each begins with four repeating512×512 albedo/relief levels,10× apart; finer levels reveal grooves, pores and mineral grains, not miniature bricks. Support additional coarser/finer scales; visually check sphere, plane and Goursat up close through microscopic distances. Ground appearance in inspected references; keep height/colour fixed in object space during camera movement; preserve carrier geometry, picking and navigation.
+- Materials view with selectable brushed steel and red brickwork/mortar. Each begins with four repeating512×512 albedo/relief levels,10× apart; finer levels reveal grooves, pores and mineral grains, not miniature bricks. Hide tile repeats: no visible period or mirror axis at any distance. Support additional coarser/finer scales; visually check sphere, plane and Goursat up close through microscopic distances. Ground appearance in inspected references; keep height/colour fixed in object space during camera movement; preserve carrier geometry, picking and navigation.
 - Intuitive add/duplicate/delete controls. Duplicate selected instances in place with fresh IDs, matching geometry/pose/material, selected copies and one-step undo. XYZ positions use numeric0.001 increments (10× finer), direct typing and wheel nudging.
 - Selected geometry: centered XYZ translation arrows and between-axis rotation arcs, Unreal-style; Shift doubles either drag. Persist normalized quaternion poses without breaking legacy scenes/URLs; keep CPU/GPU queries, bounds, cutouts, normals, materials and shadows in the same instance frame.
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
@@ -18,6 +18,7 @@
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | User | Hide visible texture repetition | Pore lattice was obvious at mid distance |
 | 2026-11-26 | User | Slow every direction near looked-at geometry | Strafe/reverse/diagonals also ease close up |
 | 2026-11-26 | User | Require generic code for any material, texture, texh and order count | Material rules come from data, not special cases |
 | 2026-11-26 | User | Require natural close-up brick relief motion | Stop pores borrowing depth from spots ~1 mm away |
