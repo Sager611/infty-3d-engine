@@ -51,18 +51,36 @@ pub fn source() -> String {
 /// Any material level list and heightfield order count; code is unrolled from the data.
 pub fn source_for(levels: &[crate::material::Level], orders: usize) -> String {
     use std::fmt::Write as _;
-    let mut height = String::new();
-    let mut material = String::new();
-    let mut leaf = String::new();
-    for index in 0..levels.len() {
-        let _ = writeln!(height, "height+=texh_level({index}u,foot,context,typical);");
+    // Levels are contiguous per material: unroll only the longest material, from its first level.
+    // Unrolling every level made Metal compile 2.6x slower.
+    let (mut first, mut run, mut longest) = (String::from("0u"), 0, 0);
+    for (index, level) in levels.iter().enumerate() {
+        run = if index > 0 && levels[index - 1].material.tag() == level.material.tag() {
+            run + 1
+        } else {
+            first = format!(
+                "select({first},{index}u,material=={}u)",
+                level.material.tag()
+            );
+            1
+        };
+        longest = longest.max(run);
+    }
+    let mut height = String::from("let first=material_first(u32(context.object.params.w));\n");
+    let mut material = String::from("let first=material_first(material);\n");
+    let mut leaf = material.clone();
+    for k in 0..longest {
+        let _ = writeln!(
+            height,
+            "height+=texh_level(first+{k}u,foot,context,typical);"
+        );
         let _ = writeln!(
             material,
-            "state=material_layer(state,{index}u,material,delta,weights,footprint,normal_filter);"
+            "state=material_layer(state,first+{k}u,material,delta,weights,footprint,normal_filter);"
         );
         let _ = writeln!(
             leaf,
-            "color=leaf_level(color,{index}u,material,p,size,footprint);"
+            "color=leaf_level(color,first+{k}u,material,p,size,footprint);"
         );
     }
     let (mut specs, mut carve, mut field) = (String::new(), 0_u32, String::from("false"));
@@ -86,6 +104,7 @@ pub fn source_for(levels: &[crate::material::Level], orders: usize) -> String {
         .replace("// @material-specs", &specs)
         .replace("MATERIAL_CARVE=0u", &format!("MATERIAL_CARVE={carve}u"))
         .replace("false/*@material-field*/", &field)
+        .replace("0u/*@material-first*/", &first)
         .replace("// @texh-levels", &height)
         .replace("// @material-levels", &material)
         .replace("// @leaf-levels", &leaf);

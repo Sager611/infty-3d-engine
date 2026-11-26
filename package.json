@@ -3,7 +3,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build:wasm": "wasm-pack build --target web --dev",
+		"build:wasm": "wasm-pack build --target web",
 		"build:web": "bun build web/app.ts --outdir dist --target browser --external ./pkg/infty.js --minify",
 		"dev": "bun serve.ts",
 		"test": "bun test web/",
