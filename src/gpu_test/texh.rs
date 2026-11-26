@@ -59,6 +59,41 @@ fn material_bumps_keep_the_carrier_side_across_view_tangencies() -> TestResult {
 }
 
 #[test]
+fn close_brick_relief_draws_shown_spots_near_their_own_depth() -> TestResult {
+    let (sin, cos) = 0.87_f32.sin_cos();
+    let mut rays = Vec::new();
+    for (x, y) in [-0.3_f32, -0.1, 0.1, 0.3]
+        .into_iter()
+        .flat_map(|x| [-0.3_f32, -0.1, 0.1, 0.3].map(|y| (x, y)))
+    {
+        for (a, b) in [-0.15_f32, -0.05, 0.05, 0.15]
+            .into_iter()
+            .flat_map(|a| [-0.15_f32, -0.05, 0.05, 0.15].map(|b| (a, b)))
+        {
+            rays.push([x, y, 0.005, 1.0, sin + a, b, -cos, 5.0]);
+        }
+    }
+    let q = run("verify_texh_borrow", &rays, rays.len() * 16)?;
+    let mut error: Vec<f32> = q
+        .chunks_exact(16)
+        .filter(|row| row[0] > 0.5)
+        .map(|row| (row[1] - row[2]).abs())
+        .collect();
+    assert!(
+        error.len() == rays.len(),
+        "missed brick rays: {}",
+        error.len()
+    );
+    error.sort_by(f32::total_cmp);
+    let (median, tail) = (error[error.len() / 2], error[error.len() * 9 / 10]);
+    assert!(
+        median < 7.5e-5,
+        "shown spots borrow depth from elsewhere: median {median} m, p90 {tail} m"
+    );
+    Ok(())
+}
+
+#[test]
 fn relief_normal_stencils_bound_byte_error_without_blurring_color() -> TestResult {
     let fine = (0.0064 / 0.042) * std::f32::consts::SQRT_2 / 255.0;
     let coarse = (0.125 * 0.5) / 255.0;

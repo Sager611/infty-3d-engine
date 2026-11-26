@@ -23,7 +23,7 @@ pub struct Tiles {
     pub buffer: wgpu::Buffer,
     levels: Vec<Level>,
     #[cfg(test)]
-    means: Vec<[f32; 4]>,
+    means: Vec<([f32; 4], u32)>,
 }
 fn image(device: &wgpu::Device, edge: u32, layers: u32, mips: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
@@ -104,7 +104,7 @@ impl Tiles {
         let mut means = Vec::with_capacity(levels.len());
         for (layer, level) in levels.iter().enumerate() {
             let mut pixels = texture(*level)?;
-            means.push(mean(&pixels));
+            means.push((mean(&pixels), median_height(&pixels)));
             let mut edge = EDGE;
             let mut index = 0;
             loop {
@@ -203,7 +203,7 @@ impl Tiles {
 )]
 fn rows(
     levels: &[Level],
-    means: &[[f32; 4]],
+    means: &[([f32; 4], u32)],
     origin: [f64; 3],
     leaf: bool,
 ) -> Result<Vec<Row>, &'static str> {
@@ -212,7 +212,7 @@ fn rows(
         .zip(means)
         .enumerate()
         .filter(|(_, (level, _))| leaf || level.material != super::Material::Leaf)
-        .map(|(index, (level, mean))| {
+        .map(|(index, (level, (mean, median)))| {
             Ok(Row {
                 identity: [
                     u32::from(level.material.tag()),
@@ -221,7 +221,7 @@ fn rows(
                         | if level.material == super::Material::Leaf {
                             u32::try_from(level.order).map_err(|_| "leaf order")? << 8
                         } else {
-                            0
+                            median << 16
                         },
                     level
                         .atlas
@@ -239,6 +239,19 @@ fn rows(
             })
         })
         .collect()
+}
+// Median height byte: the typical brick face, unlike the mean, ignores deep mortar.
+fn median_height(pixels: &[u8]) -> u32 {
+    let mut count = [0_usize; 256];
+    for p in pixels.chunks_exact(4) {
+        count[usize::from(p[3])] += 1;
+    }
+    let mut below = 0;
+    let byte = count.iter().position(|&n| {
+        below += n;
+        2 * below > pixels.len() / 4
+    });
+    byte.and_then(|b| u32::try_from(b).ok()).unwrap_or(255)
 }
 fn mean(pixels: &[u8]) -> [f32; 4] {
     let sum = pixels.chunks_exact(4).fold([0_u32; 4], |mut sums, p| {

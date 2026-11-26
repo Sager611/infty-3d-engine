@@ -1,4 +1,4 @@
-// Shared direct hit approximation. One carrier height; no root search or gap work.
+// Shared direct hit approximation. One height sample; no root search or gap work.
 struct TexhContext {base:SceneSample,object:SceneObject,delta:vec3f,footprint:f32,span:f32,coarse:f32};
 fn texh_footprint(base:SceneSample,d:vec3f,pixel_span:f32)->f32 {
   return max(1e-30,pixel_span*base.query.t/max(0.01,abs(dot(d,base.query.n))));
@@ -19,26 +19,37 @@ fn texh_context(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,p
 fn texh_delta(foot:SurfacePoint,context:TexhContext)->vec3f {
   return context.delta+(foot.p-context.base.local)*context.object.position_size.w;
 }
-fn texh_level(index:u32,foot:SurfacePoint,context:TexhContext)->f32 {
+fn texh_level(index:u32,foot:SurfacePoint,context:TexhContext,typical:bool)->f32 {
   if(index>=arrayLength(&material_levels)){return 0.0;}
   let level=material_levels[index];let material=u32(context.object.params.w);
   if(level.identity.x!=material){return 0.0;}
   let lod=material_lod(context.footprint,level.surface.x);let visible=material_visible(lod);
+  let top=material==1u&&(level.identity.z&1u)!=0u;let datum=select(level.mean.a,1.0,top);
+  if(typical){return select(0.0,f32(level.identity.z>>16u)/255.0-1.0,top)*level.surface.y*visible;}
   if(visible==0.0){return 0.0;}
   let coords=material_coords(level,texh_delta(foot,context));
   let weights=material_weights(foot.n);var alpha=0.0;
   if(weights.x>0.0){alpha+=weights.x*material_value(coords.uv.yz,coords.cells.yz,level,lod).a;}
   if(weights.y>0.0){alpha+=weights.y*material_value(coords.uv.xz,coords.cells.xz,level,lod).a;}
   if(weights.z>0.0){alpha+=weights.z*material_value(coords.uv.xy,coords.cells.xy,level,lod).a;}
-  let datum=select(level.mean.a,1.0,material==1u&&(level.identity.z&1u)!=0u);
   return (clamp(alpha,0.0,1.0)-datum)*level.surface.y*visible;
 }
-fn texh_height(foot:SurfacePoint,context:TexhContext)->f32 {
-  if(context.object.params.w==2.0){return context.coarse+hf_render_details(leaf_uv_unit(foot.uv),context.span);}
+fn texh_height(foot:SurfacePoint,context:TexhContext,typical:bool)->f32 {
+  if(context.object.params.w==2.0){
+    if(typical){return 0.0;}
+    return context.coarse+hf_render_details(leaf_uv_unit(foot.uv),context.span);
+  }
   var height=0.0;
   // @texh-levels
   if(context.object.params.w==1.0){height=min(0.0,height);}
   return height/context.object.position_size.w;
+}
+// Sample depth where the ray meets the median-height plane: brick tops sit ~1 mm above the face.
+fn texh_source(base:SceneSample,d:vec3f,object:SceneObject,context:TexhContext)->SurfacePoint {
+  let carrier=geometry_surface(base.local,base,object);let c=dot(d,base.query.n);
+  let reach=texh_height(carrier,context,true)*c/max(0.0025,c*c);
+  if(reach==0.0){return carrier;}
+  return geometry_surface(fma(vec3f(reach),scene_local_vector(object,d),base.local),base,object);
 }
 fn texh_gradient(point:vec3f,foot:SurfacePoint,context:TexhContext,normal_filter:f32)->vec3f {
   if(context.object.params.w==2.0){
@@ -69,7 +80,7 @@ fn texh_filter_footprint(base:SceneSample,depth:f32,d:vec3f,g:vec3f,pixel_span:f
 fn texh_shading_context(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->TexhContext {
   var context=texh_context(base,d,object,origin_delta,pixel_span);
   if(pixel_span>0.0&&sample.query.hit&&base.base_hit!=0u){
-    let g=texh_gradient(base.local,geometry_surface(base.local,base,object),context,0.0);
+    let g=texh_gradient(base.local,texh_source(base,d,object,context),context,0.0);
     context.footprint=texh_filter_footprint(base,sample.query.t,d,scene_world_vector(object,g),pixel_span);
   }
   return context;
@@ -77,7 +88,7 @@ fn texh_shading_context(sample:SceneSample,base:SceneSample,d:vec3f,object:Scene
 fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->SceneSample {
   if(base.base_hit==0u){return base;}
   let context=texh_context(base,d,object,origin_delta,pixel_span);
-  let height=texh_height(geometry_surface(base.local,base,object),context);
+  let height=texh_height(texh_source(base,d,object,context),context,false);
   let incidence=dot(d,base.query.n);
   // Reciprocal incidence above |cos|=.05; fade instead of exploding at grazing angles.
   let offset=height*incidence/max(0.0025,incidence*incidence);

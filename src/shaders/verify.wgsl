@@ -115,12 +115,22 @@ fn material_hit_probe(id:vec3u,pixel_span:f32) {
   let base=scene_object(r.o.xyz,d,object);
   let sample=material_texh(base,d,object,r.o.xyz,pixel_span);let q=sample.query;
   let context=texh_context(base,d,object,r.o.xyz,pixel_span);
-  let height=texh_height(geometry_surface(base.local,base,object),context);
+  let height=texh_height(texh_source(base,d,object,context),context,false);
   results[id.x]=ProbeResult(vec4f(f32(q.hit),q.t,base.query.t,f32(sample.status)),vec4f(q.p,sample.error),
     vec4f(q.uv,height,f32(base.base_hit)),vec4f(q.n,f32(base.query.hit)));
 }
 @compute @workgroup_size(1)
 fn verify_material_hit(@builtin(global_invocation_id) id:vec3u) {material_hit_probe(id,0.001);}
+// Depth at which the shown spot is drawn versus that spot's own depth.
+@compute @workgroup_size(1)
+fn verify_texh_borrow(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}
+  let r=rays[id.x];let d=normalize(r.d.xyz);let span=2.0/(1.8*791.0);
+  let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w),POSE_IDENTITY);
+  let base=scene_object(r.o.xyz,d,object);let sample=material_texh_depth(base,d,object,r.o.xyz,span);
+  let shown=texh_height(geometry_surface(sample.local,base,object),texh_context(base,d,object,r.o.xyz,span),false);
+  results[id.x]=ProbeResult(vec4f(f32(sample.query.hit),dot(sample.local-base.local,base.query.n),shown,0.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
+}
 @compute @workgroup_size(1)
 fn verify_material_hit_full(@builtin(global_invocation_id) id:vec3u) {material_hit_probe(id,0.0);}
 @compute @workgroup_size(1)

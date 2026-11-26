@@ -1,6 +1,6 @@
 // RGBA8 linear reflectance + relief. Explicit mip footprints for compute shading.
 struct MaterialLevel {
-  identity: vec4u, // material, layer, base bit + leaf order<<8, optional atlas columns/rows
+  identity: vec4u, // material, layer, base bit + leaf order<<8 or median height byte<<16, optional atlas columns/rows
   surface: vec4f, // metres/tile, relief metres, colour gain, unresolved roughness
   phase: vec4f,   // f64-origin fractions + exact packed 8-bit XYZ tile identities
   mean: vec4f,    // linear RGB/height mean; fine layers modulate around one

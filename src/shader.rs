@@ -48,7 +48,7 @@ pub fn source() -> String {
     let mut material = String::new();
     let mut leaf = String::new();
     for (index, _) in crate::material::presets_with_leaf(true).iter().enumerate() {
-        let _ = writeln!(height, "height+=texh_level({index}u,foot,context);");
+        let _ = writeln!(height, "height+=texh_level({index}u,foot,context,typical);");
         let _ = writeln!(
             material,
             "state=material_layer(state,{index}u,material,delta,weights,footprint,normal_filter);"

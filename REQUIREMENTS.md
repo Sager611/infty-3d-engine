@@ -9,7 +9,7 @@
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
 - Free-camera WASD and drag look; wheel sets travel speed, held Shift temporarily doubles translation. Straight W eases within0.25 units (4× previous approach gain); reverse/strafe/diagonals keep base speed. Minimum speed/approach floor0.000001 units/s. Far-left vertical logarithmic slider: symbol-only min/max; sync wheel/keys/reset, Shift-expanded range and applied approach rate; idle shows available speed, without polling.
 - Base ray queries always return a gap and matching surface witness with UV/normal; preserve explicit uncertainty and independent point queries.
-- Texh rendered hits: one shared, geometry-independent direct calculation. NO LOOPS or recursion; always prefer fast approximation over accurate displacement. No root search, traversal, ray marching or fitted geometry. Sample carrier height once with a frozen footprint/frame; filter shifted RGB/normals by the direct warp's pixel span; bound byte-height slope noise without weakening relief; orient bumps by the carrier side. Bound grazing offsets. No exact first-crossing or displaced-silhouette guarantee.
+- Texh rendered hits: one shared, geometry-independent direct calculation. NO LOOPS or recursion; always prefer fast approximation over accurate displacement. No root search, traversal, ray marching or fitted geometry. Sample height once, with a frozen footprint/frame, where the ray meets the median-height plane (brick face, not tops); filter shifted RGB/normals by the direct warp's pixel span; bound byte-height slope noise without weakening relief; orient bumps by the carrier side. Bound grazing offsets. No exact first-crossing or displaced-silhouette guarantee.
 - Preserve carrier queries/picking, independent point queries and the existing miss rule: one bilinear height sample at the witness accepts signed height reaching the gap. No new gap solver.
 - Scene → Leaf · relief and Red brick · relief: share texh, preserve matching source assets, cutouts, all four height bands and carrier cast-shadow behavior. Brick fine height gains are8× stronger; mortar and Leaf depth stay unchanged. Admit finer Leaf height/normal orders only when their bounded height exceeds¼pixel, fading fully over2× approach; preserve full close-up gains. Bound-cull irrelevant Leaf render/shadow work without losing selection outlines or changing raw queries. Break up visible repeats in the two finest Leaf bands without flattening them; manually approach/orbit both textures from normal through very close distances and several angles. Both localhost previews target60 warm FPS at1265×791; report measured limits.
 
@@ -17,6 +17,7 @@
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | User | Require natural close-up brick relief motion | Stop pores borrowing depth from spots ~1 mm away |
 | 2026-11-25 | User | Require live logarithmic velocity slider at screen left | Show speed and symbolic limits without numbers or idle work |
 | 2026-11-25 | User | Remove close-up Leaf/brick noise | Filter displaced pixels and byte-slope noise; stabilize bump orientation |
 | 2026-11-25 | User | Delay bounded Leaf detail; reduce crowded close-up work | Avoid premature height sampling and GPU stalls |
