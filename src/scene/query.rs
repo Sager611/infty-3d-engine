@@ -175,7 +175,7 @@ fn query_definition(
     }
     .map_err(QueryError::Geometry)?;
     let mut local = result.sample.p;
-    if Material::from_tag(material) == Some(Material::Leaf) {
+    if Material::from_tag(material).is_some_and(|m| m.spec().field) {
         let finite_axis = (geometry.kind() == Kind::FinitePlane).then_some(geometry.parameter());
         result = crate::heightfield::LEAF
             .texh(local_ray, result, finite_axis)

@@ -52,7 +52,7 @@ impl Prepared {
             if by_id.insert(object.id(), index).is_some() {
                 return Err(SceneError::DuplicateId);
             }
-            leaf_finish |= object.material() == Material::Leaf;
+            leaf_finish |= object.material().spec().field;
             let key = (object.kind().tag(), object.parameter().to_bits());
             let geometry = *interned.entry(key).or_insert_with(|| {
                 let slot = geometries.len();
@@ -83,7 +83,9 @@ impl Prepared {
             .get(instance.geometry)
             .copied()
             .ok_or(Error::Numeric)?
-            .with_leaf_surface(instance.material == u32::from(Material::Leaf.tag())))
+            .with_leaf_surface(
+                Material::from_tag(instance.material).is_some_and(|m| m.spec().field),
+            ))
     }
     pub fn geometries(&self) -> &[Geometry] {
         &self.geometries

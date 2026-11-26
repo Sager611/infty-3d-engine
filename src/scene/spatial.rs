@@ -11,7 +11,7 @@ impl Bounds {
     #[must_use]
     pub fn object(object: Object) -> Option<Self> {
         let mut radius = object.geometry().radius()?;
-        if object.material() == crate::material::Material::Leaf {
+        if object.material().spec().field {
             radius = (radius + crate::heightfield::LEAF.reach()).next_up();
         }
         let transform = object.transform();

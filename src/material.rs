@@ -70,41 +70,44 @@ pub struct Level {
     pub color: f32,
     pub roughness: f32,
 }
-pub fn presets() -> Vec<Level> {
-    presets_with_leaf(false)
-}
 pub fn presets_with_leaf(leaf: bool) -> Vec<Level> {
     Material::ALL
         .into_iter()
-        .take(if leaf { 3 } else { 2 })
+        .filter(move |m| leaf || !m.spec().field)
         .flat_map(|material| {
-            let relief = match material {
-                Material::Steel => [0.000_05, 0.000_01, 0.000_002, 0.000_000_4],
-                Material::Brick => [0.006, 0.006_4, 0.000_64, 0.000_048],
-                Material::Leaf => [
-                    0.002_187_5,
-                    0.000_068_359_375,
-                    0.000_008_544_922,
-                    0.000_002_136_230_5,
-                ],
-            };
-            relief
-                .into_iter()
-                .zip(texture::assets(material))
-                .zip(0..)
-                .map(move |((relief, source), order)| Level {
-                    atlas: (material == Material::Brick && order == 0).then_some(Atlas {
+            // Per-material data: order relief gains, base tile extent and optional base atlas.
+            let (relief, extent, atlas): (&[f32], f64, _) = match material {
+                Material::Steel => (&[0.000_05, 0.000_01, 0.000_002, 0.000_000_4], 0.42, None),
+                Material::Brick => (
+                    &[0.006, 0.006_4, 0.000_64, 0.000_048],
+                    0.42,
+                    Some(Atlas {
                         cells: [2, 6],
                         border: [0.22, 0.214, 0.195, 0.12],
                     }),
+                ),
+                Material::Leaf => (
+                    &[
+                        0.002_187_5,
+                        0.000_068_359_375,
+                        0.000_008_544_922,
+                        0.000_002_136_230_5,
+                    ],
+                    0.14,
+                    None,
+                ),
+            };
+            relief
+                .iter()
+                .copied()
+                .zip(texture::assets(material))
+                .zip(0..)
+                .map(move |((relief, source), order)| Level {
+                    atlas: atlas.filter(|_| order == 0),
                     source,
                     material,
                     order,
-                    extent: (if material == Material::Leaf {
-                        0.14
-                    } else {
-                        0.42
-                    }) / 10.0_f64.powi(order),
+                    extent: extent / 10.0_f64.powi(order),
                     relief,
                     color: if order == 0 { 1.0 } else { 0.65 },
                     roughness: 0.025,
@@ -123,7 +126,9 @@ pub fn validate(levels: &[Level], limit: u32) -> Result<(), &'static str> {
         if !keys.insert((level.material.tag(), level.order)) {
             return Err("duplicate material order");
         }
-        if (level.material == Material::Leaf && !(0..4).contains(&level.order))
+        if (level.material.spec().field
+            && usize::try_from(level.order)
+                .map_or(true, |o| o >= crate::heightfield::LEAF.orders()))
             || level.source.is_empty()
             || level.atlas.is_some_and(|a| {
                 a.cells.into_iter().any(|v| v == 0 || u32::from(v) > EDGE)

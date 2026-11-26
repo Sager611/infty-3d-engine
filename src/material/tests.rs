@@ -8,7 +8,7 @@ use crate::scene::{
 #[test]
 fn leaf_palette_appends_four_physical_orders_without_changing_the_baseline()
 -> Result<(), &'static str> {
-    let base = presets();
+    let base = presets_with_leaf(false);
     let all = presets_with_leaf(true);
     assert_eq!(all.len(), 12);
     validate(&all, 12)?;
@@ -33,7 +33,7 @@ fn four_physical_orders_per_finish_not_a_shader_level_limit() -> Result<(), &'st
     assert_eq!(Material::from_tag(2), Some(Material::Leaf));
     assert_eq!(Material::from_tag(3), None);
     assert_eq!(Material::Brick.tag(), 1);
-    let levels = presets();
+    let levels = presets_with_leaf(false);
     assert_eq!(levels.len(), 8);
     validate(&levels, 256)?;
     for material in [Material::Steel, Material::Brick] {
@@ -62,7 +62,7 @@ fn four_physical_orders_per_finish_not_a_shader_level_limit() -> Result<(), &'st
 }
 #[test]
 fn brick_pore_relief_is_eight_times_stronger_without_deepening_mortar() {
-    let relief: Vec<_> = presets()
+    let relief: Vec<_> = presets_with_leaf(false)
         .into_iter()
         .filter(|level| level.material == Material::Brick)
         .map(|level| level.relief.to_bits())
@@ -83,7 +83,7 @@ fn baked_assets_reject_corruption_and_wrong_pixel_counts() {
 
 #[test]
 fn texture_levels_are_real_rgba_tiles_with_distinct_detail() -> Result<(), &'static str> {
-    let levels = presets();
+    let levels = presets_with_leaf(false);
     assert_eq!(levels.len(), 8);
     let mut previous = Vec::new();
     for row in levels {
@@ -134,7 +134,7 @@ fn pore_components(pixels: &[u8]) -> (usize, usize) {
 
 #[test]
 fn brick_microporosity_is_irregular_and_connected_not_round_dots() -> Result<(), &'static str> {
-    let level = presets()
+    let level = presets_with_leaf(false)
         .into_iter()
         .find(|l| l.material == Material::Brick && l.order == 3)
         .ok_or("missing brick micro level")?;
@@ -157,7 +157,7 @@ fn linear_box_mips_average_color_and_height() {
 #[test]
 fn brick_cavity_floors_retain_microscopic_relief_instead_of_clipping_flat()
 -> Result<(), &'static str> {
-    for level in presets()
+    for level in presets_with_leaf(false)
         .into_iter()
         .filter(|l| l.material == Material::Brick && l.order >= 2)
     {
@@ -172,7 +172,7 @@ fn brick_cavity_floors_retain_microscopic_relief_instead_of_clipping_flat()
 }
 #[test]
 fn brick_pores_use_lighting_not_black_paint_for_cavity_contrast() -> Result<(), &'static str> {
-    for level in presets()
+    for level in presets_with_leaf(false)
         .into_iter()
         .filter(|l| l.material == Material::Brick && l.order >= 2)
     {
@@ -200,7 +200,7 @@ fn brick_pores_use_lighting_not_black_paint_for_cavity_contrast() -> Result<(), 
 }
 #[test]
 fn steel_fine_tiles_share_the_shader_brush_axis() -> Result<(), &'static str> {
-    for level in presets()
+    for level in presets_with_leaf(false)
         .into_iter()
         .filter(|l| l.material == Material::Steel && l.order > 0)
     {
@@ -224,7 +224,7 @@ fn steel_fine_tiles_share_the_shader_brush_axis() -> Result<(), &'static str> {
 }
 #[test]
 fn camera_phase_keeps_mirror_identity_without_losing_fractional_motion() {
-    let l = presets()[0];
+    let l = presets_with_leaf(false)[0];
     let a = phase(l, [0.0, l.extent, -l.extent]);
     assert_eq!(a[3].to_bits(), 16_711_936.0_f32.to_bits());
     let b = phase(l, [l.extent * 256.0, l.extent * 257.0, l.extent * 255.0]);
@@ -321,4 +321,26 @@ fn material_packets_round_trip_without_splitting_shared_geometry()
     assert_eq!(brick.params[3].to_bits(), 1.0_f32.to_bits());
     assert_eq!(brick.identity[2], 1);
     Ok(())
+}
+#[test]
+fn scene_and_material_code_branch_on_capabilities_not_material_names() {
+    for source in [
+        include_str!("../scene/prepared.rs"),
+        include_str!("../scene/spatial.rs"),
+        include_str!("../scene/query.rs"),
+        include_str!("gpu.rs"),
+        include_str!("../material.rs"),
+    ] {
+        for rule in [
+            "== Material::",
+            "== Some(Material::",
+            "!= super::Material::",
+            "Material::Leaf.tag()",
+            "== crate::material::Material::",
+            "if leaf { 3 } else { 2 }",
+            "if leaf { 12 } else { 8 }",
+        ] {
+            assert!(!source.contains(rule), "material-specific branch: {rule}");
+        }
+    }
 }

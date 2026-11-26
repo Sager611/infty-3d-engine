@@ -1,5 +1,5 @@
 //! Lazy immutable texture array and material metadata.
-use super::{EDGE, Level, mip, phase, presets, presets_with_leaf, texture, validate};
+use super::{EDGE, Level, mip, phase, presets_with_leaf, texture, validate};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 pub mod resources;
@@ -78,14 +78,10 @@ impl Tiles {
         queue: &wgpu::Queue,
         leaf: bool,
     ) -> Result<bool, &'static str> {
-        if self.ready() && self.levels.len() >= if leaf { 12 } else { 8 } {
+        let levels = presets_with_leaf(leaf);
+        if self.ready() && self.levels.len() >= levels.len() {
             return Ok(false);
         }
-        let levels = if leaf {
-            presets_with_leaf(true)
-        } else {
-            presets()
-        };
         *self = Self::new(device, queue, &levels)?;
         Ok(true)
     }
@@ -211,7 +207,7 @@ fn rows(
         .iter()
         .zip(means)
         .enumerate()
-        .filter(|(_, (level, _))| leaf || level.material != super::Material::Leaf)
+        .filter(|(_, (level, _))| leaf || !level.material.spec().field)
         .map(|(index, (level, (mean, median)))| {
             Ok(Row {
                 identity: [
