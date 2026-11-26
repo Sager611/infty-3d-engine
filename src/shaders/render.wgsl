@@ -104,7 +104,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
       if(material_view&&!scene_leaf_relevant(local_o,local_d,object,limit,padding)){i++;continue;}
       let carrier=scene_canonical(local_o,local_d,object);
       var sample=carrier;
-      if(material_view||object.params.w==2.0){sample=material_texh_depth(carrier,direction,object,delta,pixel_span);}
+      if(material_view||material_field(object.params.w)){sample=material_texh_depth(carrier,direction,object,delta,pixel_span);}
       pending=pending_min(pending,sample.pending);
       if (sample.query.hit && (!nearest_hit || sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
         nearest = sample;
@@ -139,7 +139,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     var material:MaterialSurface;
     if(material_view){
       material=texh_surface(nearest,nearest_carrier,direction,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object),pixel_span);
-    }else if(nearest_object.params.w==2.0){
+    }else if(material_field(nearest_object.params.w)){
       nearest.query.n=texh_shade_normal(nearest,nearest_carrier,direction,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object),pixel_span);
     }
     let normal=select(surface_normal(nearest.query.n,nearest_carrier.query.n,direction,nearest.kind),material.normal,material_view);

@@ -18,20 +18,23 @@ pub struct Spec {
     pub occlusion: f32,
     /// Relief is cut into the carrier: the base order is measured from its top.
     pub carve: bool,
+    /// Relief, coverage and colour use the shared surface heightfield in geometry UVs.
+    pub field: bool,
 }
 impl Material {
     pub const ALL: [Self; 3] = [Self::Steel, Self::Brick, Self::Leaf];
     pub const fn spec(self) -> Spec {
-        let (roughness, metallic, occlusion, carve) = match self {
-            Self::Steel => (0.26, 1.0, 0.0, false),
-            Self::Brick => (0.86, 0.0, 1.0, true),
-            Self::Leaf => (0.45, 0.0, 0.0, false),
+        let (roughness, metallic, occlusion, carve, field) = match self {
+            Self::Steel => (0.26, 1.0, 0.0, false, false),
+            Self::Brick => (0.86, 0.0, 1.0, true, false),
+            Self::Leaf => (0.45, 0.0, 0.0, false, true),
         };
         Spec {
             roughness,
             metallic,
             occlusion,
             carve,
+            field,
         }
     }
     pub const fn tag(self) -> u8 {

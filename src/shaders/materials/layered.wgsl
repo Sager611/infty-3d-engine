@@ -120,13 +120,16 @@ fn material_lod(footprint:f32,extent:f32)->f32 {
 }
 fn material_visible(lod:f32)->f32 {return 1.0-smoothstep(4.0,8.0,lod);}
 // Material-wide data generated from the Rust material table.
-struct MaterialSpec {roughness:f32,metallic:f32,occlusion:f32,carve:u32};
+struct MaterialSpec {roughness:f32,metallic:f32,occlusion:f32};
 fn material_spec(material:u32)->MaterialSpec {
   switch material {
     // @material-specs
-    default:{return MaterialSpec(0.5,0.0,0.0,0u);}
+    default:{return MaterialSpec(0.5,0.0,0.0);}
   }
 }
+// Generated from material data: relief carved below the carrier; relief, coverage and colour from the surface heightfield.
+const MATERIAL_CARVE=0u;
+fn material_field(material:f32)->bool {return false/*@material-field*/;}
 struct MaterialLayers {base:vec3f,modulation:vec3f,gradient:vec3f,variance:f32,occlusion:f32};
 fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weights:vec3f,footprint:f32,normal_filter:f32)->MaterialLayers {
   var state=input;

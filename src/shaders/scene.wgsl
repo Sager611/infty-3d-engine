@@ -64,9 +64,9 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
     query=canonical.query;gap_lower=canonical.gap_lower;error=canonical.error;status=canonical.status;
   }else if(kind==3u){query=plane(local_o,d);gap_lower=query.gap;status=0u;}
   let base_hit=query.hit;
-  if(obj.params.w==2.0&&kind==5u&&base_hit){query.hit=leaf_covered(query.uv);}
+  if(material_field(obj.params.w)&&kind==5u&&base_hit){query.hit=leaf_covered(query.uv);}
   let local_error=error;let local=query.p;let canonical_gap=query.gap;let canonical_lower=gap_lower;
-  if(obj.params.w==2.0&&!base_hit&&status==0u){
+  if(material_field(obj.params.w)&&!base_hit&&status==0u){
     query=texh(local_o,d,query,gap_lower,kind==5u);
     if(query.hit){gap_lower=0.0;}
   }

@@ -41,14 +41,14 @@ fn scene_shadow(source:SceneSample,object:SceneObject,n:vec3f,light:vec3f,count:
     }else{
       let other=resolved_object(i);
       // An outward ray from a biased plane cannot recross it. Leaf omits self-shadows.
-      if(source.id==other.identity.x&&(leaves_plane||object.params.w==2.0)){i++;continue;}
+      if(source.id==other.identity.x&&(leaves_plane||material_field(object.params.w))){i++;continue;}
       let legacy=source.kind!=5u&&other.identity.y!=5u;
       var local=scene_local_vector(other,(origin-other.position_size.xyz)/other.position_size.w);
       if(!legacy){local=shadow_local_origin(source,object,other,n);}
       let local_d=scene_local_vector(other,direction);
       if(!scene_leaf_relevant(local,local_d,other,distance,0.0)){i++;continue;}
       var sample=scene_canonical(local,local_d,other);
-      if(other.params.w==2.0&&sample.query.hit&&!leaf_covered(leaf_uv_unit(sample.query.uv))){sample.query.hit=false;}
+      if(material_field(other.params.w)&&sample.query.hit&&!leaf_covered(leaf_uv_unit(sample.query.uv))){sample.query.hit=false;}
       if(legacy){
         if(sample.query.hit&&sample.query.t>=2.0*bias&&sample.query.t<distance){return Shadow(true,false);}
       }else{

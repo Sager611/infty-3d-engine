@@ -21,7 +21,7 @@ fn verify_leaf_material(@builtin(global_invocation_id) id:vec3u) {
   let uv=fma(input.o.xy,vec2f(0.5),vec2f(0.5));
   let carrier=plane_unframe(vec3f(0.0,0.0,1.0),axis);
   let normal=surface_normal(carrier,carrier,input.d.xyz,5u);
-  let material=leaf_material(uv,normal,input.d.w,input.o.z);
+  let material=leaf_material(2u,uv,normal,input.d.w,input.o.z);
   results[id.x]=ProbeResult(vec4f(material.normal,material.roughness),vec4f(material.albedo,material.metallic),
     vec4f(0.0),vec4f(leaf_fetch(leaf_uv(uv,0u),0u,8,0.0).a,
       leaf_fetch(leaf_uv(uv,3u),3u,11,0.0).a,leaf_fetch(leaf_uv(uv,2u),2u,10,0.0).a,

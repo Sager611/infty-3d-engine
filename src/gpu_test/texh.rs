@@ -63,11 +63,17 @@ fn relief_and_shading_rules_come_from_material_data() {
     for source in [
         include_str!("../shaders/materials/texh.wgsl"),
         include_str!("../shaders/materials/layered.wgsl"),
+        include_str!("../shaders/materials/leaf.wgsl"),
+        include_str!("../shaders/materials/shadow.wgsl"),
+        include_str!("../shaders/render.wgsl"),
+        include_str!("../shaders/scene.wgsl"),
     ] {
         for rule in [
             "params.w==1.0",
+            "params.w==2.0",
             "material==0u",
             "material==1u",
+            "identity.x!=2u",
             "min(0.0,height)",
         ] {
             assert!(!source.contains(rule), "material-specific rule: {rule}");

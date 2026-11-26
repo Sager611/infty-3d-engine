@@ -144,8 +144,8 @@ fn verify_material_color(@builtin(global_invocation_id) id: vec3u) {
   var expected=layered_material(u32(r.o.w),vec3f(sample.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint);
   var original=layered_material(u32(r.o.w),vec3f(base.query.p.xy,0.0),vec3f(0.0,0.0,1.0),footprint);
   if(r.o.w==2.0){
-    expected=leaf_material(sample.query.uv,material.normal,1.0,footprint);
-    original=leaf_material(base.query.uv,material.normal,1.0,footprint);
+    expected=leaf_material(2u,sample.query.uv,material.normal,1.0,footprint);
+    original=leaf_material(2u,base.query.uv,material.normal,1.0,footprint);
   }
   results[id.x]=ProbeResult(vec4f(material.albedo,f32(sample.query.hit)),vec4f(expected.albedo,sample.query.t),
     vec4f(original.albedo,0.0),vec4f(sample.query.uv,base.query.uv));

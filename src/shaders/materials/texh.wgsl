@@ -5,7 +5,7 @@ fn texh_footprint(base:SceneSample,d:vec3f,pixel_span:f32)->f32 {
 }
 fn texh_context(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->TexhContext {
   var span=0.0;var coarse=0.0;
-  if(object.params.w==2.0){
+  if(material_field(object.params.w)){
     coarse=hf_render_level(0u,leaf_uv_unit(geometry_surface(base.local,base,object).uv),0.0);
     if(pixel_span>0.0){
       let c=dot(d,base.query.n);let factor=object.position_size.w*c/max(0.0025,c*c);
@@ -24,7 +24,7 @@ fn texh_level(index:u32,foot:SurfacePoint,context:TexhContext,typical:bool)->f32
   let level=material_levels[index];let material=u32(context.object.params.w);
   if(level.identity.x!=material){return 0.0;}
   let lod=material_lod(context.footprint,level.surface.x);let visible=material_visible(lod);
-  let datum=select(level.mean.a,1.0,(level.identity.z&1u)!=0u&&material_spec(material).carve!=0u);
+  let datum=select(level.mean.a,1.0,(level.identity.z&1u&(MATERIAL_CARVE>>material))!=0u);
   if(typical){return (f32((level.identity.z>>16u)&255u)/255.0-datum)*level.surface.y*visible;}
   if(visible==0.0){return 0.0;}
   let coords=material_coords(level,texh_delta(foot,context));
@@ -35,7 +35,7 @@ fn texh_level(index:u32,foot:SurfacePoint,context:TexhContext,typical:bool)->f32
   return (clamp(alpha,0.0,1.0)-datum)*level.surface.y*visible;
 }
 fn texh_height(foot:SurfacePoint,context:TexhContext,typical:bool)->f32 {
-  if(context.object.params.w==2.0){
+  if(material_field(context.object.params.w)){
     if(typical){return 0.0;}
     return context.coarse+hf_render_details(leaf_uv_unit(foot.uv),context.span);
   }
@@ -51,7 +51,7 @@ fn texh_source(base:SceneSample,d:vec3f,object:SceneObject,context:TexhContext)-
   return geometry_surface(fma(vec3f(reach),scene_local_vector(object,d),base.local),base,object);
 }
 fn texh_gradient(point:vec3f,foot:SurfacePoint,context:TexhContext,normal_filter:f32)->vec3f {
-  if(context.object.params.w==2.0){
+  if(material_field(context.object.params.w)){
     let axes=geometry_uv_axes(point,context.base,context.object);let error=abs(axes[0])+abs(axes[1]);
     let quantum_axes=normal_filter*max(error.x,max(error.y,error.z));
     let slope=hf_gradient_lod(leaf_uv_unit(foot.uv),0.5*context.footprint/context.object.position_size.w,context.span,quantum_axes);
@@ -63,7 +63,7 @@ fn texh_gradient(point:vec3f,foot:SurfacePoint,context:TexhContext,normal_filter
 }
 fn texh_normal(point:vec3f,foot:SurfacePoint,context:TexhContext)->vec3f {
   let g=texh_gradient(point,foot,context,1.0);let n=material_unit(foot.n,vec3f(0.0,1.0,0.0));
-  return material_unit(n-g/select(max(1.0,length(g)/2.0),1.0,context.object.params.w==2.0),n);
+  return material_unit(n-g/select(max(1.0,length(g)/2.0),1.0,material_field(context.object.params.w)),n);
 }
 // Largest ray-cone stretch of the frozen-frame direct map, including grazing fade.
 // Only shading uses it; carrier height/LOD and depth are never resampled.
@@ -97,7 +97,7 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   let foot=geometry_surface(result.local,base,object);
   result.query.hit=result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
   result.query.uv=foot.uv;
-  if(object.params.w==2.0){result.query.hit=result.query.hit&&leaf_covered(leaf_uv_unit(foot.uv));}
+  if(material_field(object.params.w)){result.query.hit=result.query.hit&&leaf_covered(leaf_uv_unit(foot.uv));}
   if(result.query.hit){
     result.query.gap=0.0;result.gap_lower=0.0;
   }
@@ -117,9 +117,9 @@ fn material_texh(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,
 fn texh_surface(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->MaterialSurface {
   let context=texh_shading_context(sample,base,d,object,origin_delta,pixel_span);
   let foot=geometry_surface(sample.local,base,object);
-  if(object.params.w==2.0){
+  if(material_field(object.params.w)){
     let n=scene_world_vector(object,texh_normal(sample.local,foot,context));
-    return leaf_material(sample.query.uv,surface_normal(n,base.query.n,d,sample.kind),object.position_size.w,context.footprint);
+    return leaf_material(u32(object.params.w),sample.query.uv,surface_normal(n,base.query.n,d,sample.kind),object.position_size.w,context.footprint);
   }
   var material=layered_material(u32(object.params.w),texh_delta(foot,context),foot.n,context.footprint);
   material.normal=surface_normal(scene_world_vector(object,material.normal),base.query.n,d,sample.kind);
