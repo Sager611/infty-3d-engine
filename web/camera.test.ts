@@ -83,7 +83,7 @@ describe("camera framing", () => {
 });
 
 function movement(forward: number, side: number): Movement {
-	return { forward, side, onlyForward: forward === 1 && side === 0 };
+	return { forward, side };
 }
 function eye(c: PureCamera): readonly [number, number, number] {
 	return [

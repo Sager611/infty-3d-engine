@@ -8,7 +8,7 @@
 - Intuitive add/duplicate/delete controls. Duplicate selected instances in place with fresh IDs, matching geometry/pose/material, selected copies and one-step undo. XYZ positions use numeric0.001 increments (10× finer), direct typing and wheel nudging.
 - Selected geometry: centered XYZ translation arrows and between-axis rotation arcs, Unreal-style; Shift doubles either drag. Persist normalized quaternion poses without breaking legacy scenes/URLs; keep CPU/GPU queries, bounds, cutouts, normals, materials and shadows in the same instance frame.
 - Modular geometry definitions, instances and query kernels, including closest-point queries with explicit accuracy and unresolved results.
-- Free-camera WASD and drag look; wheel sets travel speed, held Shift temporarily doubles translation. Straight W eases within0.25 units (4× previous approach gain); reverse/strafe/diagonals keep base speed. Minimum speed/approach floor0.000001 units/s. Far-left vertical logarithmic slider: symbol-only min/max; sync wheel/keys/reset, Shift-expanded range and applied approach rate; idle shows available speed, without polling.
+- Free-camera WASD and drag look; wheel sets travel speed, held Shift temporarily doubles translation. Every direction eases within0.25 units of the geometry under the view centre; the forward share integrates the approach. Minimum speed/approach floor0.000001 units/s. Far-left vertical logarithmic slider: symbol-only min/max; sync wheel/keys/reset, Shift-expanded range and applied approach rate; idle shows available speed, without polling.
 - Base ray queries always return a gap and matching surface witness with UV/normal; preserve explicit uncertainty and independent point queries.
 - Texh rendered hits: one shared, geometry-independent direct calculation. NO LOOPS or recursion; always prefer fast approximation over accurate displacement. No root search, traversal, ray marching or fitted geometry. Sample height once, with a frozen footprint/frame, where the ray meets the median-height plane (brick face, not tops); filter shifted RGB/normals by the direct warp's pixel span; bound byte-height slope noise without weakening relief; orient bumps by the carrier side. Bound grazing offsets. No exact first-crossing or displaced-silhouette guarantee.
 - Preserve carrier queries/picking, independent point queries and the existing miss rule: one bilinear height sample at the witness accepts signed height reaching the gap. No new gap solver.
@@ -18,6 +18,7 @@
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | User | Slow every direction near looked-at geometry | Strafe/reverse/diagonals also ease close up |
 | 2026-11-26 | User | Require generic code for any material, texture, texh and order count | Material rules come from data, not special cases |
 | 2026-11-26 | User | Require natural close-up brick relief motion | Stop pores borrowing depth from spots ~1 mm away |
 | 2026-11-25 | User | Require live logarithmic velocity slider at screen left | Show speed and symbolic limits without numbers or idle work |

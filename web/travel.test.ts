@@ -3,28 +3,37 @@
 import { expect, test } from "bun:test";
 import { MIN_SPEED, type Movement, stepSpeed } from "./camera.ts";
 
-const FORWARD: Movement = { forward: 1, side: 0, onlyForward: true };
+const FORWARD: Movement = { forward: 1, side: 0 };
 function unusedHit(): never {
 	throw new Error("unnecessary center query");
 }
 
-test("only sole W queries a surface; reverse, strafe, diagonals and cancelling chords keep base speed", () => {
-	const movements: readonly Movement[] = [
-		{ forward: 0, side: 0, onlyForward: false },
-		{ forward: -1, side: 0, onlyForward: false },
-		{ forward: 0, side: 1, onlyForward: false },
-		{ forward: 0, side: -1, onlyForward: false },
-		{ forward: 1, side: 1, onlyForward: false },
-		{ forward: 1, side: -1, onlyForward: false },
-		{ forward: -1, side: 1, onlyForward: false },
-		{ forward: 1, side: 0, onlyForward: false },
-		{ forward: -1, side: 0, onlyForward: true },
-		{ forward: 1, side: 1, onlyForward: true },
-	];
-	for (const movement of movements) {
-		expect(stepSpeed(movement, 3, 0.02, unusedHit)).toBe(3);
-	}
+test("every direction slows near the looked-at geometry; idle and misses keep base speed", () => {
+	expect(stepSpeed({ forward: 0, side: 0 }, 3, 0.02, unusedHit)).toBe(3);
 	expect(stepSpeed(FORWARD, 3, 0, unusedHit)).toBe(3);
+	const gain = (3 - MIN_SPEED) / 0.25;
+	for (const movement of [
+		{ forward: -1, side: 0 },
+		{ forward: 0, side: 1 },
+		{ forward: 0, side: -1 },
+		{ forward: -1, side: 1 },
+	]) {
+		expect(stepSpeed(movement, 3, 0.02, () => 0.125)).toBe(
+			MIN_SPEED + gain * 0.125,
+		);
+		expect(stepSpeed(movement, 3, 0.02, () => null)).toBe(3);
+		expect(stepSpeed(movement, 3, 0.02, () => 1)).toBe(3);
+	}
+	for (const side of [1, -1]) {
+		const diagonal = { forward: 1, side };
+		const rate = stepSpeed(diagonal, 3, 0.04, () => 0.2);
+		expect(rate).toBeLessThan(3);
+		expect(rate).toBeGreaterThan(stepSpeed(FORWARD, 3, 0.04, () => 0.2));
+		const first = stepSpeed(diagonal, 3, 0.02, () => 0.2);
+		const nearer = 0.2 - Math.SQRT1_2 * first * 0.02;
+		const second = stepSpeed(diagonal, 3, 0.02, () => nearer);
+		expect(Math.abs((first + second) * 0.02 - rate * 0.04)).toBeLessThan(1e-12);
+	}
 });
 
 test("approach rates stay positive, monotone and bounded, without clamping motion to the surface", () => {

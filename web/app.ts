@@ -230,7 +230,6 @@ const setMovement = (value: Movement): void => {
 		disposed ||
 		(movement.forward === value.forward &&
 			movement.side === value.side &&
-			movement.onlyForward === value.onlyForward &&
 			movement.boost === value.boost)
 	) {
 		return;

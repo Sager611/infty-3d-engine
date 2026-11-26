@@ -98,7 +98,6 @@ test("held keys emit absolute movement; diagonals/opposites never enable W-only 
 	expect(f.state.moves.at(-1)).toEqual({
 		forward: 1,
 		side: 0,
-		onlyForward: true,
 	});
 	const count = f.state.moves.length;
 	send(f, "w", { repeat: true });
@@ -108,26 +107,22 @@ test("held keys emit absolute movement; diagonals/opposites never enable W-only 
 	expect(f.state.moves.at(-1)).toEqual({
 		forward: 1,
 		side: 1,
-		onlyForward: false,
 	});
 	send(f, "a");
 	expect(f.state.moves.at(-1)).toEqual({
 		forward: 1,
 		side: 0,
-		onlyForward: false,
 	});
 	send(f, "s");
 	expect(f.state.moves.at(-1)).toEqual({
 		forward: 0,
 		side: 0,
-		onlyForward: false,
 	});
 	f.controller.stop();
 	send(f, "S");
 	expect(f.state.moves.at(-1)).toEqual({
 		forward: -1,
 		side: 0,
-		onlyForward: false,
 	});
 	f.controller.dispose();
 });
@@ -221,7 +216,6 @@ test("held Shift doubles movement temporarily, including mid-move and both Shift
 	expect(f.state.moves.at(-1)).toEqual({
 		forward: 1,
 		side: 0,
-		onlyForward: true,
 		boost: true,
 	});
 	const count = f.state.moves.length;
@@ -233,13 +227,11 @@ test("held Shift doubles movement temporarily, including mid-move and both Shift
 	expect(f.state.moves.at(-1)).toEqual({
 		forward: 1,
 		side: 0,
-		onlyForward: true,
 	});
 	send(f, "d", { shiftKey: true });
 	expect(f.state.moves.at(-1)).toEqual({
 		forward: 1,
 		side: 1,
-		onlyForward: false,
 		boost: true,
 	});
 	f.keyboard.dispatchEvent(new Event("blur"));

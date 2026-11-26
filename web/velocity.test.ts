@@ -60,15 +60,10 @@ test("readout follows Shift and the applied approach rate without another query;
 	expect(node.dataset.speed).toBe("6");
 	expect(node.ariaValueText).toContain("units per second");
 	let queries = 0;
-	const rate = stepSpeed(
-		{ forward: 1, side: 0, onlyForward: true, boost: true },
-		3,
-		0.02,
-		() => {
-			queries += 1;
-			return 0.001;
-		},
-	);
+	const rate = stepSpeed({ forward: 1, side: 0, boost: true }, 3, 0.02, () => {
+		queries += 1;
+		return 0.001;
+	});
 	renderVelocity(node, rate, true);
 	expect(queries).toBe(1);
 	expect(Number(node.dataset.speed)).toBe(rate * 2);

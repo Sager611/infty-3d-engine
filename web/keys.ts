@@ -43,7 +43,6 @@ function movementFor(held: ReadonlySet<string>, boost: boolean): Movement {
 	return Object.freeze({
 		forward: Number(held.has("w")) - Number(held.has("s")),
 		side: Number(held.has("d")) - Number(held.has("a")),
-		onlyForward: held.size === 1 && held.has("w"),
 		...(boost && { boost: true }),
 	});
 }

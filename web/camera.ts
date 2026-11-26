@@ -9,13 +9,11 @@ type CameraBasis = Readonly<{ origin: Vector; forward: Vector; right: Vector }>;
 type Movement = Readonly<{
 	forward: number;
 	side: number;
-	onlyForward: boolean;
 	boost?: boolean;
 }>;
 const STOPPED: Movement = Object.freeze({
 	forward: 0,
 	side: 0,
-	onlyForward: false,
 });
 const MIN_SPEED = 0.000_001;
 const MAX_SPEED = 100;
@@ -248,13 +246,17 @@ function approachSpeed(
 	if (speed === MIN_SPEED || distance >= APPROACH_RANGE + speed * seconds) {
 		return speed;
 	}
+	const gain = (speed - MIN_SPEED) / APPROACH_RANGE;
+	// Strafe and reverse do not approach: ease at the current distance.
+	if (seconds === 0) {
+		return MIN_SPEED + gain * distance;
+	}
 	const free = Math.min(
 		seconds,
 		Math.max(0, distance - APPROACH_RANGE) / speed,
 	);
 	const remaining = seconds - free;
 	const near = Math.min(distance, APPROACH_RANGE);
-	const gain = (speed - MIN_SPEED) / APPROACH_RANGE;
 	const contact = Math.log1p((gain * near) / MIN_SPEED) / gain;
 	let average: number;
 	if (remaining <= contact) {
@@ -283,12 +285,8 @@ function stepSpeed(
 ): number {
 	validStep(movement, speed, seconds);
 	travelSpeed(speed, 0);
-	if (
-		seconds === 0 ||
-		movement.onlyForward !== true ||
-		movement.forward !== 1 ||
-		movement.side !== 0
-	) {
+	const length = Math.hypot(movement.forward, movement.side);
+	if (seconds === 0 || length === 0) {
 		return speed;
 	}
 	const distance = centerHit();
@@ -299,10 +297,14 @@ function stepSpeed(
 	if (distance < 0) {
 		invalid("negative center hit distance");
 	}
+	// Every direction eases near the looked-at geometry; only the forward share approaches it.
 	return approachSpeed(
 		speed,
 		distance,
-		Math.min(seconds, MAX_STEP) * (1 + Number(movement.boost === true)),
+		(Math.min(seconds, MAX_STEP) *
+			(1 + Number(movement.boost === true)) *
+			Math.max(0, movement.forward)) /
+			length,
 	);
 }
 function travelSpeed(speed: number, amount: number): number {
