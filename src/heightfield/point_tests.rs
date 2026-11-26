@@ -58,7 +58,7 @@ fn cutout_closest_bounds_never_use_the_removed_rectangle() -> Result<(), Box<dyn
 {
     let pixels = data([[128; 4], [128; 4], [128; 4], [128; 4], [0, 255, 0, 255]]);
     let field = Field {
-        amplitudes: [0.0; 4],
+        amplitudes: &[0.0; 4],
         ..fixture(&pixels)
     };
     let p = [-0.9, -0.3, 0.1];

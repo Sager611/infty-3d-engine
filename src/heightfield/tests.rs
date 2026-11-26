@@ -2,6 +2,40 @@
 use super::*;
 
 #[test]
+fn any_height_order_count_follows_the_data() -> Result<(), Error> {
+    for (orders, byte) in [(1_usize, 200_u8), (2, 64), (6, 150)] {
+        let mut pixels = Vec::new();
+        for _ in 0..orders {
+            pixels.extend_from_slice(&tile([byte; 4]));
+        }
+        pixels.extend_from_slice(&tile([255; 4]));
+        let amplitudes: Vec<f64> = (0..orders)
+            .map(|o| 1.0 / f64::from(1_u32 << (2 * o + 3)))
+            .collect();
+        let field = Field::new(&pixels, 2, &amplitudes, [0.0; 2])?;
+        let expected: f64 = amplitudes
+            .iter()
+            .map(|a| a * (f64::from(byte) - 128.0) / 255.0)
+            .sum();
+        let sample = field.sample([0.31, -0.42])?;
+        assert!(
+            (sample.height - expected).abs() < 1e-12,
+            "{orders}: {}",
+            sample.height
+        );
+        let total: f64 = amplitudes.iter().map(|a| a.abs()).sum();
+        assert_eq!(field.reach(), (total * (128.0 / 255.0)).next_up());
+        let finest = u32::try_from(orders - 1).map_err(|_| Error::Numeric)?;
+        assert_eq!(field.resolution()?, 2 * 10_u32.pow(finest));
+        let bounds = field.bounds(Node::default())?.ok_or(Error::Numeric)?;
+        assert!(bounds.lo[2] <= sample.height && sample.height <= bounds.hi[2]);
+        assert!(Field::new(&pixels[8..], 2, &amplitudes, [0.0; 2]).is_err());
+        let header = 16 + 16 * orders.div_ceil(4);
+        assert_eq!(field.gpu_bytes()?.len(), header + pixels.len());
+    }
+    Ok(())
+}
+#[test]
 fn leaf_preserves_fine_height_gains() {
     assert_eq!(AMPLITUDES[1..], [1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0]);
 }
@@ -17,7 +51,7 @@ fn leaf_fine_bands_do_not_repeat_one_tile_apart() -> Result<(), Error> {
     for order in 2..4 {
         let mut amplitudes = [0.0; 4];
         amplitudes[order] = 1.0 / 1024.0;
-        let field = Field::new(&pixels, 2, amplitudes, [0.0; 2])?;
+        let field = Field::new(&pixels, 2, &amplitudes, [0.0; 2])?;
         let mut different = 0.0_f64;
         let mut low = f64::INFINITY;
         let mut high = f64::NEG_INFINITY;
@@ -54,7 +88,7 @@ fn leaf_fine_phase_wraps_without_seams_and_differentiates_the_same_field() -> Re
     for order in 2..4 {
         let mut amplitudes = [0.0; 4];
         amplitudes[order] = 0.125;
-        let field = Field::new(&pixels, 2, amplitudes, [0.0; 2])?;
+        let field = Field::new(&pixels, 2, &amplitudes, [0.0; 2])?;
         for axis in 0..2 {
             let mut a = [0.12345; 2];
             let mut b = a;
@@ -91,7 +125,7 @@ fn leaf_fine_nodes_enclose_samples_and_keep_refining() -> Result<(), Error> {
         [240, 32, 192, 64],
         [255; 4],
     ]);
-    let field = Field::new(&pixels, 2, [0.0, 0.0, 0.125, -0.125], [0.0; 2])?;
+    let field = Field::new(&pixels, 2, &[0.0, 0.0, 0.125, -0.125], [0.0; 2])?;
     let mut seed = 17_u32;
     for depth in [0, 4, 12, 18, 24] {
         for _ in 0..32 {
@@ -149,16 +183,16 @@ fn leaf_depth_tracks_the_source_tip_blade_and_veins() -> Result<(), Error> {
 
 #[test]
 fn checked_fields_require_a_layout_and_a_covered_anchor() -> Result<(), Error> {
-    let field = Field::new(DATA, 512, AMPLITUDES, [0.0; 2])?;
+    let field = Field::new(DATA, 512, &AMPLITUDES, [0.0; 2])?;
     assert_eq!(
         field.sample([0.0; 2])?.height,
         LEAF.sample([0.0; 2])?.height
     );
-    assert!(Field::new(DATA, 511, AMPLITUDES, [0.0; 2]).is_err());
-    assert!(Field::new(&DATA[..DATA.len() - 1], 512, AMPLITUDES, [0.0; 2]).is_err());
-    assert!(Field::new(DATA, 512, [f64::NAN; 4], [0.0; 2]).is_err());
-    assert!(Field::new(DATA, 512, [f64::MAX; 4], [0.0; 2]).is_err());
-    assert!(Field::new(DATA, 512, AMPLITUDES, [-0.96; 2]).is_err());
+    assert!(Field::new(DATA, 511, &AMPLITUDES, [0.0; 2]).is_err());
+    assert!(Field::new(&DATA[..DATA.len() - 1], 512, &AMPLITUDES, [0.0; 2]).is_err());
+    assert!(Field::new(DATA, 512, &[f64::NAN; 4], [0.0; 2]).is_err());
+    assert!(Field::new(DATA, 512, &[f64::MAX; 4], [0.0; 2]).is_err());
+    assert!(Field::new(DATA, 512, &AMPLITUDES, [-0.96; 2]).is_err());
     Ok(())
 }
 
@@ -184,7 +218,7 @@ fn gpu_header_preserves_scalar_bytes_and_exact_canonical_amplitudes()
     assert_eq!(&bytes[32..], DATA);
     assert!(
         Field {
-            amplitudes: [0.1; 4],
+            amplitudes: &[0.1; 4],
             ..LEAF
         }
         .gpu_bytes()
@@ -218,7 +252,7 @@ fn fixture(data: &[u8]) -> Field<'_> {
     Field {
         data,
         edge: 2,
-        amplitudes: AMPLITUDES,
+        amplitudes: &AMPLITUDES,
         anchor: [0.0; 2],
     }
 }
@@ -257,7 +291,7 @@ fn four_height_orders_add_before_geometry_or_normals() -> Result<(), Error> {
         let mut amplitudes = AMPLITUDES;
         amplitudes[i] = 0.0;
         let without = Field {
-            amplitudes,
+            amplitudes: &amplitudes,
             ..field
         }
         .sample([0.125, -0.25])?;

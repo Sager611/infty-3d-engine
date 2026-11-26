@@ -7,6 +7,25 @@ use crate::{
 };
 
 #[test]
+fn generated_shader_validates_for_any_field_order_count() -> Result<(), Box<dyn std::error::Error>>
+{
+    for orders in [1, 2, 6, crate::heightfield::MAX_ORDERS] {
+        let module = naga::front::wgsl::parse_str(&crate::shader::source_for(orders))?;
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)?;
+    }
+    Ok(())
+}
+const PLANES: [[f64; 4]; 4] = [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0],
+];
+#[test]
 fn leaf_gpu_material_uses_carrier_normals_and_vertex_aligned_color()
 -> Result<(), Box<dyn std::error::Error>> {
     let points = [
@@ -32,11 +51,7 @@ fn leaf_gpu_material_uses_carrier_normals_and_vertex_aligned_color()
     }
     assert!(!used_bindings("verify_leaf_material")?.contains(&9));
     let actual = run("verify_leaf_material", &inputs, inputs.len() * 16)?;
-    let plane = |order: usize| {
-        let mut amplitudes = [0.0; 4];
-        amplitudes[order] = 1.0;
-        Field::new(crate::heightfield::DATA, 512, amplitudes, [0.0; 2])
-    };
+    let plane = |order: usize| Field::new(crate::heightfield::DATA, 512, &PLANES[order], [0.0; 2]);
     let fields = [plane(0)?, plane(3)?, plane(2)?, plane(1)?];
     for (input, row) in inputs.iter().zip(actual.chunks_exact(16)) {
         let xy = [f64::from(input[0]), f64::from(input[1])];
@@ -174,7 +189,7 @@ fn texh_gpu_matches_cpu_for_either_side_and_multiple_carriers()
 -> Result<(), Box<dyn std::error::Error>> {
     for (texel, side) in [(192, 1.0_f32), (64, -1.0)] {
         let data = fixture([[texel; 4], [128; 4], [128; 4], [128; 4], [0, 255, 0, 255]]);
-        let field = Field::new(&data, 2, [255.0 / 256.0, 0.0, 0.0, 0.0], [0.0; 2])?;
+        let field = Field::new(&data, 2, &[255.0 / 256.0, 0.0, 0.0, 0.0], [0.0; 2])?;
         let inputs = [
             [0.0, 0.0, side * 1.125, 1.0, 0.0, 0.0, side, 2.0],
             [0.0, 0.0, side * 1.25, 1.0, 0.0, 0.0, side, 2.0],
@@ -222,7 +237,7 @@ fn texh_gpu_matches_cpu_for_either_side_and_multiple_carriers()
 #[test]
 fn texh_blends_four_texels_on_a_gap() -> Result<(), Box<dyn std::error::Error>> {
     let data = fixture([[192, 128, 224, 160], [128; 4], [128; 4], [128; 4], [255; 4]]);
-    let field = Field::new(&data, 2, [255.0 / 256.0, 0.0, 0.0, 0.0], [0.0; 2])?;
+    let field = Field::new(&data, 2, &[255.0 / 256.0, 0.0, 0.0, 0.0], [0.0; 2])?;
     // UV (.25,.25) blends four corners to 176, for a height of 0.1875.
     let inputs = [0.17_f32, 0.20].map(|z| [-0.5, -0.5, z, 5.0, 0.0, 0.0, 1.0, 2.0]);
     let actual = run_field("verify_texh", &inputs, inputs.len() * 16, field)?;

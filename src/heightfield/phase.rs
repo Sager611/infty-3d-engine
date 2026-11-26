@@ -18,7 +18,7 @@ fn hash(ij: [u32; 2]) -> [f64; 2] {
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    reason = "Canonical points and positive seeds give noise cells in 13..=364"
+    reason = "Canonical points and positive seeds give small non-negative noise cells"
 )]
 fn noise(point: [f64; 2], period: u32) -> ([f64; 2], [[f64; 2]; 2]) {
     let ij = point.map(|v| v.floor() as u32 % period);
@@ -49,15 +49,13 @@ pub(super) fn map(p: [f64; 2], order: usize) -> Mapping {
         point: p,
         jacobian: [[1.0, 0.0], [0.0, 1.0]],
     };
-    if !(2..4).contains(&order) {
+    if order < 2 {
         return mapping;
     }
     let repeats = f64::from(repeat(order));
-    let seed = if order == 2 {
-        [13.0, 71.0]
-    } else {
-        [47.0, 113.0]
-    };
+    // Orders 2 and 3 keep seeds (13,71) and (47,113); finer orders continue the line.
+    let step = f64::from(u32::try_from(order - 2).unwrap_or(0));
+    let seed = [step.mul_add(34.0, 13.0), step.mul_add(42.0, 71.0)];
     let q = [0, 1].map(|axis| {
         let scaled = (repeats * 0.5).mul_add(p[axis], repeats * 0.5);
         scaled.mul_add(0.25, seed[axis])

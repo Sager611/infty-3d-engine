@@ -1,10 +1,12 @@
-//! Immutable bilinear maps; four height bands, coarse coverage and bounded fine UV variation.
+//! Immutable bilinear maps; any height-order count, each 10× finer, plus coarse coverage and bounded fine UV variation.
 use crate::{geometry::Error, math::interval::Interval as I};
 pub mod gpu;
 mod phase;
 mod ray;
 
 pub const STEPS: usize = 64;
+/// The finest repeat, edge×10^(orders-1), must fit the u32 texel grid.
+pub const MAX_ORDERS: usize = 7;
 pub const AMPLITUDES: [f64; 4] = [
     0.125,
     0.000_976_562_5,
@@ -16,13 +18,13 @@ pub const DATA: &[u8; 2_184_540] = include_bytes!("heightfield/leaf.bin");
 pub struct Field<'a> {
     data: &'a [u8],
     edge: u32,
-    amplitudes: [f64; 4],
+    amplitudes: &'a [f64],
     anchor: [f64; 2],
 }
 pub static LEAF: Field<'static> = Field {
     data: DATA,
     edge: 512,
-    amplitudes: AMPLITUDES,
+    amplitudes: &AMPLITUDES,
     anchor: [0.0; 2],
 };
 #[derive(Clone, Copy, Default)]
@@ -99,8 +101,11 @@ impl Node {
         ])
     }
 }
-const fn repeat(order: usize) -> u32 {
-    [1, 10, 100, 1000, 1][order]
+fn repeat(order: usize) -> u32 {
+    u32::try_from(order)
+        .ok()
+        .and_then(|o| 10_u32.checked_pow(o))
+        .unwrap_or(u32::MAX)
 }
 fn polynomial(c: [f64; 4], x: f64, y: f64) -> f64 {
     c[3].mul_add(x * y, c[1].mul_add(x, c[2].mul_add(y, c[0])))
@@ -110,7 +115,7 @@ impl<'a> Field<'a> {
     pub fn new(
         data: &'a [u8],
         edge: u32,
-        amplitudes: [f64; 4],
+        amplitudes: &'a [f64],
         anchor: [f64; 2],
     ) -> Result<Self, Error> {
         let field = Self {
@@ -120,7 +125,10 @@ impl<'a> Field<'a> {
             anchor,
         };
         let stride = field.stride()?;
-        if data.len() != 5 * stride || amplitudes.iter().any(|value| !value.is_finite()) {
+        if !(1..=MAX_ORDERS).contains(&amplitudes.len())
+            || data.len() != (amplitudes.len() + 1) * stride
+            || amplitudes.iter().any(|value| !value.is_finite())
+        {
             return Err(Error::InvalidParameter);
         }
         if field.sample(anchor)?.coverage < (64.0 * f64::EPSILON).mul_add(1024.0, 127.5) {
@@ -137,13 +145,14 @@ impl<'a> Field<'a> {
         let field = Self::new(self.data, self.edge, self.amplitudes, self.anchor)?;
         let stride = field.stride()?;
         let edge = usize::try_from(field.edge).map_err(|_| Error::Numeric)?;
-        let coverage = &field.data[4 * stride..];
+        let coverage = &field.data[field.orders() * stride..];
         let clear_border = (0..edge).all(|i| {
             [i, (edge - 1) * edge + i, i * edge, i * edge + edge - 1]
                 .into_iter()
                 .all(|at| coverage[at] == 0)
         });
-        let mut bytes = Vec::with_capacity(32 + field.data.len());
+        let padded = 4 * field.orders().div_ceil(4);
+        let mut bytes = Vec::with_capacity(16 + 4 * padded + field.data.len());
         for value in [
             field.edge,
             u32::try_from(stride).map_err(|_| Error::Numeric)?,
@@ -152,7 +161,7 @@ impl<'a> Field<'a> {
         ] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
-        for amplitude in field.amplitudes {
+        for &amplitude in field.amplitudes {
             let value = amplitude as f32;
             if value.abs() > 1.0
                 || value.is_subnormal()
@@ -162,8 +171,20 @@ impl<'a> Field<'a> {
             }
             bytes.extend_from_slice(&value.to_le_bytes());
         }
+        bytes.resize(16 + 4 * padded, 0);
         bytes.extend_from_slice(field.data);
         Ok(bytes)
+    }
+    pub const fn orders(self) -> usize {
+        self.amplitudes.len()
+    }
+    /// Height orders repeat 10× apart; the trailing coverage plane spans the card once.
+    fn scale(self, order: usize) -> u32 {
+        if order == self.orders() {
+            1
+        } else {
+            repeat(order)
+        }
     }
 
     fn stride(self) -> Result<usize, Error> {
@@ -175,12 +196,12 @@ impl<'a> Field<'a> {
     }
     fn bytes(self, order: usize, level: u32, ij: [u32; 2]) -> Result<[f64; 2], Error> {
         let stride = self.stride()?;
-        if order > 4 || level > self.edge.ilog2() {
+        if order > self.orders() || level > self.edge.ilog2() {
             return Err(Error::InvalidParameter);
         }
         let side = self.edge >> level;
         let ij = ij.map(|v| {
-            if order == 0 || order == 4 {
+            if order == 0 || order == self.orders() {
                 v.min(side - 1)
             } else {
                 v % side
@@ -215,7 +236,7 @@ impl<'a> Field<'a> {
         reason = "Validated canonical or mapped fine coordinates fit the u32 texel grid"
     )]
     fn coordinate(self, order: usize, p: f64) -> Result<(u32, f64), Error> {
-        let scale = f64::from(self.edge * repeat(order)) * 0.5;
+        let scale = f64::from(self.edge * self.scale(order)) * 0.5;
         let mut cell = scale.mul_add(p, scale).floor() as u32;
         let mut fraction = scale.mul_add(p, scale - f64::from(cell));
         if fraction < 0.0 {
@@ -237,7 +258,7 @@ impl<'a> Field<'a> {
             gradient: [0.0; 2],
             coverage: 0.0,
         };
-        for order in 0..4 {
+        for order in 0..self.orders() {
             let mapped = phase::map(p, order);
             let (ix, fx) = self.coordinate(order, mapped.point[0])?;
             let (iy, fy) = self.coordinate(order, mapped.point[1])?;
@@ -259,22 +280,22 @@ impl<'a> Field<'a> {
                 );
             }
         }
-        let (ix, fx) = self.coordinate(4, p[0])?;
-        let (iy, fy) = self.coordinate(4, p[1])?;
-        value.coverage = polynomial(self.coefficients(4, [ix, iy])?, fx, fy);
+        let cover = self.orders();
+        let (ix, fx) = self.coordinate(cover, p[0])?;
+        let (iy, fy) = self.coordinate(cover, p[1])?;
+        value.coverage = polynomial(self.coefficients(cover, [ix, iy])?, fx, fy);
         if !value.height.is_finite() || value.gradient.iter().any(|value| !value.is_finite()) {
             return Err(Error::Numeric);
         }
         Ok(value)
     }
     pub fn reach(self) -> f64 {
-        let [a, b, c, d] = self.amplitudes;
-        ((a.abs() + b.abs() + c.abs() + d.abs()) * (128.0 / 255.0)).next_up()
+        (self.amplitudes.iter().map(|a| a.abs()).sum::<f64>() * (128.0 / 255.0)).next_up()
     }
 
     fn alpha_range(self, order: usize, node: Node) -> Result<I, Error> {
         let side = 1_u32 << node.depth;
-        let scale = u64::from(self.edge * repeat(order));
+        let scale = u64::from(self.edge * self.scale(order));
         let mut first = [0_u32; 2];
         let mut last = [0_u32; 2];
         let mut low = [0.0; 2];
@@ -289,7 +310,7 @@ impl<'a> Field<'a> {
             high[axis] = f64::from(u32::try_from(b % u64::from(side)).map_err(|_| Error::Numeric)?)
                 / f64::from(side);
         }
-        if (2..4).contains(&order) {
+        if (2..self.orders()).contains(&order) {
             let [lo, hi] = phase::region(node, order)?;
             for axis in 0..2 {
                 (first[axis], low[axis]) = self.coordinate(order, lo[axis])?;
@@ -353,11 +374,11 @@ impl<'a> Field<'a> {
     pub fn resolution(self) -> Result<u32, Error> {
         self.stride()?;
         let mut highest = 1;
-        for order in 0..4 {
-            if !self.amplitudes[order].is_finite() {
+        for (order, amplitude) in self.amplitudes.iter().enumerate() {
+            if !amplitude.is_finite() {
                 return Err(Error::InvalidParameter);
             }
-            if self.amplitudes[order] != 0.0 {
+            if *amplitude != 0.0 {
                 highest = highest.max(repeat(order));
             }
         }
@@ -365,17 +386,17 @@ impl<'a> Field<'a> {
     }
     pub fn roundoff(self) -> f64 {
         let base = (64.0 * f64::EPSILON).mul_add(
-            self.amplitudes[0].abs()
-                + self.amplitudes[1].abs()
-                + self.amplitudes[2].abs()
-                + self.amplitudes[3].abs(),
+            self.amplitudes.iter().map(|a| a.abs()).sum::<f64>(),
             f64::from_bits(64),
         );
         let rounding = phase::ERROR * f64::from(self.edge);
-        (1000.0 * rounding).mul_add(
-            self.amplitudes[3].abs(),
-            (100.0 * rounding).mul_add(self.amplitudes[2].abs(), base),
-        )
+        self.amplitudes
+            .iter()
+            .enumerate()
+            .skip(2)
+            .fold(base, |sum, (order, a)| {
+                (f64::from(repeat(order)) * rounding).mul_add(a.abs(), sum)
+            })
     }
     pub const fn anchor(self) -> [f64; 2] {
         self.anchor
@@ -383,15 +404,15 @@ impl<'a> Field<'a> {
     pub fn bounds(self, node: Node) -> Result<Option<Bounds>, Error> {
         let [lo, hi] = node.domain()?;
         self.stride()?;
-        if self.alpha_range(4, node)?.hi() < 127.5 {
+        if self.alpha_range(self.orders(), node)?.hi() < 127.5 {
             return Ok(None);
         }
         let mut height = I::ZERO;
-        for order in 0..4 {
+        for (order, &amplitude) in self.amplitudes.iter().enumerate() {
             height = height.add(
                 self.alpha_range(order, node)?
                     .sub(I::point(128.0)?)?
-                    .scale(self.amplitudes[order])?
+                    .scale(amplitude)?
                     .divide(255.0)?,
             )?;
         }

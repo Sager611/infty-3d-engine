@@ -283,7 +283,7 @@ fn leaf_envelope_culls_only_irrelevant_rays_and_depths() -> TestResult {
         );
     }
     let bytes = data([255; 4], [255; 4]);
-    let field = Field::new(&bytes, 2, [0.125, 0.0, 0.0, 0.0], [0.0; 2])?;
+    let field = Field::new(&bytes, 2, &[0.125, 0.0, 0.0, 0.0], [0.0; 2])?;
     let q = run_field("verify_leaf_culling", &rays[3..5], 32, field)?;
     assert!(
         q[0] > 0.5 && q[16] > 0.5,
@@ -321,7 +321,7 @@ fn leaf_height_orders_wait_for_visible_bounded_amplitude() -> TestResult {
     );
     let bytes = data([0; 4], [255; 4]);
     let amplitudes = [0.125, 1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0];
-    let field = Field::new(&bytes, 2, amplitudes, [0.0; 2])?;
+    let field = Field::new(&bytes, 2, &amplitudes, [0.0; 2])?;
     let q = run_field(
         "verify_height_lod",
         &[[0.6, 0.65, 0.0, 0.08, 0.01, 0.0, 0.0, 0.0]],
@@ -414,7 +414,7 @@ fn render_keeps_the_exact_live_host_binding_contract() -> TestResult {
 #[test]
 fn direct_texh_uses_the_carrier_height_without_searching_for_a_root() -> TestResult {
     let bytes = data([128, 255, 128, 255], [255; 4]);
-    let field = Field::new(&bytes, 2, [255.0 / 1024.0, 0.0, 0.0, 0.0], [0.0; 2])?;
+    let field = Field::new(&bytes, 2, &[255.0 / 1024.0, 0.0, 0.0, 0.0], [0.0; 2])?;
     let q = run_field(
         "verify_material_hit",
         &[[-0.6, 0.0, 0.3, 2.0, 0.6, 0.0, -0.8, 5.0]],
@@ -441,7 +441,7 @@ fn texh_shares_shifted_uv_rgb_and_normals_without_geometry_switches() -> TestRes
             .all(|name| !source.contains(name))
     );
     let bytes = data([128, 255, 128, 255], [255; 4]);
-    let field = Field::new(&bytes, 2, [255.0 / 1024.0, 0.0, 0.0, 0.0], [0.0; 2])?;
+    let field = Field::new(&bytes, 2, &[255.0 / 1024.0, 0.0, 0.0, 0.0], [0.0; 2])?;
     let rays = [[-0.6, 0.0, 0.3, 2.0, 0.6, 0.0, -0.8, 5.0]];
     let leaf = run_field("verify_material_color", &rays, 16, field)?;
     let brick = run(
@@ -462,7 +462,7 @@ fn texh_shares_shifted_uv_rgb_and_normals_without_geometry_switches() -> TestRes
 #[test]
 fn displaced_leaf_normals_blend_across_bilinear_texel_boundaries() -> TestResult {
     let bytes = data([128, 255, 128, 255], [255; 4]);
-    let field = Field::new(&bytes, 2, [255.0 / 1024.0, 0.0, 0.0, 0.0], [0.0; 2])?;
+    let field = Field::new(&bytes, 2, &[255.0 / 1024.0, 0.0, 0.0, 0.0], [0.0; 2])?;
     let rays = [
         [-1.0 / 1024.0, 0.0, 0.3, 2.0, 0.0, 0.0, -1.0, 5.0],
         [1.0 / 1024.0, 0.0, 0.3, 2.0, 0.0, 0.0, -1.0, 5.0],
@@ -489,7 +489,8 @@ fn direct_texh_preserves_zero_and_constant_height_on_distinct_carriers() -> Test
     ];
     let bytes = data([160; 4], [255; 4]);
     for amplitude in [0.0, 255.0 / 32768.0] {
-        let field = Field::new(&bytes, 2, [amplitude, 0.0, 0.0, 0.0], [0.0; 2])?;
+        let amplitudes = [amplitude, 0.0, 0.0, 0.0];
+        let field = Field::new(&bytes, 2, &amplitudes, [0.0; 2])?;
         for q in run_field("verify_material_hit", &rays, rays.len() * 16, field)?.chunks_exact(16) {
             assert!(
                 q.iter().all(|v| v.is_finite()) && q[0] > 0.5 && q[11] > 0.5,
@@ -513,7 +514,7 @@ fn leaf_direct_depth_keeps_every_centered_height_band() -> TestResult {
     let field = Field::new(
         &bytes,
         2,
-        [0.125, 1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0],
+        &[0.125, 1.0 / 1024.0, 1.0 / 8192.0, 1.0 / 32768.0],
         [0.0; 2],
     )?;
     let expected = field.uv([0.6, 0.65])?.height;
@@ -569,7 +570,7 @@ fn direct_texh_leaves_misses_alone_and_rejects_an_uncovered_or_backward_candidat
     assert_eq!(q[1].to_bits(), q[2].to_bits());
     for (coverage, origin) in [([255, 0, 0, 0], 0.3), ([255; 4], 0.01)] {
         let bytes = data([255; 4], coverage);
-        let field = Field::new(&bytes, 2, [0.125, 0.0, 0.0, 0.0], [-1.0; 2])?;
+        let field = Field::new(&bytes, 2, &[0.125, 0.0, 0.0, 0.0], [-1.0; 2])?;
         let q = run_field(
             "verify_material_hit",
             &[[0.0, 0.0, origin, 2.0, 0.0, 0.0, -1.0, 5.0]],
@@ -587,7 +588,7 @@ fn direct_texh_leaves_misses_alone_and_rejects_an_uncovered_or_backward_candidat
 #[test]
 fn direct_texh_fades_grazing_offsets_instead_of_searching() -> TestResult {
     let bytes = data([160; 4], [255; 4]);
-    let field = Field::new(&bytes, 2, [255.0 / 1024.0, 0.0, 0.0, 0.0], [0.0; 2])?;
+    let field = Field::new(&bytes, 2, &[255.0 / 1024.0, 0.0, 0.0, 0.0], [0.0; 2])?;
     let q = run_field(
         "verify_material_hit",
         &[[0.2, 0.1, 0.25, 2.0, 1.0, -0.0001, 0.0, 3.0]],

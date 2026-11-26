@@ -31,7 +31,7 @@ fn scene_object_precise(o:vec3f,low:vec3f,d:vec3f,object:SceneObject)->SceneSamp
 fn scene_leaf_relevant(local_o:vec3f,local_d:vec3f,object:SceneObject,limit:f32,padding:f32)->bool {
   if(object.identity.y!=5u||object.params.w!=2.0){return true;}
   let o=plane_frame(local_o,scene_axis(object));let d=plane_frame(local_d,scene_axis(object));
-  let reach=fi_up(dot(abs(height_data.amplitudes),vec4f(128.0/255.0)));
+  let reach=fi_up(hf_reach());
   let bounds=vec3f(1.0+reach,1.0+reach,reach)+vec3f(padding+plane_rounding(o,length(o)+2.0));
   var span=plane_axis(plane_range(),o.z,d.z,-bounds.z,bounds.z);
   span=plane_axis(span,o.x,d.x,-bounds.x,bounds.x);

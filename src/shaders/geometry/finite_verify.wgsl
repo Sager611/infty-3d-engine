@@ -84,7 +84,7 @@ fn verify_texh(@builtin(global_invocation_id) id:vec3u) {
 fn verify_heightfield(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let uv=rays[id.x].o.xy;
-  results[id.x]=ProbeResult(vec4f(hf_height(uv),hf_bilinear(4u,uv,1.0),0.0,0.0),
+  results[id.x]=ProbeResult(vec4f(hf_height(uv),hf_bilinear(FIELD_ORDERS,uv,1.0),0.0,0.0),
     vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 

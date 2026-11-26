@@ -9,7 +9,7 @@ fn texh_context(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,p
     coarse=hf_render_level(0u,leaf_uv_unit(geometry_surface(base.local,base,object).uv),0.0);
     if(pixel_span>0.0){
       let c=dot(d,base.query.n);let factor=object.position_size.w*c/max(0.0025,c*c);
-      let remaining=fi_up(dot(abs(height_data.amplitudes.yzw),vec3f(128.0/255.0)));
+      let remaining=fi_up(hf_detail_bound());
       let closest=max(0.0,fi_down(base.query.t+coarse*factor)-fi_up(remaining*abs(factor)));
       span=pixel_span*closest/object.position_size.w;
     }

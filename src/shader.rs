@@ -43,6 +43,9 @@ const SOURCE: &str = concat!(
 // Expand immutable level metadata once when compiling, never per rendered hit.
 // Additional material orders require assets/metadata, not a shader traversal.
 pub fn source() -> String {
+    source_for(crate::heightfield::LEAF.orders())
+}
+pub fn source_for(orders: usize) -> String {
     use std::fmt::Write as _;
     let mut height = String::new();
     let mut material = String::new();
@@ -75,11 +78,81 @@ pub fn source() -> String {
             let _ = write!(field, "||material=={}.0", m.tag());
         }
     }
-    SOURCE
+    let source = SOURCE
         .replace("// @material-specs", &specs)
         .replace("MATERIAL_CARVE=0u", &format!("MATERIAL_CARVE={carve}u"))
         .replace("false/*@material-field*/", &field)
         .replace("// @texh-levels", &height)
         .replace("// @material-levels", &material)
-        .replace("// @leaf-levels", &leaf)
+        .replace("// @leaf-levels", &leaf);
+    field_orders(&source, orders)
+}
+
+// Unroll the heightfield's data-defined order count; no per-hit traversal over orders.
+fn field_orders(source: &str, orders: usize) -> String {
+    let join = |items: Vec<String>, empty: &str| {
+        if items.is_empty() {
+            empty.to_owned()
+        } else {
+            items.join("+")
+        }
+    };
+    let repeat = |k: usize| format!("{:?}", 10_f64.powi(i32::try_from(k).unwrap_or(0)));
+    let chunks = orders.div_ceil(4);
+    let term = |k: usize| match k {
+        _ if k >= orders => "128.0".to_owned(),
+        0 | 1 => format!("hf_bilinear({k}u,uv,{})", repeat(k)),
+        _ => format!("hf_gradient_value({k}u,uv,{})", repeat(k)),
+    };
+    let dots = |c: usize| format!("dot(abs(height_data.amplitudes[{c}]),vec4f(128.0/255.0))");
+    let height = (0..chunks).map(|c| {
+        let terms: Vec<_> = (0..4).map(|j| term(4 * c + j)).collect();
+        format!(
+            "dot(vec4f({})-vec4f(128.0),height_data.amplitudes[{c}]/255.0)",
+            terms.join(",")
+        )
+    });
+    let lanes = &"yzw"[..orders.clamp(1, 4) - 1];
+    let first = match lanes.len() {
+        0 => vec![],
+        1 => vec!["abs(height_data.amplitudes[0].y)*(128.0/255.0)".to_owned()],
+        n => vec![format!(
+            "dot(abs(height_data.amplitudes[0].{lanes}),vec{n}f(128.0/255.0))"
+        )],
+    };
+    let detail = first.into_iter().chain((1..chunks).map(dots)).collect();
+    let details = (1..orders)
+        .map(|k| format!("hf_render_level({k}u,uv,span)"))
+        .collect();
+    let slopes: Vec<_> = (0..orders)
+        .map(|k| {
+            let lane = ["x", "y", "z", "w"][k % 4];
+            format!("hf_slope({k}u,uv,{},footprint,span,quantum_axes)*height_data.amplitudes[{}].{lane}", repeat(k), k / 4)
+        })
+        .collect();
+    let repeats: Vec<_> = (0..orders).map(repeat).chain(["1.0".to_owned()]).collect();
+    source
+        .replace(
+            "const FIELD_ORDERS=4u;",
+            &format!("const FIELD_ORDERS={orders}u;"),
+        )
+        .replace(
+            "const FIELD_CHUNKS=1u;",
+            &format!("const FIELD_CHUNKS={chunks}u;"),
+        )
+        .replace(
+            "array<f32,5>(1.0,10.0,100.0,1000.0,1.0)",
+            &format!("array<f32,{}>({})", orders + 1, repeats.join(",")),
+        )
+        .replace("0.0/*@field-height*/", &join(height.collect(), "0.0"))
+        .replace(
+            "0.0/*@field-reach*/",
+            &join((0..chunks).map(dots).collect(), "0.0"),
+        )
+        .replace("0.0/*@field-detail-bound*/", &join(detail, "0.0"))
+        .replace("0.0/*@field-details*/", &join(details, "0.0"))
+        .replace(
+            "vec2f(0.0)/*@field-slopes*/",
+            &format!("({})/255.0", slopes.join("+")),
+        )
 }
