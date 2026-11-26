@@ -19,6 +19,7 @@ const MIN_SPEED = 0.000_001;
 const MAX_SPEED = 100;
 const MAX_STEP = 0.05;
 const APPROACH_RANGE = 0.25;
+const CLOSE: number = 1 / 12;
 const POINTER_SCALE = 0.008;
 const FOCAL_LENGTH = 1.8;
 const FRAME_MARGIN = 1.1;
@@ -236,8 +237,8 @@ function moveCamera(
 		],
 	});
 }
-// Integrate v(gap) = minimum + gain * gap inside the band, at base speed outside.
-// Crossing continues at the floor for the rest of this step: this is not collision.
+// Inside the band v = speed·x·(CLOSE + (1 - CLOSE)·x), x = gap/band: base speed at the edge,
+// about one gap per second up close at the initial speed. Exact integration keeps steps frame-rate independent.
 function approachSpeed(
 	speed: number,
 	distance: number,
@@ -246,34 +247,25 @@ function approachSpeed(
 	if (speed === MIN_SPEED || distance >= APPROACH_RANGE + speed * seconds) {
 		return speed;
 	}
-	const gain = (speed - MIN_SPEED) / APPROACH_RANGE;
+	const near = (CLOSE * speed) / APPROACH_RANGE;
+	const far = ((1 - CLOSE) * speed) / APPROACH_RANGE ** 2;
+	const gap = Math.min(distance, APPROACH_RANGE);
 	// Strafe and reverse do not approach: ease at the current distance.
 	if (seconds === 0) {
-		return MIN_SPEED + gain * distance;
+		return Math.max(MIN_SPEED, gap * (near + far * gap));
 	}
 	const free = Math.min(
 		seconds,
 		Math.max(0, distance - APPROACH_RANGE) / speed,
 	);
-	const remaining = seconds - free;
-	const near = Math.min(distance, APPROACH_RANGE);
-	const contact = Math.log1p((gain * near) / MIN_SPEED) / gain;
-	let average: number;
-	if (remaining <= contact) {
-		const exponent = gain * remaining;
-		let ratio = 1;
-		if (exponent !== 0) {
-			ratio = -Math.expm1(-exponent) / exponent;
-		}
-		average = (MIN_SPEED + gain * near) * ratio;
-	} else {
-		average = near / remaining + MIN_SPEED * (1 - contact / remaining);
-	}
+	const eased = -Math.expm1(-near * (seconds - free));
 	return Math.min(
 		speed,
 		Math.max(
 			MIN_SPEED,
-			speed * (free / seconds) + average * (remaining / seconds),
+			(speed * free +
+				(gap * eased * (near + far * gap)) / (near + far * gap * eased)) /
+				seconds,
 		),
 	);
 }

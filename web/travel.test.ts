@@ -7,20 +7,33 @@ const FORWARD: Movement = { forward: 1, side: 0 };
 function unusedHit(): never {
 	throw new Error("unnecessary center query");
 }
+// Exact gap covered in t seconds of v = speed·x·(1/12 + 11/12·x), x = gap/0.25.
+function travelled(speed: number, gap: number, t: number): number {
+	const a = speed / 3;
+	const b = (speed * 11) / 0.75;
+	const decay = Math.exp(-a * t);
+	return gap - (a * gap * decay) / (a + b * gap * (1 - decay));
+}
+
+test("close up, travel covers about one gap per second at the initial speed", () => {
+	for (const gap of [0.000_01, 0.001, 0.01]) {
+		const rate = stepSpeed({ forward: 0, side: 1 }, 3, 0.02, () => gap) / gap;
+		expect(rate).toBeGreaterThan(0.99);
+		expect(rate).toBeLessThan(1.5);
+	}
+	expect(stepSpeed({ forward: 0, side: 1 }, 3, 0.02, () => 0.25)).toBe(3);
+});
 
 test("every direction slows near the looked-at geometry; idle and misses keep base speed", () => {
 	expect(stepSpeed({ forward: 0, side: 0 }, 3, 0.02, unusedHit)).toBe(3);
 	expect(stepSpeed(FORWARD, 3, 0, unusedHit)).toBe(3);
-	const gain = (3 - MIN_SPEED) / 0.25;
 	for (const movement of [
 		{ forward: -1, side: 0 },
 		{ forward: 0, side: 1 },
 		{ forward: 0, side: -1 },
 		{ forward: -1, side: 1 },
 	]) {
-		expect(stepSpeed(movement, 3, 0.02, () => 0.125)).toBe(
-			MIN_SPEED + gain * 0.125,
-		);
+		expect(stepSpeed(movement, 3, 0.02, () => 0.125)).toBeCloseTo(0.8125, 12);
 		expect(stepSpeed(movement, 3, 0.02, () => null)).toBe(3);
 		expect(stepSpeed(movement, 3, 0.02, () => 1)).toBe(3);
 	}
@@ -68,33 +81,22 @@ test("approach rates stay positive, monotone and bounded, without clamping motio
 	}
 });
 
-test("micro-unit inspection slows before contact without raising the positive floor", () => {
-	const floor = 0.000_001;
-	const gap = 0.000_001;
-	const seconds = 0.05;
-	const gain = (3 - floor) / 0.25;
-	const distance = stepSpeed(FORWARD, 3, seconds, () => gap) * seconds;
-	const oracle = (gap + floor / gain) * (1 - Math.exp(-gain * seconds));
-	expect(distance).toBeGreaterThan(gap / 4);
-	expect(Math.abs(distance - oracle)).toBeLessThan(1e-16);
-	expect(stepSpeed(FORWARD, 3, seconds, () => 0)).toBe(floor);
+test("micro-unit inspection follows the exact easing without raising the positive floor", () => {
+	const distance = stepSpeed(FORWARD, 3, 0.05, () => 0.000_01) * 0.05;
+	expect(Math.abs(distance - travelled(3, 0.000_01, 0.05))).toBeLessThan(1e-18);
+	expect(stepSpeed(FORWARD, 3, 0.05, () => 0)).toBe(MIN_SPEED);
 });
 
 test("closed-form easing cannot skip its band at high speed and agrees across time partitions", () => {
 	const speed = 3;
 	const gap = 0.2;
-	const gain = (speed - MIN_SPEED) / 0.25;
 	const full = stepSpeed(FORWARD, speed, 0.04, () => gap) * 0.04;
-	const oracle = (gap + MIN_SPEED / gain) * (1 - Math.exp(-gain * 0.04));
-	expect(Math.abs(full - oracle)).toBeLessThan(1e-12);
+	expect(Math.abs(full - travelled(speed, gap, 0.04))).toBeLessThan(1e-12);
 	const first = stepSpeed(FORWARD, speed, 0.02, () => gap) * 0.02;
 	const second = stepSpeed(FORWARD, speed, 0.02, () => gap - first) * 0.02;
 	expect(Math.abs(first + second - full)).toBeLessThan(1e-12);
 	const fast = stepSpeed(FORWARD, 100, 0.05, () => 1.25) * 0.05;
-	const highGain = (100 - MIN_SPEED) / 0.25;
-	const highOracle =
-		1 + (0.25 + MIN_SPEED / highGain) * (1 - Math.exp(-highGain * 0.04));
-	expect(Math.abs(fast - highOracle)).toBeLessThan(1e-12);
+	expect(Math.abs(fast - 1 - travelled(100, 0.25, 0.04))).toBeLessThan(1e-12);
 	expect(fast).toBeLessThan(1.25);
 	expect(stepSpeed(FORWARD, 3, 1000, () => gap)).toBe(
 		stepSpeed(FORWARD, 3, 0.05, () => gap),
@@ -112,9 +114,9 @@ test("Shift integrates the faster approach continuously across frame partitions"
 	const second =
 		(2 * stepSpeed(boosted, speed, seconds / 2, () => gap - first) * seconds) /
 		2;
-	const gain = (speed - MIN_SPEED) / 0.25;
-	const oracle = (gap + MIN_SPEED / gain) * (1 - Math.exp(-gain * seconds * 2));
-	expect(Math.abs(full - oracle)).toBeLessThan(1e-12);
+	expect(Math.abs(full - travelled(speed, gap, seconds * 2))).toBeLessThan(
+		1e-12,
+	);
 	expect(Math.abs(full - first - second)).toBeLessThan(1e-12);
 });
 
