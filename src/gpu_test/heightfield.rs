@@ -7,10 +7,27 @@ use crate::{
 };
 
 #[test]
-fn generated_shader_validates_for_any_field_order_count() -> Result<(), Box<dyn std::error::Error>>
-{
+fn generated_shader_validates_for_any_material_and_field_order_count()
+-> Result<(), Box<dyn std::error::Error>> {
+    let presets = crate::material::presets_with_leaf(true);
     for orders in [1, 2, 6, crate::heightfield::MAX_ORDERS] {
-        let module = naga::front::wgsl::parse_str(&crate::shader::source_for(orders))?;
+        // Layered materials get `orders` levels too; the field material keeps its data.
+        let levels: Vec<_> = presets
+            .iter()
+            .filter(|l| l.order == 0 || l.material.spec().field)
+            .flat_map(|&l| {
+                let count = if l.material.spec().field { 1 } else { orders };
+                (0..count).map(move |o| crate::material::Level {
+                    order: l.order + i32::try_from(o).unwrap_or(0),
+                    extent: l.extent / 10.0_f64.powi(i32::try_from(o).unwrap_or(0)),
+                    relief: l.relief / 10.0_f32.powi(i32::try_from(o).unwrap_or(0)),
+                    ..l
+                })
+            })
+            .collect();
+        crate::material::validate(&levels, 256)?;
+        let source = crate::shader::source_for(&levels, orders);
+        let module = naga::front::wgsl::parse_str(&source)?;
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),

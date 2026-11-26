@@ -43,14 +43,18 @@ const SOURCE: &str = concat!(
 // Expand immutable level metadata once when compiling, never per rendered hit.
 // Additional material orders require assets/metadata, not a shader traversal.
 pub fn source() -> String {
-    source_for(crate::heightfield::LEAF.orders())
+    source_for(
+        &crate::material::presets_with_leaf(true),
+        crate::heightfield::LEAF.orders(),
+    )
 }
-pub fn source_for(orders: usize) -> String {
+/// Any material level list and heightfield order count; code is unrolled from the data.
+pub fn source_for(levels: &[crate::material::Level], orders: usize) -> String {
     use std::fmt::Write as _;
     let mut height = String::new();
     let mut material = String::new();
     let mut leaf = String::new();
-    for (index, _) in crate::material::presets_with_leaf(true).iter().enumerate() {
+    for index in 0..levels.len() {
         let _ = writeln!(height, "height+=texh_level({index}u,foot,context,typical);");
         let _ = writeln!(
             material,
