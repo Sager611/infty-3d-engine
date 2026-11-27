@@ -35,16 +35,16 @@ fn texh_project(level:MaterialLevel,uv:vec2f,origin:vec2f,t:vec2f,lod:f32,walls:
   let ramp=f32((level.identity.z>>2u)&63u)/4.0;
   return vec3f(alpha,material_reach(runs,t,ramp),material_reach(runs,-t,ramp));
 }
-// Typical mode: typical, deepest and highest heights. Otherwise height at foot; the material's largest-step level also
-// reports its classes, heights and contour distances ahead of foot and behind bottom.
-struct TexhLevel {height:f32,deepest:f32,highest:f32,ahead:f32,back:f32,behind:f32,near:f32,far:f32,groove:f32,bevel:f32,near_high:bool,far_high:bool,structural:bool};
+// Typical mode: typical, deepest and highest heights. Otherwise the height at foot; texh_walls then adds the
+// material's largest-step level's classes, heights and contour distances ahead of foot and behind bottom, once.
+struct TexhLevel {height:f32,deepest:f32,highest:f32,ahead:f32,back:f32,behind:f32,near:f32,far:f32,groove:f32,bevel:f32,near_high:bool,far_high:bool,structural:bool,index:u32};
 fn texh_merge(sum:TexhLevel,level:TexhLevel)->TexhLevel {
   var merged=sum;if(level.structural){merged=level;}
   merged.height=sum.height+level.height;merged.deepest=sum.deepest+level.deepest;merged.highest=sum.highest+level.highest;
   return merged;
 }
-fn texh_level(index:u32,foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext,typical:bool)->TexhLevel {
-  var result=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false);
+fn texh_level(index:u32,foot:SurfacePoint,context:TexhContext,typical:bool)->TexhLevel {
+  var result=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false,index);
   if(index>=arrayLength(&material_levels)){return result;}
   let level=material_levels[index];let material=u32(context.object.params.w);
   if(level.identity.x!=material){return result;}
@@ -52,22 +52,25 @@ fn texh_level(index:u32,foot:SurfacePoint,bottom:SurfacePoint,context:TexhContex
   let datum=select(level.mean.a,1.0,(level.identity.z&1u&(MATERIAL_CARVE>>material))!=0u);
   if(typical){result.height=(f32((level.identity.z>>16u)&255u)/255.0-datum)*gain;result.deepest=-datum*gain;result.highest=(1.0-datum)*gain;return result;}
   if(gain==0.0){return result;}
-  let structural=(level.identity.z&2u)!=0u;let near=texh_sample(level,foot,context,lod,structural);
-  result.height=(near.x-datum)*gain;
-  if(structural){
-    let far=texh_sample(level,bottom,context,lod,true);let edge=f32(level.identity.z>>24u)/255.0;
-    let bevel=f32((level.identity.z>>2u)&63u)/8.0*level.surface.x/512.0;// half ramp width
-    result=TexhLevel(result.height,0.0,0.0,near.y,near.z,far.z,result.height,(far.x-datum)*gain,(level.border.a-datum)*gain,bevel,near.x>=edge,far.x>=edge,true);
-  }
+  result.height=(texh_sample(level,foot,context,lod,false).x-datum)*gain;result.structural=(level.identity.z&2u)!=0u;
   return result;
 }
+fn texh_walls(sum:TexhLevel,foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext)->TexhLevel {
+  let level=material_levels[sum.index];let material=u32(context.object.params.w);
+  let lod=material_lod(context.footprint,level.surface.x);let gain=level.surface.y*material_visible(lod);
+  let datum=select(level.mean.a,1.0,(level.identity.z&1u&(MATERIAL_CARVE>>material))!=0u);
+  let near=texh_sample(level,foot,context,lod,true);let far=texh_sample(level,bottom,context,lod,true);
+  let edge=f32(level.identity.z>>24u)/255.0;let bevel=f32((level.identity.z>>2u)&63u)/8.0*level.surface.x/512.0;// half ramp width
+  return TexhLevel(sum.height,0.0,0.0,near.y,near.z,far.z,(near.x-datum)*gain,(far.x-datum)*gain,(level.border.a-datum)*gain,bevel,near.x>=edge,far.x>=edge,true,sum.index);
+}
 fn texh_height(foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext,typical:bool)->TexhLevel {
-  var sum=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false);
+  var sum=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false,0u);
   if(material_field(context.object.params.w)){
     if(!typical){sum.height=context.coarse+hf_render_details(leaf_uv_unit(foot.uv),context.span);}
     return sum;
   }
   // @texh-levels
+  if(!typical&&sum.structural){sum=texh_walls(sum,foot,bottom,context);}
   let size=context.object.position_size.w;
   sum.height/=size;sum.deepest/=size;sum.highest/=size;sum.ahead/=size;sum.back/=size;sum.behind/=size;sum.near/=size;sum.far/=size;sum.groove/=size;sum.bevel/=size;
   return sum;

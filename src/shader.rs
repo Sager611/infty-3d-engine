@@ -72,7 +72,7 @@ pub fn source_for(levels: &[crate::material::Level], orders: usize) -> String {
     for k in 0..longest {
         let _ = writeln!(
             height,
-            "sum=texh_merge(sum,texh_level(first+{k}u,foot,bottom,context,typical));"
+            "sum=texh_merge(sum,texh_level(first+{k}u,foot,context,typical));"
         );
         let _ = writeln!(
             material,
