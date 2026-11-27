@@ -52,7 +52,7 @@ Sphere/plane gaps are analytic within floating-point precision. Quartic misses h
 
 Selected sphere/quartic/cluster misses qualify for an outline only when their valid upper gap is below the pixel-scale thickness and their witness passes the depth test. No duplicate enlarged surfaces or hit fills. Loose witnesses can under-cover; planes have no finite silhouette. Internal shader status2/3 means uncomputed/invalid and cannot qualify.
 
-Modes0/1/2/3 are UV/Gap/Detail/Materials. Canonical UVs and analytic footprints apply object size once. Detail blends three adjacent hashed power-of-two grids with finite precision/LOD limits, not texture images or literally infinite detail. Cluster uses two-sided geometric normals, not the procedural checker.
+Modes0/1/2/3 are UV/Gap/Detail/Materials; +4 (transient unchecked Texh) draws texh at carrier depth. Canonical UVs and analytic footprints apply object size once. Detail blends three adjacent hashed power-of-two grids with finite precision/LOD limits, not texture images or literally infinite detail. Cluster uses two-sided geometric normals, not the procedural checker.
 
 Materials alter reflectance/normal detail, never analytic geometry, silhouettes, queries or camera easing. Per-instance selection persists in the saved packet without splitting shared geometry. Brushed steel is metallic; brick/mortar is dielectric. Four512² linear-RGB/relief tiles per finish cover420/42/4.2/0.42mm; finest texels are0.82µm. Credited optical/SEM derivatives and authored fields approximate morphology, not calibrated height/photometry; see`src/material/REFERENCES.md`. Brick0's twelve-face2×6 atlas supplies running bond, mortar borders, stable flips/tint; finer levels show pores/minerals, never miniature bricks. Clay albedo excludes pore masks; artistic cavity occlusion/normal relief supplies contrast without clipping floor variation. Steel relief and anisotropic shading share the V brush axis.
 
@@ -125,3 +125,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-09 | Assistant | Guarded terminal device loss before GPU work | Reject dead-device rendering/resizing without background retries |
 | 2026-11-09 | Assistant | Added instance materials, physical texture layers, filtered GPU shading and lazy ownership | Reveal surface detail without changing geometry or idle work |
 | 2026-11-09 | Assistant | Documented final atlas/phase layout, relief filtering, lighting and display encoding | Match validated appearance-only implementation and limits |
+| 2026-11-27 | Assistant | Documented the flat-texh mode bit | Keep the display-mode interface explicit |

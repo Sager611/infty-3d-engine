@@ -117,6 +117,7 @@ fn material_tiles(
             | "verify_material_color"
             | "verify_slope_precision"
             | "verify_texh_borrow"
+            | "verify_texh_flat"
             | "verify_instance_pose"
     ) {
         return Ok(None);

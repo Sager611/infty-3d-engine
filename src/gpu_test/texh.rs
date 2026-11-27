@@ -81,8 +81,7 @@ fn relief_and_shading_rules_come_from_material_data() {
     }
 }
 
-#[test]
-fn close_brick_relief_draws_shown_spots_near_their_own_depth() -> TestResult {
+fn close_brick_rays() -> Vec<[f32; 8]> {
     let (sin, cos) = 0.87_f32.sin_cos();
     let mut rays = Vec::new();
     for (x, y) in [-0.3_f32, -0.1, 0.1, 0.3]
@@ -96,6 +95,12 @@ fn close_brick_relief_draws_shown_spots_near_their_own_depth() -> TestResult {
             rays.push([x, y, 0.005, 1.0, sin + a, b, -cos, 5.0]);
         }
     }
+    rays
+}
+
+#[test]
+fn close_brick_relief_draws_shown_spots_near_their_own_depth() -> TestResult {
+    let rays = close_brick_rays();
     let q = run("verify_texh_borrow", &rays, rays.len() * 16)?;
     let mut error: Vec<f32> = q
         .chunks_exact(16)
@@ -113,6 +118,30 @@ fn close_brick_relief_draws_shown_spots_near_their_own_depth() -> TestResult {
         median < 7.5e-5,
         "shown spots borrow depth from elsewhere: median {median} m, p90 {tail} m"
     );
+    Ok(())
+}
+
+#[test]
+fn flat_texh_draws_carrier_depth_and_keeps_leaf_cutout() -> TestResult {
+    let mut rays = close_brick_rays();
+    let bricks = rays.len();
+    // Leaf card centre, then its uncovered corners.
+    for [x, y] in [
+        [0.0, 0.0],
+        [-0.96, -0.96],
+        [0.96, -0.96],
+        [-0.96, 0.96],
+        [0.96, 0.96],
+    ] {
+        rays.push([x, y, 1.0, 2.0, 0.0, 0.0, -1.0, 5.0]);
+    }
+    let q = run("verify_texh_flat", &rays, rays.len() * 16)?;
+    for (i, row) in q.chunks_exact(16).enumerate() {
+        assert!(
+            (row[0] > 0.5) == (i <= bricks) && row[1] == 0.0,
+            "ray {i}: {row:?}"
+        );
+    }
     Ok(())
 }
 

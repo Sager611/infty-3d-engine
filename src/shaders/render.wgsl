@@ -63,8 +63,9 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     + sy * normalize(frame_params.up.xyz));
   let origin = frame_params.origin.xyz;
   let count = frame_params.screen.w;
-  let display_gap = frame_params.screen.z == 1u;
-  let material_view = frame_params.screen.z == 3u;
+  let mode = frame_params.screen.z & 3u;
+  let display_gap = mode == 1u;
+  let material_view = mode == 3u;
   let pixel_span = 2.0/(frame_params.forward.w*height);
   let light = vec3f(3.0, 5.0, 4.0);
 
@@ -104,7 +105,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
       if(material_view&&!scene_leaf_relevant(local_o,local_d,object,limit,padding)){i++;continue;}
       let carrier=scene_canonical(local_o,local_d,object);
       var sample=carrier;
-      if(material_view||material_field(object.params.w)){sample=material_texh_depth(carrier,direction,object,delta,pixel_span);}
+      if(material_view||material_field(object.params.w)){sample=material_texh_depth(carrier,direction,object,delta,pixel_span,f32(frame_params.screen.z<4u));}
       pending=pending_min(pending,sample.pending);
       if (sample.query.hit && (!nearest_hit || sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
         nearest = sample;
@@ -153,7 +154,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
       local_query.p=nearest.local*nearest_size;local_query.n=scene_local_vector(nearest_object,nearest.query.n);
       color = surface_shade(local_query, scene_local_vector(nearest_object,nearest_carrier.query.n), nearest.local, nearest.kind,
         scene_local_vector(nearest_object,direction), height, nearest_size,
-        frame_params.screen.z, scene_local_vector(nearest_object,scene_origin_delta(light,vec3f(0.0),nearest_object)), shadow);
+        mode, scene_local_vector(nearest_object,scene_origin_delta(light,vec3f(0.0),nearest_object)), shadow);
     }
   }
 

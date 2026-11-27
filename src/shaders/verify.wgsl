@@ -99,7 +99,7 @@ fn verify_leaf_culling(@builtin(global_invocation_id) id:vec3u) {
   let size=select(0.07,0.035,pose>=6u);
   let object=SceneObject(vec4u(1u,5u,(mode%3u)<<8u,0u),vec4f(1.0,1.0,0.0,size),vec4f(0.0,0.0,0.0,2.0),vec4f(0.0,sin(angle*0.5),0.0,cos(angle*0.5)));
   let d=normalize(r.d.xyz);let base=scene_object(r.o.xyz,d,object);
-  let sample=material_texh_depth(base,d,object,scene_origin_delta(r.o.xyz,vec3f(0.0),object),0.001);
+  let sample=material_texh_depth(base,d,object,scene_origin_delta(r.o.xyz,vec3f(0.0),object),0.001,1.0);
   let local=scene_local_vector(object,(r.o.xyz-object.position_size.xyz)/size);
   let padding=select(0.0,6.0*(length(local)+2.0)/(1.8*791.0),selected);
   let relevant=scene_leaf_relevant(local,scene_local_vector(object,d),object,r.d.w,padding);
@@ -122,15 +122,18 @@ fn material_hit_probe(id:vec3u,pixel_span:f32) {
 @compute @workgroup_size(1)
 fn verify_material_hit(@builtin(global_invocation_id) id:vec3u) {material_hit_probe(id,0.001);}
 // Depth at which the shown spot is drawn versus that spot's own depth.
-@compute @workgroup_size(1)
-fn verify_texh_borrow(@builtin(global_invocation_id) id:vec3u) {
+fn texh_borrow_probe(id:vec3u,relief:f32) {
   if(id.x>=arrayLength(&rays)){return;}
   let r=rays[id.x];let d=normalize(r.d.xyz);let span=2.0/(1.8*791.0);
   let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w),POSE_IDENTITY);
-  let base=scene_object(r.o.xyz,d,object);let sample=material_texh_depth(base,d,object,r.o.xyz,span);
+  let base=scene_object(r.o.xyz,d,object);let sample=material_texh_depth(base,d,object,r.o.xyz,span,relief);
   let shown=texh_height(geometry_surface(sample.local,base,object),texh_context(base,d,object,r.o.xyz,span),false);
   results[id.x]=ProbeResult(vec4f(f32(sample.query.hit),dot(sample.local-base.local,base.query.n),shown,0.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
+@compute @workgroup_size(1)
+fn verify_texh_borrow(@builtin(global_invocation_id) id:vec3u) {texh_borrow_probe(id,1.0);}
+@compute @workgroup_size(1)
+fn verify_texh_flat(@builtin(global_invocation_id) id:vec3u) {texh_borrow_probe(id,0.0);}
 @compute @workgroup_size(1)
 fn verify_material_hit_full(@builtin(global_invocation_id) id:vec3u) {material_hit_probe(id,0.0);}
 @compute @workgroup_size(1)

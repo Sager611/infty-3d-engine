@@ -291,7 +291,7 @@
 			gap: 8px;
 			align-items: end;
 		}
-		.control-row > label:last-child {
+		.control-row > label:only-child {
 			grid-column: 1 / -1;
 		}
 		.properties {
@@ -683,6 +683,15 @@
 							<option value="2">Detail</option>
 							<option value="3">Materials</option>
 						</select>
+					</label>
+					<label for="texh">
+						Texh
+						<input
+							id="texh"
+							type="checkbox"
+							title="Heightmap displacement"
+							checked
+						>
 					</label>
 				</div>
 				<div

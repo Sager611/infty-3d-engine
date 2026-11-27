@@ -22,6 +22,24 @@ test("Materials is an additional accessible view without replacing diagnostics",
 	expect(labels).toEqual(["UV", "Gap", "Detail", "Materials"]);
 });
 
+test("texh displacement toggle starts on inside the scene controls", async () => {
+	const source = await Bun.file(
+		new URL("../index.html", import.meta.url),
+	).text();
+	const toggles: unknown[][] = [];
+	const parser = new HTMLRewriter().on("#controls label > #texh", {
+		element(element: HTMLRewriterTypes.Element): void {
+			toggles.push([
+				element.getAttribute("type"),
+				element.hasAttribute("checked"),
+				element.getAttribute("title"),
+			]);
+		},
+	});
+	await parser.transform(new Response(source)).text();
+	expect(toggles).toEqual([["checkbox", true, "Heightmap displacement"]]);
+});
+
 test("property forms have a non-form host and their own grid", async () => {
 	const source = await Bun.file(
 		new URL("../index.html", import.meta.url),

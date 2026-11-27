@@ -84,13 +84,13 @@ fn texh_shading_context(sample:SceneSample,base:SceneSample,d:vec3f,object:Scene
   }
   return context;
 }
-fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->SceneSample {
+fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32,relief:f32)->SceneSample {
   if(base.base_hit==0u){return base;}
   let context=texh_context(base,d,object,origin_delta,pixel_span);
   let height=texh_height(texh_source(base,d,object,context),context,false);
   let incidence=dot(d,base.query.n);
   // Reciprocal incidence above |cos|=.05; fade instead of exploding at grazing angles.
-  let offset=height*incidence/max(0.0025,incidence*incidence);
+  let offset=relief*height*incidence/max(0.0025,incidence*incidence);
   var result=base;result.query.t+=offset*object.position_size.w;
   result.query.p=fma(vec3f(offset*object.position_size.w),d,base.query.p);
   result.local=fma(vec3f(offset),scene_local_vector(object,d),base.local);
@@ -110,7 +110,7 @@ fn texh_shade_normal(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObj
   return scene_world_vector(object,texh_normal(sample.local,geometry_surface(sample.local,base,object),context));
 }
 fn material_texh(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->SceneSample {
-  var sample=material_texh_depth(base,d,object,origin_delta,pixel_span);
+  var sample=material_texh_depth(base,d,object,origin_delta,pixel_span,1.0);
   sample.query.n=texh_shade_normal(sample,base,d,object,origin_delta,pixel_span);
   return sample;
 }

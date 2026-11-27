@@ -277,8 +277,8 @@ fn frame_params(
     height: u16,
 ) -> Result<Params, JsValue> {
     let mode = crate::math::checked_u32(mode)
-        .filter(|&value| value <= 3)
-        .ok_or_else(|| js_error("render mode must be 0, 1, 2, or 3"))?;
+        .filter(|&value| value <= 7)
+        .ok_or_else(|| js_error("render mode must be 0-3, plus 4 for flat texh"))?;
     let camera = parse_camera(camera_packet).map_err(|error| js_error(error.to_string()))?;
     let basis = camera.basis();
     let (high, low) = crate::math::types::split32(basis.origin)

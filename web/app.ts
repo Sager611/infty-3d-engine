@@ -80,8 +80,10 @@ const MAX_WIDTH = 1440;
 const MAX_HEIGHT = 1000;
 const MAX_PIXELS = 1_000_000;
 const HASH_DELAY = 150;
+const FLAT_TEXH = 4;
 const canvas: HTMLElement | null = document.getElementById("viewport");
 const modeNode: HTMLElement | null = document.getElementById("mode");
+const texhNode: HTMLElement | null = document.getElementById("texh");
 const velocityNode: HTMLElement | null = document.getElementById("velocity");
 const presetNode: HTMLElement | null = document.getElementById("scene-preset");
 const resetNode: HTMLElement | null = document.getElementById("reset");
@@ -93,6 +95,7 @@ if (
 	!(
 		canvas instanceof HTMLCanvasElement &&
 		modeNode instanceof HTMLSelectElement &&
+		texhNode instanceof HTMLInputElement &&
 		velocityNode instanceof HTMLInputElement &&
 		presetNode instanceof HTMLSelectElement &&
 		resetNode instanceof HTMLButtonElement &&
@@ -276,6 +279,7 @@ const resetDefaults = (): void => {
 	editor = createEditor(DEFAULT_SNAPSHOT.objects);
 	selection = EMPTY_SELECTION;
 	pickAll = false;
+	texhNode.checked = true;
 	setSnapshot(DEFAULT_SNAPSHOT);
 	inspector.textContent = "Move pointer over the canvas to inspect.";
 };
@@ -526,7 +530,7 @@ const renderFrame = (now: number): void => {
 		renderer.render_scene(
 			cameraValues(),
 			preparedScene(),
-			snapshot.mode,
+			snapshot.mode + FLAT_TEXH * Number(!texhNode.checked),
 			new Uint32Array(selection.ids),
 		);
 		meter?.record(performance.now() - started);
@@ -744,6 +748,7 @@ modeNode.addEventListener("change", () => {
 		setStatus(`Mode update failed: ${errorMessage(error)}`);
 	}
 });
+texhNode.addEventListener("change", invalidate);
 presetNode.addEventListener("change", loadScenePreset);
 resetNode.addEventListener("click", resetDefaults);
 focusNode.addEventListener("click", frame);
