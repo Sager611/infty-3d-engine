@@ -111,8 +111,10 @@ fn material_runs(uv:vec2f,origin:vec2f,level:MaterialLevel,lod:f32,top:bool)->ve
     +material_swap(material_sample(c,layer,lod),c>=vec2f(1.0))*g.w.z)/(g.w.x+g.w.y+g.w.z);
 }
 // World distance along t (texels per world unit) to the nearest axis run's contour: exact for axis-aligned walls.
-fn material_reach(runs:vec4f,t:vec2f)->f32 {
-  let d=max(vec2f(select(runs.y,runs.x,t.x>=0.0),select(runs.w,runs.z,t.y>=0.0)),vec2f(1e-3));
+// Cross-axis runs shorter than a ramp are edge wiggle the ray soon leaves, not walls ahead.
+fn material_reach(runs:vec4f,t:vec2f,ramp:f32)->f32 {
+  var d=max(vec2f(select(runs.y,runs.x,t.x>=0.0),select(runs.w,runs.z,t.y>=0.0)),vec2f(1e-3));
+  d=select(d,vec2f(1e30),vec2<bool>(d.x<ramp&&abs(t.x)<abs(t.y),d.y<ramp&&abs(t.y)<abs(t.x)));
   return 1.0/max(max(abs(t.x)/d.x,abs(t.y)/d.y),1e-30);
 }
 // Zero keeps raw height differentials; one limits byte noise in shading normals.

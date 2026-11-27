@@ -23,7 +23,7 @@ pub struct Tiles {
     pub buffer: wgpu::Buffer,
     levels: Vec<Level>,
     #[cfg(test)]
-    means: Vec<([f32; 4], u32)>,
+    means: Vec<([f32; 4], u32, f32)>,
 }
 fn image(device: &wgpu::Device, edge: u32, layers: u32, mips: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
@@ -102,11 +102,13 @@ impl Tiles {
         for (layer, level) in (0..layers).zip(levels) {
             let pixels = texture(*level)?;
             let (threshold, contrast, low, high) = split(&pixels);
-            let (to_top, to_groove) = runs(&pixels, threshold);
+            let cells = level.atlas.map_or([1, 1], |a| a.cells.map(usize::from));
+            let (to_top, to_groove) = runs(&pixels, threshold, low, high, cells);
             upload(queue, &texture_array, layer + layers, to_top)?;
             upload(queue, &texture_array, layer + 2 * layers, to_groove)?;
             stats.push((
                 mean(&pixels),
+                low,
                 bevel(&pixels, threshold, low, high) << 2
                     | median_height(&pixels) << 16
                     | threshold << 24,
@@ -118,13 +120,17 @@ impl Tiles {
         let means: Vec<_> = stats
             .iter()
             .zip(levels)
-            .map(|(&(mean, packed, step), level)| {
+            .map(|(&(mean, low, packed, step), level)| {
                 let largest = stats
                     .iter()
                     .zip(levels)
                     .filter(|(_, other)| other.material.tag() == level.material.tag())
-                    .fold(0.0_f32, |top, (other, _)| top.max(other.2));
-                (mean, packed | u32::from(step > 0.0 && step >= largest) << 1)
+                    .fold(0.0_f32, |top, (other, _)| top.max(other.3));
+                (
+                    mean,
+                    packed | u32::from(step > 0.0 && step >= largest) << 1,
+                    unit(low),
+                )
             })
             .collect();
         let rows = rows(levels, &means, [0.0; 3], true)?;
@@ -191,7 +197,7 @@ impl Tiles {
 )]
 fn rows(
     levels: &[Level],
-    means: &[([f32; 4], u32)],
+    means: &[([f32; 4], u32, f32)],
     origin: [f64; 3],
     leaf: bool,
 ) -> Result<Vec<Row>, &'static str> {
@@ -200,7 +206,7 @@ fn rows(
         .zip(means)
         .enumerate()
         .filter(|(_, (level, _))| leaf || !level.material.spec().field)
-        .map(|(index, (level, (mean, packed)))| {
+        .map(|(index, (level, (mean, packed, groove)))| {
             Ok(Row {
                 identity: [
                     u32::from(level.material.tag()),
@@ -220,7 +226,8 @@ fn rows(
                 ],
                 phase: phase(*level, origin),
                 mean: *mean,
-                border: level.atlas.map_or([0.0; 4], |a| a.border),
+                // Atlas mortar, or the groove-class mean height for ordinary tiles.
+                border: level.atlas.map_or([0.0, 0.0, 0.0, *groove], |a| a.border),
             })
         })
         .collect()
@@ -289,7 +296,7 @@ fn split(pixels: &[u8]) -> (u32, f32, f64, f64) {
     }
     (result.0, result.1 as f32, result.2, result.3)
 }
-// Mean groove-to-top ramp width: the 10-90 % band per crossing, widened to the whole ramp, in quarter texels.
+// Mean wall ramp width between the 20 % and 80 % levels of the class gap, per crossing, in quarter texels.
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -304,60 +311,106 @@ fn bevel(pixels: &[u8], threshold: u32, low: f64, high: f64) -> u32 {
     for i in 0..texels {
         let alpha = f64::from(pixels[4 * i + 3]);
         band += f64::from(u8::from(
-            alpha > 0.1_f64.mul_add(high - low, low) && alpha < 0.1_f64.mul_add(low - high, high),
+            alpha >= 0.2_f64.mul_add(high - low, low) && alpha < 0.2_f64.mul_add(low - high, high),
         ));
         crossings += f64::from(u8::from(i % edge + 1 < edge && top(i) != top(i + 1)));
         crossings += f64::from(u8::from(i + edge < texels && top(i) != top(i + edge)));
     }
-    (band / crossings.max(1.0) * 5.0).round().clamp(1.0, 63.0) as u32
+    (band / crossings.max(1.0) * 4.0).round().clamp(1.0, 63.0) as u32
 }
-// Quarter texels to the interpolated threshold crossing along +u, -u, +v, -v (RGBA, up to 63.75 texels),
-// mirror-extended like the sampler; split by class so filtering never mixes a groove's run with a top's.
+// Quarter texels (up to 63.75) along +u, -u, +v, -v (RGBA) from a groove texel to the foot (20 % of the class gap)
+// of the next rising wall, and from a top texel to the crest (80 %) of the next falling one; zero on that ramp itself.
+// Interpolated crossings, mirror-extended like the sampler at tile and atlas-cell edges (neighbouring cells are
+// unrelated faces), split by Otsu class so filtering never mixes classes.
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     reason = "Runs are clamped to one byte"
 )]
-fn runs(pixels: &[u8], threshold: u32) -> (Vec<u8>, Vec<u8>) {
+fn runs(
+    pixels: &[u8],
+    threshold: u32,
+    low: f64,
+    high: f64,
+    cells: [usize; 2],
+) -> (Vec<u8>, Vec<u8>) {
     let edge = EDGE as usize;
-    let level = f64::from(threshold) - 0.5;
+    let middle = f64::from(threshold) - 0.5;
+    let (foot, crest) = (
+        0.2_f64.mul_add(high - low, low),
+        0.2_f64.mul_add(low - high, high),
+    );
     let (mut to_top, mut to_groove) = (vec![0_u8; pixels.len()], vec![0_u8; pixels.len()]);
     for line in 0..edge {
-        for (channel, start, stride) in [(0, line * edge, 1), (2, line, edge)] {
-            for (offset, reverse) in [(0, false), (1, true)] {
-                let texel = |i: usize| {
-                    let i = if i < edge { i } else { 2 * edge - 1 - i };
-                    start + stride * if reverse { edge - 1 - i } else { i }
-                };
-                let alpha = |i: usize| f64::from(pixels[4 * texel(i) + 3]);
-                let mut run = 64.0_f64;
-                for i in (0..2 * edge).rev() {
-                    let (here, next) = (
-                        alpha(i),
-                        if i + 1 < 2 * edge {
-                            alpha(i + 1)
-                        } else {
-                            alpha(i)
-                        },
-                    );
-                    run = if (here > level) == (next > level) {
-                        run + 1.0
-                    } else {
-                        (level - here) / (next - here)
+        for (channel, start, stride, count) in
+            [(0, line * edge, 1, cells[0]), (2, line, edge, cells[1])]
+        {
+            for (cell, size) in
+                (0..count).map(|k| (k * edge / count, (k + 1) * edge / count - k * edge / count))
+            {
+                for (offset, reverse) in [(0, false), (1, true)] {
+                    let texel = |i: usize| {
+                        let i = if i < size { i } else { 2 * size - 1 - i };
+                        start + stride * (cell + if reverse { size - 1 - i } else { i })
                     };
-                    if i < edge {
-                        let out = if here > level {
-                            &mut to_groove
+                    let alpha = |i: usize| f64::from(pixels[4 * texel(i) + 3]);
+                    // (distance, on that ramp): toward the next rising wall's foot and the next falling wall's crest.
+                    let (mut rise, mut fall) = ((64.0_f64, false), (64.0_f64, false));
+                    for i in (0..2 * size).rev() {
+                        let (here, next) = (
+                            alpha(i),
+                            if i + 1 < 2 * size {
+                                alpha(i + 1)
+                            } else {
+                                alpha(i)
+                            },
+                        );
+                        let cross = |level: f64| (level - here) / (next - here);
+                        rise = if here > middle {
+                            (64.0, false)
+                        } else if next > middle || rise.1 {
+                            if here >= foot {
+                                (0.0, true)
+                            } else if next >= foot {
+                                (cross(foot), false)
+                            } else {
+                                (rise.0 + 1.0, false)
+                            }
                         } else {
-                            &mut to_top
+                            (rise.0 + 1.0, false)
                         };
-                        out[4 * texel(i) + channel + offset] = (run * 4.0).round().min(255.0) as u8;
+                        fall = if here <= middle {
+                            (64.0, false)
+                        } else if next <= middle || fall.1 {
+                            if here < crest {
+                                (0.0, true)
+                            } else if next < crest {
+                                (cross(crest), false)
+                            } else {
+                                (fall.0 + 1.0, false)
+                            }
+                        } else {
+                            (fall.0 + 1.0, false)
+                        };
+                        if i < size {
+                            let (out, run) = if here > middle {
+                                (&mut to_groove, fall.0)
+                            } else {
+                                (&mut to_top, rise.0)
+                            };
+                            out[4 * texel(i) + channel + offset] =
+                                (run * 4.0).round().min(255.0) as u8;
+                        }
                     }
                 }
             }
         }
     }
     (to_top, to_groove)
+}
+#[expect(clippy::cast_possible_truncation, reason = "Unit heights fit f32")]
+fn unit(byte: f64) -> f32 {
+    (byte / 255.0) as f32
 }
 // Median height byte: the typical brick face, unlike the mean, ignores deep mortar.
 fn median_height(pixels: &[u8]) -> u32 {
