@@ -48,7 +48,8 @@ function wheelAmount(delta: number, mode: number, height: number): number {
 	if (mode === 2) {
 		pixels *= height;
 	}
-	const amount = pixels * WHEEL_SCALE;
+	// Positive deltaY (two-finger swipe up with natural scrolling) raises speed.
+	const amount = -pixels * WHEEL_SCALE;
 	if (!Number.isFinite(amount)) {
 		throw new Error("Wheel input overflow");
 	}

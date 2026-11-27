@@ -17,10 +17,11 @@ describe("input click threshold", () => {
 	});
 });
 
-test("wheel units normalize pixels, lines and pages without accepting invalid input", () => {
-	expect(wheelAmount(1, 0, 100)).toBe(0.001);
-	expect(wheelAmount(1, 1, 100)).toBe(0.016);
-	expect(wheelAmount(1, 2, 100)).toBe(0.1);
+test("wheel units normalize pixels, lines and pages; positive deltaY raises speed", () => {
+	expect(wheelAmount(1, 0, 100)).toBe(-0.001);
+	expect(wheelAmount(1, 1, 100)).toBe(-0.016);
+	expect(wheelAmount(1, 2, 100)).toBe(-0.1);
+	expect(wheelAmount(-1, 0, 100)).toBe(0.001);
 	expect(() => wheelAmount(Number.NaN, 0, 100)).toThrow();
 	expect(() => wheelAmount(1, 3, 100)).toThrow();
 	expect(() => wheelAmount(1, 2, 0)).toThrow();
