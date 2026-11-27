@@ -14,11 +14,13 @@
 - Preserve carrier queries/picking, independent point queries and the existing miss rule: one bilinear height sample at the witness accepts signed height reaching the gap. No new gap solver.
 - Scene → Leaf · relief and Red brick · relief: share texh, preserve matching source assets, cutouts, all four height bands and carrier cast-shadow behavior. Brick fine height gains are8× stronger; mortar and Leaf depth stay unchanged. Admit finer Leaf height/normal orders only when their bounded height exceeds¼pixel, fading fully over2× approach; preserve full close-up gains. Bound-cull irrelevant Leaf render/shadow work without losing selection outlines or changing raw queries. Break up visible repeats in the two finest Leaf bands without flattening them; manually approach/orbit both textures from normal through very close distances and several angles. Both localhost previews target60 warm FPS at1265×791; report measured limits.
 - A loading screen names the current step (engine, shaders) until the first frame shows.
+- Public GitHub Pages demo built from `texh-preview` by CI; Help links source and asset credits.
 
 ## Changelog
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-27 | User | Public repo and Pages demo | Anyone can open it |
 | 2026-11-27 | User | Loading screen until the first frame | Startup showed a blank canvas |
 | 2026-11-27 | User | Reverse wheel speed direction | Wheel up should speed up |
 | 2026-11-27 | User | Seamless relief silhouettes on near-miss rays | Relief never reached past the carrier silhouette |

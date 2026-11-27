@@ -138,3 +138,26 @@ test("a loading screen names its step until the first frame", async () => {
 	await parser.transform(new Response(source)).text();
 	expect(screens).toEqual(["status", "true", "Loading engine"]);
 });
+
+test("the page loads its script relative to itself and links asset credits", async () => {
+	const source = await Bun.file(
+		new URL("../index.html", import.meta.url),
+	).text();
+	const links: string[] = [];
+	const parser = new HTMLRewriter()
+		.on("script[src]", {
+			element(element: HTMLRewriterTypes.Element): void {
+				links.push(element.getAttribute("src") ?? "");
+			},
+		})
+		.on("#help a", {
+			element(element: HTMLRewriterTypes.Element): void {
+				links.push(element.getAttribute("href") ?? "");
+			},
+		});
+	await parser.transform(new Response(source)).text();
+	expect(links).toEqual([
+		"https://github.com/Sager611/infty-3d-engine/tree/texh-preview#credits",
+		"dist/app.js",
+	]);
+});
