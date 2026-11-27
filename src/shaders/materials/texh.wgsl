@@ -195,7 +195,8 @@ fn texh_shading_context(sample:SceneSample,base:SceneSample,d:vec3f,object:Scene
   return context;
 }
 fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32,relief:f32)->SceneSample {
-  // Gaps share the hit path; only exact gaps under the highest relief reach a lookup.
+  // Gaps share the hit path; past the rise bound they are culled exactly like scene_relief_candidate, so the one
+  // relief pass per pixel lands on its candidate or misses it.
   let gap=base.base_hit==0u;
   if(gap&&(base.status!=0u||base.query.gap>=relief*material_spec(u32(object.params.w)).rise)){return base;}
   let ray=texh_ray(base,d,object,origin_delta);
@@ -203,7 +204,6 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   // Direct walls, at most 4 lookups: heights at q (ray at the typical plane); for the largest-step level also its
   // contour distance ahead of q, and its height and contour distance behind the deepest point. Others stay at q.
   let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
-  if(gap&&ray.g>=relief*shell.highest){return base;}
   context.along=material_unit(ray.ld-carrier.n*dot(ray.ld,carrier.n),vec3f(0.0));
   // A chord above the deepest plane descends only to its lowest point: relief below it is never met.
   let v=select(0.0,-ray.c*abs(ray.c)/max(ray.k*texh_slope(ray),1e-30),ray.k>0.0);
