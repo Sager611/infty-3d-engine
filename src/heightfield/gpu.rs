@@ -11,7 +11,7 @@ impl Heights {
         Self {
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("heightfield placeholder"),
-                contents: &vec![0; 32 + 16 * LEAF.orders().div_ceil(4)],
+                contents: &vec![0; 32 + 16 * LEAF.orders().div_ceil(4) + 8 * super::OUTLINE_SIDES],
                 usage: wgpu::BufferUsages::STORAGE,
             }),
             ready: false,

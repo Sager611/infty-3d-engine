@@ -161,16 +161,13 @@ fn field_orders(source: &str, orders: usize) -> String {
         })
         .collect();
     let repeats: Vec<_> = (0..orders).map(repeat).chain(["1.0".to_owned()]).collect();
-    // Clip a..b against each outline side n·p <= c (Cyrus–Beck), unrolled from the coverage data.
-    let outline = crate::heightfield::LEAF.outline(16).unwrap_or_default();
+    // Clip a..b against each side of the uploaded outline (Cyrus–Beck), unrolled.
     let mut clips = String::new();
-    for (a, b) in outline.iter().zip(outline.iter().cycle().skip(1)) {
-        let n = [b[1] - a[1], a[0] - b[0]];
-        let c = n[0].mul_add(a[0], n[1] * a[1]);
+    for k in 0..crate::heightfield::OUTLINE_SIDES {
         let _ = writeln!(
             clips,
-            "{{let n=vec2f({:.9},{:.9});let num={c:.9}-dot(a,n);let den=dot(e,n);let r=num/select(den,1.0,den==0.0);hi=select(hi,min(hi,r),den>0.0);lo=select(lo,max(lo,r),den<0.0);inside=inside&&(den!=0.0||num>=0.0);}}",
-            n[0], n[1]
+            "{{let p=hf_vertex({k}u);let q=hf_vertex({}u);let n=vec2f(q.y-p.y,p.x-q.x);let num=dot(p-a,n);let den=dot(e,n);let r=num/select(den,1.0,den==0.0);hi=select(hi,min(hi,r),den>0.0);lo=select(lo,max(lo,r),den<0.0);inside=inside&&(den!=0.0||num>=0.0);}}",
+            k + 1
         );
     }
     source

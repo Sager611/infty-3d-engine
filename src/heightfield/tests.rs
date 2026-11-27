@@ -30,7 +30,7 @@ fn any_height_order_count_follows_the_data() -> Result<(), Error> {
         let bounds = field.bounds(Node::default())?.ok_or(Error::Numeric)?;
         assert!(bounds.lo[2] <= sample.height && sample.height <= bounds.hi[2]);
         assert!(Field::new(&pixels[8..], 2, &amplitudes, [0.0; 2]).is_err());
-        let header = 16 + 16 * orders.div_ceil(4);
+        let header = 16 + 16 * orders.div_ceil(4) + 8 * OUTLINE_SIDES;
         assert_eq!(field.gpu_bytes()?.len(), header + pixels.len());
     }
     Ok(())
@@ -200,7 +200,7 @@ fn checked_fields_require_a_layout_and_a_covered_anchor() -> Result<(), Error> {
 fn gpu_header_preserves_scalar_bytes_and_exact_canonical_amplitudes()
 -> Result<(), Box<dyn std::error::Error>> {
     let bytes = LEAF.gpu_bytes()?;
-    assert_eq!(bytes.len(), DATA.len() + 32);
+    assert_eq!(bytes.len(), DATA.len() + 32 + 8 * OUTLINE_SIDES);
     for (index, expected) in [512, 436_908, 512_000, 1].into_iter().enumerate() {
         assert_eq!(
             u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into()?),
@@ -215,7 +215,7 @@ fn gpu_header_preserves_scalar_bytes_and_exact_canonical_amplitudes()
             expected
         );
     }
-    assert_eq!(&bytes[32..], DATA);
+    assert_eq!(&bytes[32 + 8 * OUTLINE_SIDES..], DATA);
     assert!(
         Field {
             amplitudes: &[0.1; 4],

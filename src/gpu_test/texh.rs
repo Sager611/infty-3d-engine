@@ -297,7 +297,8 @@ fn leaf_envelope_culls_only_irrelevant_rays_and_depths() -> TestResult {
         let selected = i / cases.len() >= 9;
         let case = i % cases.len();
         let outline = selected && case == 7;
-        let edge_miss = !selected && matches!(case, 3 | 4);
+        // Only the chord outside the coverage outline is certain; a grazing ray over the card may meet raised relief.
+        let edge_miss = !selected && case == 3;
         assert_eq!(
             row[0] > 0.5,
             (cases[case].3 && !edge_miss) || outline,

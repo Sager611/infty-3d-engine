@@ -72,9 +72,12 @@ fn data(height: [u8; 4], mask: [u8; 4]) -> [u8; 40] {
 #[test]
 fn leaf_shadow_cutouts_and_close_occluders_do_not_inherit_a_world_scale_bias()
 -> Result<(), Box<dyn std::error::Error>> {
-    for (mask, x, blocked) in [([255; 4], 0.0, true), ([0, 255, 0, 255], -0.9, false)] {
-        let bytes = data([128; 4], mask);
-        let field = Field::new(&bytes, 2, &[0.0; 4], [0.0; 2])?;
+    // Shadows cut out by the precomputed coverage outline: Leaf's card margin (u 0.05) lies outside it.
+    let opaque = data([128; 4], [255; 4]);
+    for (field, x, blocked) in [
+        (Field::new(&opaque, 2, &[0.0; 4], [0.0; 2])?, 0.0, true),
+        (crate::heightfield::LEAF, -0.9, false),
+    ] {
         let source = Object::new(7, Kind::FinitePlane, [0.0, 1.0, 0.0], 0.07, 0.0)?;
         let target = Object::new(8, Kind::FinitePlane, [0.0, 1.0, 0.000_02], 0.07, 0.0)?
             .with_material(Material::Leaf);

@@ -163,13 +163,14 @@ fn leaf_gpu_resources_are_lazy_and_growth_never_reverts() -> Result<(), Box<dyn 
     )?);
     let mut heights = crate::heightfield::gpu::Heights::empty(&device);
     assert!(!heights.ready());
-    assert_eq!(heights.buffer.size(), 48);
+    let outline = u64::try_from(8 * crate::heightfield::OUTLINE_SIDES)?;
+    assert_eq!(heights.buffer.size(), 48 + outline);
     assert!(!heights.ensure(&device, false)?);
     assert!(heights.ensure(&device, true)?);
     assert!(heights.ready());
     assert_eq!(
         heights.buffer.size(),
-        u64::try_from(crate::heightfield::DATA.len())? + 32
+        u64::try_from(crate::heightfield::DATA.len())? + 32 + outline
     );
     assert!(!heights.ensure(&device, true)?);
     assert!(!heights.ensure(&device, false)?);

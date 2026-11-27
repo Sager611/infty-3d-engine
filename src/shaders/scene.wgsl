@@ -29,7 +29,7 @@ fn scene_object_precise(o:vec3f,low:vec3f,d:vec3f,object:SceneObject)->SceneSamp
 // Full height envelope includes direct hits and witness-gap hits. Reject only
 // a certified miss/occluded leaf; never run nine-region gap math for it.
 fn scene_leaf_relevant(local_o:vec3f,local_d:vec3f,object:SceneObject,limit:f32,padding:f32)->bool {
-  if(object.identity.y!=5u||object.params.w!=2.0){return true;}
+  if(object.identity.y!=5u||!material_field(object.params.w)){return true;}
   let o=plane_frame(local_o,scene_axis(object));let d=plane_frame(local_d,scene_axis(object));
   let reach=fi_up(hf_reach());
   let bounds=vec3f(1.0+reach,1.0+reach,reach)+vec3f(padding+plane_rounding(o,length(o)+2.0));
@@ -38,12 +38,11 @@ fn scene_leaf_relevant(local_o:vec3f,local_d:vec3f,object:SceneObject,limit:f32,
   span=plane_axis(span,o.y,d.y,-bounds.y,bounds.y);
   if(span.uncertain){return true;}
   if(!span.valid||span.near>fi_up(limit/object.position_size.w)){return false;}
-  // With no origin minimum or carrier crossing, a nonparallel ray's closest
-  // witness is on the square boundary. A zero-opacity border cannot cover it.
-  if(padding==0.0&&height_data.info.w!=0u&&d.z!=0.0&&plane_rounding(o,length(o)+2.0)*f32(height_data.info.x)<0.25){
-    let carrier=plane_box(o,d,vec3f(-1.0,-1.0,0.0),vec3f(1.0,1.0,0.0));
-    let derivative=plane_origin_derivative(o,d);
-    if(!carrier.valid&&!carrier.uncertain&&derivative.valid&&derivative.v.y<0.0){return false;}
+  // Unselected cards: relief can only land where the ray's chord through the relief slab crosses the
+  // conservative coverage outline.
+  if(padding==0.0&&abs(d.z)>1e-6){
+    let a=o.xy+d.xy*((reach-o.z)/d.z);let b=o.xy+d.xy*((-reach-o.z)/d.z);
+    if(!field_outline(fma(a,vec2f(0.5),vec2f(0.5)),fma(b,vec2f(0.5),vec2f(0.5)))){return false;}
   }
   return true;
 }

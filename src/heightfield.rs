@@ -7,6 +7,8 @@ mod ray;
 pub const STEPS: usize = 64;
 /// The finest repeat, edge×10^(orders-1), must fit the u32 texel grid.
 pub const MAX_ORDERS: usize = 7;
+/// Sides of the conservative coverage outline uploaded with every field.
+pub const OUTLINE_SIDES: usize = 16;
 pub const AMPLITUDES: [f64; 4] = [
     0.125,
     0.000_976_562_5,
@@ -216,7 +218,7 @@ impl<'a> Field<'a> {
                 .all(|at| coverage[at] == 0)
         });
         let padded = 4 * field.orders().div_ceil(4);
-        let mut bytes = Vec::with_capacity(16 + 4 * padded + field.data.len());
+        let mut bytes = Vec::with_capacity(16 + 4 * padded + 8 * OUTLINE_SIDES + field.data.len());
         for value in [
             field.edge,
             u32::try_from(stride).map_err(|_| Error::Numeric)?,
@@ -236,6 +238,17 @@ impl<'a> Field<'a> {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         bytes.resize(16 + 4 * padded, 0);
+        let outline = field.outline(OUTLINE_SIDES)?;
+        for k in 0..OUTLINE_SIDES {
+            for value in outline
+                .get(k)
+                .or_else(|| outline.last())
+                .copied()
+                .unwrap_or_default()
+            {
+                bytes.extend_from_slice(&(value as f32).to_le_bytes());
+            }
+        }
         bytes.extend_from_slice(field.data);
         Ok(bytes)
     }
@@ -253,22 +266,45 @@ impl<'a> Field<'a> {
             .and_then(|plane| plane.get(..texels))
             .ok_or(Error::InvalidParameter)?;
         let scale = f64::from(field.edge);
-        // A covered bilinear sample lies within one texel of a covered texel; two leave rounding room.
-        let reach = 2.0 / scale;
+        // A covered bilinear sample lies within one texel of a covered texel centre (i/edge); 1e-6 covers rounding.
+        let reach = 1.0 / scale + 1e-6;
         let mut corners = Vec::new();
-        for (at, _) in (0_u32..).zip(coverage).filter(|&(_, &value)| value >= 128) {
-            let centre = [
-                f64::from(at % field.edge) / scale,
-                f64::from(at / field.edge) / scale,
-            ];
-            for [x, y] in [
-                [-reach, -reach],
-                [reach, -reach],
-                [reach, reach],
-                [-reach, reach],
-            ] {
-                corners.push([centre[0] + x, centre[1] + y]);
-            }
+        // Boundary texels span the same hull as all covered ones.
+        let covered = |at: u32| coverage.get(at as usize).is_some_and(|&value| value >= 128);
+        let last = field.edge - 1;
+        let boundary = |at: u32| {
+            let (i, j) = (at % field.edge, at / field.edge);
+            i == 0
+                || j == 0
+                || i == last
+                || j == last
+                || ![at - 1, at + 1, at - field.edge, at + field.edge]
+                    .into_iter()
+                    .all(covered)
+        };
+        // Sampling clamps at the card edge, so covered edge texels extend over the relief slab's overhang.
+        let overhang = field.reach() / 2.0 + reach;
+        let span = |index: u32| {
+            let centre = f64::from(index) / scale;
+            [
+                if index == 0 {
+                    -overhang
+                } else {
+                    centre - reach
+                },
+                if index == last {
+                    1.0 + overhang
+                } else {
+                    centre + reach
+                },
+            ]
+        };
+        for (at, _) in (0_u32..)
+            .zip(coverage)
+            .filter(|&(at, &value)| value >= 128 && boundary(at))
+        {
+            let ([x0, x1], [y0, y1]) = (span(at % field.edge), span(at / field.edge));
+            corners.extend([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
         }
         let mut hull = convex_hull(corners);
         while hull.len() > sides.max(3) {

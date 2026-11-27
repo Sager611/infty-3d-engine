@@ -3,7 +3,7 @@
 const FIELD_ORDERS=4u;
 const FIELD_CHUNKS=1u;
 const FIELD_REPEATS=array<f32,5>(1.0,10.0,100.0,1000.0,1.0);
-struct HeightData {info:vec4u,amplitudes:array<vec4f,FIELD_CHUNKS>,words:array<u32>};
+struct HeightData {info:vec4u,amplitudes:array<vec4f,FIELD_CHUNKS>,outline:array<vec4f,8>,words:array<u32>};
 @group(0) @binding(9) var<storage,read> height_data:HeightData;
 fn hf_amplitude(order:u32)->f32 {return height_data.amplitudes[order>>2u][order&3u];}
 // Height orders repeat 10× apart; the trailing coverage plane spans the card once.
@@ -79,7 +79,8 @@ fn hf_gradient_lod(uv:vec2f,footprint:f32,span:f32,quantum_axes:f32)->vec2f {
   return vec2f(0.0)/*@field-slopes*/;
 }
 fn hf_gradient(uv:vec2f,footprint:f32)->vec2f {return hf_gradient_lod(uv,footprint,0.0,0.0);}
-// Precomputed convex outline holding all coverage: does UV segment a..b cross it? Traversal culls without lookups.
+// The bound field's precomputed convex outline (16 sides) holds all its coverage: does UV segment a..b cross it?
+fn hf_vertex(k:u32)->vec2f {let pair=height_data.outline[(k%16u)>>1u];return select(pair.xy,pair.zw,(k&1u)!=0u);}
 fn field_outline(a:vec2f,b:vec2f)->bool {
   if(height_data.info.x<2u){return true;}
   let e=b-a;var lo=0.0;var hi=1.0;var inside=true;
