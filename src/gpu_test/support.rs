@@ -110,6 +110,7 @@ fn material_tiles(
         "verify_material"
             | "verify_material_anchor"
             | "verify_material_mapping"
+            | "verify_texh_march"
             | "verify_leaf_material"
             | "verify_material_hit"
             | "verify_material_hit_full"

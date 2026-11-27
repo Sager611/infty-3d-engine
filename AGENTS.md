@@ -3,6 +3,7 @@
 - REQUIREMENTS.md is the complete source of project requirements.
 - Every change: maximum deletion, minimum addition; minimize final words/characters/code across all files, including AGENTS.md; preserve required behavior/tests.
 - Architecture MUST be modular and functional-first at every level: dynamic, readable, maintainable, changeable, debuggable; specify module behavior, interfaces, state, and errors for every edge case; no hidden state; idempotent updates; pure cores isolated from effects.
+- Every implementation MUST be general for any current or future material: no material-specific code, files, shaders or branches; drive behavior from material data/capabilities.
 - After every completed change, commit and push.
 - Write tests first; preserve behavior; run strict format, compile, lint, and relevant tests; fully stage all non-ignored files before committing.
 - No workers or subagents; work directly.
@@ -23,3 +24,4 @@
 | 2026-11-07 | Assistant | Added modular functional-first architecture rule | Keep behavior explicit, dynamic, and easy to change/debug |
 | 2026-11-07 | User | Prohibited workers and subagents | Require direct execution |
 | 2026-11-08 | Assistant | Made REQUIREMENTS.md authoritative | Centralize project requirements |
+| 2026-11-26 | User | Required material-general implementations | Stop material-specific paths |

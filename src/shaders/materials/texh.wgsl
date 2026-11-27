@@ -1,5 +1,5 @@
 // Shared direct hit approximation. One height sample; no root search or gap work.
-struct TexhContext {base:SceneSample,object:SceneObject,delta:vec3f,footprint:f32,span:f32,coarse:f32};
+struct TexhContext {base:SceneSample,object:SceneObject,delta:vec3f,footprint:f32,span:f32,coarse:f32,along:vec3f};
 fn texh_footprint(base:SceneSample,d:vec3f,pixel_span:f32)->f32 {
   return max(1e-30,pixel_span*base.query.t/max(0.01,abs(dot(d,base.query.n))));
 }
@@ -14,39 +14,87 @@ fn texh_context(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,p
       span=pixel_span*closest/object.position_size.w;
     }
   }
-  return TexhContext(base,object,scene_local_vector(object,origin_delta+d*base.query.t),texh_footprint(base,d,pixel_span),span,coarse);
+  return TexhContext(base,object,scene_local_vector(object,origin_delta+d*base.query.t),texh_footprint(base,d,pixel_span),span,coarse,vec3f(0.0));
 }
 fn texh_delta(foot:SurfacePoint,context:TexhContext)->vec3f {
   return context.delta+(foot.p-context.base.local)*context.object.position_size.w;
 }
-fn texh_level(index:u32,foot:SurfacePoint,context:TexhContext,typical:bool)->f32 {
-  if(index>=arrayLength(&material_levels)){return 0.0;}
-  let level=material_levels[index];let material=u32(context.object.params.w);
-  if(level.identity.x!=material){return 0.0;}
-  let lod=material_lod(context.footprint,level.surface.x);let visible=material_visible(lod);
-  let datum=select(level.mean.a,1.0,(level.identity.z&1u&(MATERIAL_CARVE>>material))!=0u);
-  if(typical){return (f32((level.identity.z>>16u)&255u)/255.0-datum)*level.surface.y*visible;}
-  if(visible==0.0){return 0.0;}
+// Alpha at a foot and, for walls, world distances to the first contour ahead (+along) and behind (-along).
+fn texh_sample(level:MaterialLevel,foot:SurfacePoint,context:TexhContext,lod:f32,walls:bool)->vec3f {
   let coords=material_coords(level,texh_delta(foot,context));
-  let weights=material_weights(foot.n);var alpha=0.0;
-  if(weights.x>0.0){alpha+=weights.x*material_value(coords.uv.yz,coords.cells.yz,level,lod).a;}
-  if(weights.y>0.0){alpha+=weights.y*material_value(coords.uv.xz,coords.cells.xz,level,lod).a;}
-  if(weights.z>0.0){alpha+=weights.z*material_value(coords.uv.xy,coords.cells.xy,level,lod).a;}
-  return (clamp(alpha,0.0,1.0)-datum)*level.surface.y*visible;
+  let weights=material_weights(foot.n);let t=context.along*512.0/level.surface.x;var value=vec3f(0.0);
+  if(weights.x>0.0){value+=weights.x*texh_project(level,coords.uv.yz,coords.cells.yz,t.yz,lod,walls);}
+  if(weights.y>0.0){value+=weights.y*texh_project(level,coords.uv.xz,coords.cells.xz,t.xz,lod,walls);}
+  if(weights.z>0.0){value+=weights.z*texh_project(level,coords.uv.xy,coords.cells.xy,t.xy,lod,walls);}
+  return vec3f(clamp(value.x,0.0,1.0),value.yz);
 }
-fn texh_height(foot:SurfacePoint,context:TexhContext,typical:bool)->f32 {
-  if(material_field(context.object.params.w)){
-    if(typical){return 0.0;}
-    return context.coarse+hf_render_details(leaf_uv_unit(foot.uv),context.span);
+fn texh_project(level:MaterialLevel,uv:vec2f,origin:vec2f,t:vec2f,lod:f32,walls:bool)->vec3f {
+  let alpha=material_value(uv,origin,level,lod).a;
+  if(!walls){return vec3f(alpha,0.0,0.0);}
+  let runs=material_runs(uv,origin,level,lod,alpha>=f32(level.identity.z>>24u)/255.0);
+  return vec3f(alpha,material_reach(runs,t),material_reach(runs,-t));
+}
+// Typical mode: typical, deepest and highest heights. Otherwise height at foot; the material's largest-step level also
+// reports its classes, heights and contour distances ahead of foot and behind bottom.
+struct TexhLevel {height:f32,deepest:f32,highest:f32,ahead:f32,behind:f32,near:f32,far:f32,contour:f32,bevel:f32,near_high:bool,far_high:bool,structural:bool};
+fn texh_merge(sum:TexhLevel,level:TexhLevel)->TexhLevel {
+  var merged=sum;if(level.structural){merged=level;}
+  merged.height=sum.height+level.height;merged.deepest=sum.deepest+level.deepest;merged.highest=sum.highest+level.highest;
+  return merged;
+}
+fn texh_level(index:u32,foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext,typical:bool)->TexhLevel {
+  var result=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false);
+  if(index>=arrayLength(&material_levels)){return result;}
+  let level=material_levels[index];let material=u32(context.object.params.w);
+  if(level.identity.x!=material){return result;}
+  let lod=material_lod(context.footprint,level.surface.x);let gain=level.surface.y*material_visible(lod);
+  let datum=select(level.mean.a,1.0,(level.identity.z&1u&(MATERIAL_CARVE>>material))!=0u);
+  if(typical){result.height=(f32((level.identity.z>>16u)&255u)/255.0-datum)*gain;result.deepest=-datum*gain;result.highest=(1.0-datum)*gain;return result;}
+  if(gain==0.0){return result;}
+  let structural=(level.identity.z&2u)!=0u;let near=texh_sample(level,foot,context,lod,structural);
+  result.height=(near.x-datum)*gain;
+  if(structural){
+    let far=texh_sample(level,bottom,context,lod,true);let edge=f32(level.identity.z>>24u)/255.0;
+    let bevel=f32((level.identity.z>>2u)&63u)/8.0*level.surface.x/512.0;
+    result=TexhLevel(result.height,0.0,0.0,near.y,far.z,result.height,(far.x-datum)*gain,(edge-datum)*gain,bevel,near.x>=edge,far.x>=edge,true);
   }
-  var height=0.0;
+  return result;
+}
+fn texh_height(foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext,typical:bool)->TexhLevel {
+  var sum=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false);
+  if(material_field(context.object.params.w)){
+    if(!typical){sum.height=context.coarse+hf_render_details(leaf_uv_unit(foot.uv),context.span);}
+    return sum;
+  }
   // @texh-levels
-  return height/context.object.position_size.w;
+  let size=context.object.position_size.w;
+  sum.height/=size;sum.deepest/=size;sum.highest/=size;sum.ahead/=size;sum.behind/=size;sum.near/=size;sum.far/=size;sum.contour/=size;sum.bevel/=size;
+  return sum;
+}
+// Hit height above the carrier, shared by hit and gap paths: s sums heights at q (ray at the typical plane) with the
+// largest-step level's walls toward bottom (ray at the deepest plane); shell holds typical/deepest; reach = |q→bottom|.
+// Others stay at q. On a top: land before its edge ramp, else cross to the far wall or groove floor. Over a groove:
+// its floor, the wall ramp ahead, or the plateau beyond.
+fn texh_depth(s:TexhLevel,shell:TexhLevel,reach:f32)->f32 {
+  let top=shell.height;let span=max(top-shell.deepest,1e-30);let landing=(top-s.height)/span;let half=s.bevel/reach;
+  let ahead=s.ahead/reach;let behind=1.0-s.behind/reach;let plateau=s.height-s.near+s.far;let mid=s.height-s.near+s.contour;
+  if(!s.structural||s.height>=top){return s.height;}
+  var depth=s.height;
+  if(s.near_high){if(landing>ahead-half){depth=select(plateau,texh_ramp(top,span,max(behind,ahead),half,2.0*mid-plateau,plateau),s.far_high);}}
+  else{depth=texh_ramp(top,span,ahead,half,s.height,select(top,plateau,s.far_high));}
+  return max(depth,shell.deepest);
+}
+// First meeting of the ray z = top - λ·span with a floor lo, then a straight wall up to hi across centre ± half, then hi.
+fn texh_ramp(top:f32,span:f32,centre:f32,half:f32,lo:f32,hi:f32)->f32 {
+  let start=max(centre-half,0.0);
+  if((top-lo)/span<=start){return lo;}
+  let k=(hi-lo)/max(centre+half-start,1e-6);let meet=(top-lo+k*start)/(span+k);
+  return select(hi,top-meet*span,meet<=centre+half);
 }
 // Sample depth where the ray meets the median-height plane: brick tops sit ~1 mm above the face.
 fn texh_source(base:SceneSample,d:vec3f,object:SceneObject,context:TexhContext)->SurfacePoint {
   let carrier=geometry_surface(base.local,base,object);let c=dot(d,base.query.n);
-  let reach=texh_height(carrier,context,true)*c/max(0.0025,c*c);
+  let reach=texh_height(carrier,carrier,context,true).height*c/max(0.0025,c*c);
   if(reach==0.0){return carrier;}
   return geometry_surface(fma(vec3f(reach),scene_local_vector(object,d),base.local),base,object);
 }
@@ -86,11 +134,19 @@ fn texh_shading_context(sample:SceneSample,base:SceneSample,d:vec3f,object:Scene
 }
 fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32,relief:f32)->SceneSample {
   if(base.base_hit==0u){return base;}
-  let context=texh_context(base,d,object,origin_delta,pixel_span);
-  let height=texh_height(texh_source(base,d,object,context),context,false);
+  var context=texh_context(base,d,object,origin_delta,pixel_span);
   let incidence=dot(d,base.query.n);
   // Reciprocal incidence above |cos|=.05; fade instead of exploding at grazing angles.
-  let offset=relief*height*incidence/max(0.0025,incidence*incidence);
+  let rcp=incidence/max(0.0025,incidence*incidence);
+  // Direct walls, at most 4 lookups: heights at q (ray at the typical plane); for the largest-step level also its
+  // contour distance ahead of q, and its height and contour distance behind the deepest point. Others stay at q.
+  let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
+  let ld=scene_local_vector(object,d);context.along=material_unit(ld-carrier.n*dot(ld,carrier.n),vec3f(0.0));
+  let q=texh_source(base,d,object,context);
+  let bottom=geometry_surface(fma(vec3f(shell.deepest*rcp),ld,base.local),base,object);
+  let s=texh_height(q,bottom,context,false);
+  let depth=texh_depth(s,shell,max(length(bottom.p-q.p),1e-30));
+  let offset=relief*rcp*depth;
   var result=base;result.query.t+=offset*object.position_size.w;
   result.query.p=fma(vec3f(offset*object.position_size.w),d,base.query.p);
   result.local=fma(vec3f(offset),scene_local_vector(object,d),base.local);

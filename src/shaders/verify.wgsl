@@ -115,7 +115,7 @@ fn material_hit_probe(id:vec3u,pixel_span:f32) {
   let base=scene_object(r.o.xyz,d,object);
   let sample=material_texh(base,d,object,r.o.xyz,pixel_span);let q=sample.query;
   let context=texh_context(base,d,object,r.o.xyz,pixel_span);
-  let height=texh_height(texh_source(base,d,object,context),context,false);
+  let source=texh_source(base,d,object,context);let height=texh_height(source,source,context,false).height;
   results[id.x]=ProbeResult(vec4f(f32(q.hit),q.t,base.query.t,f32(sample.status)),vec4f(q.p,sample.error),
     vec4f(q.uv,height,f32(base.base_hit)),vec4f(q.n,f32(base.query.hit)));
 }
@@ -127,7 +127,8 @@ fn texh_borrow_probe(id:vec3u,relief:f32) {
   let r=rays[id.x];let d=normalize(r.d.xyz);let span=2.0/(1.8*791.0);
   let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w),POSE_IDENTITY);
   let base=scene_object(r.o.xyz,d,object);let sample=material_texh_depth(base,d,object,r.o.xyz,span,relief);
-  let shown=texh_height(geometry_surface(sample.local,base,object),texh_context(base,d,object,r.o.xyz,span),false);
+  let foot=geometry_surface(sample.local,base,object);
+  let shown=texh_height(foot,foot,texh_context(base,d,object,r.o.xyz,span),false).height;
   results[id.x]=ProbeResult(vec4f(f32(sample.query.hit),dot(sample.local-base.local,base.query.n),shown,0.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)
@@ -173,6 +174,21 @@ fn verify_material_anchor(@builtin(global_invocation_id) id:vec3u) {
 fn verify_material_display(@builtin(global_invocation_id) id: vec3u) {
   if (id.x>=arrayLength(&rays)) { return; }
   results[id.x]=ProbeResult(vec4f(material_display(rays[id.x].o.xyz),1.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
+}
+@compute @workgroup_size(1)
+// Direct depth versus a 400-step reference march through the same heights (test-only loop).
+fn verify_texh_march(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}
+  let r=rays[id.x];let d=normalize(r.d.xyz);let span=2.0/(1.8*791.0);
+  let object=SceneObject(vec4u(1u,1u,0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,1.0),POSE_IDENTITY);
+  let base=scene_object(r.o.xyz,d,object);let context=texh_context(base,d,object,r.o.xyz,span);
+  let sample=material_texh_depth(base,d,object,r.o.xyz,span,1.0);let depth=dot(sample.local-base.local,base.query.n);
+  let incidence=dot(d,base.query.n);let rcp=incidence/max(0.0025,incidence*incidence);
+  let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
+  let ld=scene_local_vector(object,d);
+  let top=2.0*shell.height-shell.deepest;var pz=top;var pg=1.0;var md=shell.deepest;
+  for(var i=1u;i<=400u;i++){let z=mix(top,shell.deepest,f32(i)/400.0);let foot=geometry_surface(fma(vec3f(z*rcp),ld,base.local),base,object);let g=z-texh_height(foot,foot,context,false).height;if(g<=0.0){md=mix(pz,z,pg/(pg-g));break;}pz=z;pg=g;}
+  results[id.x]=ProbeResult(vec4f(f32(base.base_hit),depth,md,0.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)
 fn verify_material_mapping(@builtin(global_invocation_id) id: vec3u) {
@@ -369,3 +385,4 @@ fn verify_crystal_point(@builtin(global_invocation_id) id: vec3u) {
   results[id.x] = ProbeResult(vec4f(q.upper, q.error, 0.0, 0.0),
     vec4f(q.p, 0.0), vec4f(q.n, 0.0), vec4f(q.uv, 0.0, 0.0));
 }
+

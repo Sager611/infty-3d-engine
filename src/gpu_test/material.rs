@@ -209,6 +209,61 @@ fn material_mirrors_reflect_source_height_without_periodic_stamps()
     Ok(())
 }
 #[test]
+fn grazing_brick_joint_rays_land_near_a_reference_march() -> Result<(), Box<dyn std::error::Error>>
+{
+    // A user view 1.7 cm above a brick sphere, sweeping across a mortar joint at about 20 degrees.
+    let (yaw, pitch) = (-1.117_937_5_f64, 0.160_937_5_f64);
+    let orbit = [
+        pitch.cos() * yaw.sin(),
+        pitch.sin(),
+        pitch.cos() * yaw.cos(),
+    ];
+    let target = [
+        4.175_500_091_631_266,
+        0.072_878_076_823_433_17,
+        -1.796_281_534_904_121_7,
+    ];
+    let origin: Vec<f64> = (0..3)
+        .map(|i| orbit[i].mul_add(6.5, target[i]) - [-1.65, 1.0, 0.0][i])
+        .collect();
+    let mut rays = Vec::new();
+    for step in 0..48 {
+        let (sin, cos) = f64::from(step).mul_add(0.008, -0.19).sin_cos();
+        let ray = [
+            (-orbit[0]).mul_add(cos, -orbit[2] * sin),
+            -orbit[1],
+            orbit[0].mul_add(sin, -orbit[2] * cos),
+        ];
+        #[expect(clippy::cast_possible_truncation, reason = "GPU rays are f32")]
+        rays.push([
+            origin[0] as f32,
+            origin[1] as f32,
+            origin[2] as f32,
+            0.0,
+            ray[0] as f32,
+            ray[1] as f32,
+            ray[2] as f32,
+            0.0,
+        ]);
+    }
+    let q = run("verify_texh_march", &rays, rays.len() * 16)?;
+    let mut error: Vec<f32> = q
+        .chunks_exact(16)
+        .map(|row| (row[1] - row[2]).abs())
+        .collect();
+    assert!(
+        q.chunks_exact(16).all(|row| row[0] > 0.5),
+        "joint rays missed the sphere"
+    );
+    error.sort_by(f32::total_cmp);
+    let (median, tail) = (error[error.len() / 2], error[error.len() * 9 / 10]);
+    assert!(
+        median < 1e-4 && tail < 5e-4,
+        "joint depth strays from the march: median {median} m, p90 {tail} m"
+    );
+    Ok(())
+}
+#[test]
 fn tiled_relief_shows_no_period_or_mirror_axis() -> Result<(), Box<dyn std::error::Error>> {
     // Mirror tiling repeats every 2 tiles and reflects about integer lines.
     let partners = [[2.0_f32, 0.0, 1.0], [0.0, 2.0, 1.0], [2.0, 0.0, -1.0]];

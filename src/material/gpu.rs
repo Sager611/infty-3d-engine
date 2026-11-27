@@ -91,50 +91,42 @@ impl Tiles {
         levels: &[Level],
     ) -> Result<Self, &'static str> {
         let limits = device.limits();
-        validate(levels, limits.max_texture_array_layers)?;
+        validate(levels, limits.max_texture_array_layers / 3)?;
         if EDGE > limits.max_texture_dimension_2d {
             return Err("512px material textures are unsupported");
         }
         let layers = u32::try_from(levels.len()).map_err(|_| "material layer count")?;
-        let texture_array = image(device, EDGE, layers, EDGE.ilog2() + 1);
-        let mut means = Vec::with_capacity(levels.len());
-        for (layer, level) in levels.iter().enumerate() {
-            let mut pixels = texture(*level)?;
-            means.push((mean(&pixels), median_height(&pixels)));
-            let mut edge = EDGE;
-            let mut index = 0;
-            loop {
-                queue.write_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &texture_array,
-                        mip_level: index,
-                        origin: wgpu::Origin3d {
-                            x: 0,
-                            y: 0,
-                            z: u32::try_from(layer).map_err(|_| "material layer")?,
-                        },
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    &pixels,
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(edge * 4),
-                        rows_per_image: Some(edge),
-                    },
-                    wgpu::Extent3d {
-                        width: edge,
-                        height: edge,
-                        depth_or_array_layers: 1,
-                    },
-                );
-                if edge == 1 {
-                    break;
-                }
-                pixels = mip(&pixels, edge)?;
-                edge /= 2;
-                index += 1;
-            }
+        // Layers: colour/height, then runs to the next top (for groove texels), then to the next groove (for tops).
+        let texture_array = image(device, EDGE, 3 * layers, EDGE.ilog2() + 1);
+        let mut stats = Vec::with_capacity(levels.len());
+        for (layer, level) in (0..layers).zip(levels) {
+            let pixels = texture(*level)?;
+            let (threshold, contrast, low, high) = split(&pixels);
+            let (to_top, to_groove) = runs(&pixels, threshold);
+            upload(queue, &texture_array, layer + layers, to_top)?;
+            upload(queue, &texture_array, layer + 2 * layers, to_groove)?;
+            stats.push((
+                mean(&pixels),
+                bevel(&pixels, threshold, low, high) << 2
+                    | median_height(&pixels) << 16
+                    | threshold << 24,
+                contrast * level.relief,
+            ));
+            upload(queue, &texture_array, layer, pixels)?;
         }
+        // Each material's largest relief step carries direct wall placement.
+        let means: Vec<_> = stats
+            .iter()
+            .zip(levels)
+            .map(|(&(mean, packed, step), level)| {
+                let largest = stats
+                    .iter()
+                    .zip(levels)
+                    .filter(|(_, other)| other.material.tag() == level.material.tag())
+                    .fold(0.0_f32, |top, (other, _)| top.max(other.2));
+                (mean, packed | u32::from(step > 0.0 && step >= largest) << 1)
+            })
+            .collect();
         let rows = rows(levels, &means, [0.0; 3], true)?;
         Ok(Self {
             texture: texture_array,
@@ -208,14 +200,14 @@ fn rows(
         .zip(means)
         .enumerate()
         .filter(|(_, (level, _))| leaf || !level.material.spec().field)
-        .map(|(index, (level, (mean, median)))| {
+        .map(|(index, (level, (mean, packed)))| {
             Ok(Row {
                 identity: [
                     u32::from(level.material.tag()),
                     u32::try_from(index).map_err(|_| "material layer")?,
                     u32::from(level.order == 0)
                         | u32::try_from(level.order).map_err(|_| "material order")? << 8
-                        | median << 16,
+                        | packed,
                     level
                         .atlas
                         .map_or(0, |a| u32::from(a.cells[0]) | (u32::from(a.cells[1]) << 16)),
@@ -232,6 +224,140 @@ fn rows(
             })
         })
         .collect()
+}
+fn upload(
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    layer: u32,
+    mut pixels: Vec<u8>,
+) -> Result<(), &'static str> {
+    let mut edge = EDGE;
+    let mut index = 0;
+    loop {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: index,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: layer,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(edge * 4),
+                rows_per_image: Some(edge),
+            },
+            wgpu::Extent3d {
+                width: edge,
+                height: edge,
+                depth_or_array_layers: 1,
+            },
+        );
+        if edge == 1 {
+            return Ok(());
+        }
+        pixels = mip(&pixels, edge)?;
+        edge /= 2;
+        index += 1;
+    }
+}
+// Otsu's alpha threshold (the byte that best splits grooves from tops), unit contrast and both class means.
+#[expect(clippy::cast_possible_truncation, reason = "Unit contrast fits f32")]
+fn split(pixels: &[u8]) -> (u32, f32, f64, f64) {
+    let mut count = [0.0_f64; 256];
+    for texel in pixels.chunks_exact(4) {
+        count[usize::from(texel[3])] += 1.0;
+    }
+    let total: f64 = count.iter().sum();
+    let sum: f64 = (0_u32..).zip(count).map(|(b, n)| n * f64::from(b)).sum();
+    let (mut weight, mut below, mut best, mut result) = (0.0, 0.0, 0.0, (0, 0.0, 0.0, 0.0));
+    for (byte, n) in (0_u32..).zip(count) {
+        weight += n;
+        below = n.mul_add(f64::from(byte), below);
+        let above = total - weight;
+        if weight > 0.0 && above > 0.0 {
+            let gap = (sum - below) / above - below / weight;
+            if gap * gap * weight * above > best {
+                best = gap * gap * weight * above;
+                result = (byte + 1, gap / 255.0, below / weight, (sum - below) / above);
+            }
+        }
+    }
+    (result.0, result.1 as f32, result.2, result.3)
+}
+// Mean groove-to-top ramp width: the 10-90 % band per crossing, widened to the whole ramp, in quarter texels.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Clamped to six bits"
+)]
+fn bevel(pixels: &[u8], threshold: u32, low: f64, high: f64) -> u32 {
+    let edge = EDGE as usize;
+    let (texels, top) = (edge * edge, |i: usize| {
+        u32::from(pixels[4 * i + 3]) >= threshold
+    });
+    let (mut band, mut crossings) = (0.0_f64, 0.0_f64);
+    for i in 0..texels {
+        let alpha = f64::from(pixels[4 * i + 3]);
+        band += f64::from(u8::from(
+            alpha > 0.1_f64.mul_add(high - low, low) && alpha < 0.1_f64.mul_add(low - high, high),
+        ));
+        crossings += f64::from(u8::from(i % edge + 1 < edge && top(i) != top(i + 1)));
+        crossings += f64::from(u8::from(i + edge < texels && top(i) != top(i + edge)));
+    }
+    (band / crossings.max(1.0) * 5.0).round().clamp(1.0, 63.0) as u32
+}
+// Quarter texels to the interpolated threshold crossing along +u, -u, +v, -v (RGBA, up to 63.75 texels),
+// mirror-extended like the sampler; split by class so filtering never mixes a groove's run with a top's.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Runs are clamped to one byte"
+)]
+fn runs(pixels: &[u8], threshold: u32) -> (Vec<u8>, Vec<u8>) {
+    let edge = EDGE as usize;
+    let level = f64::from(threshold) - 0.5;
+    let (mut to_top, mut to_groove) = (vec![0_u8; pixels.len()], vec![0_u8; pixels.len()]);
+    for line in 0..edge {
+        for (channel, start, stride) in [(0, line * edge, 1), (2, line, edge)] {
+            for (offset, reverse) in [(0, false), (1, true)] {
+                let texel = |i: usize| {
+                    let i = if i < edge { i } else { 2 * edge - 1 - i };
+                    start + stride * if reverse { edge - 1 - i } else { i }
+                };
+                let alpha = |i: usize| f64::from(pixels[4 * texel(i) + 3]);
+                let mut run = 64.0_f64;
+                for i in (0..2 * edge).rev() {
+                    let (here, next) = (
+                        alpha(i),
+                        if i + 1 < 2 * edge {
+                            alpha(i + 1)
+                        } else {
+                            alpha(i)
+                        },
+                    );
+                    run = if (here > level) == (next > level) {
+                        run + 1.0
+                    } else {
+                        (level - here) / (next - here)
+                    };
+                    if i < edge {
+                        let out = if here > level {
+                            &mut to_groove
+                        } else {
+                            &mut to_top
+                        };
+                        out[4 * texel(i) + channel + offset] = (run * 4.0).round().min(255.0) as u8;
+                    }
+                }
+            }
+        }
+    }
+    (to_top, to_groove)
 }
 // Median height byte: the typical brick face, unlike the mean, ignores deep mortar.
 fn median_height(pixels: &[u8]) -> u32 {

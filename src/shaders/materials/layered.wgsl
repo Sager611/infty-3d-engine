@@ -64,7 +64,7 @@ fn material_shift(vertex:vec2f,seed:u32)->vec2f {
 fn material_mirrored(uv: vec2f, origin: vec2f, layer: i32, lod: f32) -> vec4f {
   return material_sample(material_mirror_uv(uv,origin),layer,lod);
 }
-struct MaterialAtlas {uv:vec2f,local:vec2f,grid:vec2f,cell:vec2f};
+struct MaterialAtlas {uv:vec2f,local:vec2f,grid:vec2f,cell:vec2f,flip:vec2<bool>};
 fn material_atlas(uv:vec2f,origin:vec2f,level:MaterialLevel)->MaterialAtlas {
   let grid=vec2f(f32(level.identity.w&65535u),f32(level.identity.w>>16u));
   let world=(uv+origin)*grid;let row=floor(world.y);
@@ -73,8 +73,8 @@ fn material_atlas(uv:vec2f,origin:vec2f,level:MaterialLevel)->MaterialAtlas {
   let seed=material_hash(cell,level.identity.y+571u);
   let chosen=seed%u32(grid.x*grid.y);
   let face=vec2f(f32(chosen%u32(grid.x)),f32(chosen/u32(grid.x)));
-  let mirrored=select(local,1.0-local,vec2<bool>((seed&256u)!=0u,(seed&512u)!=0u));
-  return MaterialAtlas((face+mirrored)/grid,local,grid,cell);
+  let flip=vec2<bool>((seed&256u)!=0u,(seed&512u)!=0u);
+  return MaterialAtlas((face+select(local,1.0-local,flip))/grid,local,grid,cell,flip);
 }
 fn material_value(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32) -> vec4f {
   let layer=i32(level.identity.y);
@@ -86,14 +86,34 @@ fn material_value(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32) -> v
     value=mix(level.border,value,smoothstep(0.0,1.0,min(distance.x,distance.y)));
     return mix(value,level.mean,smoothstep(4.0,8.0,lod));
   }
-  // Half-tile triangle-grid vertices pick random offsets; cubed weights keep patches crisp: no period or mirror axis shows.
+  let g=material_grid(uv,origin,level);
+  return material_compensate(material_mirrored(g.a,origin,layer,lod),material_mirrored(g.b,origin,layer,lod),material_mirrored(g.c,origin,layer,lod),level.mean,g.w);
+}
+struct MaterialGrid {a:vec2f,b:vec2f,c:vec2f,w:vec3f};
+// Half-tile triangle-grid vertices pick random offsets; cubed weights keep patches crisp: no period or mirror axis shows.
+fn material_grid(uv:vec2f,origin:vec2f,level:MaterialLevel)->MaterialGrid {
   let grid=(uv+origin)*2.0;let cell=floor(grid);let f=grid-cell;let upper=f.x+f.y>1.0;
   let w=select(vec3f(1.0-f.x-f.y,f.x,f.y),vec3f(f.x+f.y-1.0,1.0-f.y,1.0-f.x),upper);
   let seed=level.identity.y+317u;
-  let a=material_mirrored(uv+material_shift(cell+f32(upper),seed),origin,layer,lod);
-  let b=material_mirrored(uv+material_shift(cell+vec2f(1.0,0.0),seed),origin,layer,lod);
-  let c=material_mirrored(uv+material_shift(cell+vec2f(0.0,1.0),seed),origin,layer,lod);
-  return material_compensate(a,b,c,level.mean,w*w*w);
+  return MaterialGrid(uv+material_shift(cell+f32(upper),seed),uv+material_shift(cell+vec2f(1.0,0.0),seed),uv+material_shift(cell+vec2f(0.0,1.0),seed),w*w*w);
+}
+// Texels to the threshold crossing along +u,−u,+v,−v (quarter-texel bytes); mirrored copies swap each pair.
+fn material_swap(runs:vec4f,mirror:vec2<bool>)->vec4f {
+  let r=runs*63.75;return vec4f(select(r.xy,r.yx,mirror.x),select(r.zw,r.wz,mirror.y));
+}
+// Precomputed runs at uv for a groove or top point, mapped like material_value.
+fn material_runs(uv:vec2f,origin:vec2f,level:MaterialLevel,lod:f32,top:bool)->vec4f {
+  let layer=i32(level.identity.y+textureNumLayers(material_tiles)/3u*(1u+u32(top)));
+  if(level.identity.w!=0u){let m=material_atlas(uv,origin,level);return material_swap(material_sample(m.uv,layer,lod),m.flip);}
+  let g=material_grid(uv,origin,level);
+  let a=material_mirror_uv(g.a,origin);let b=material_mirror_uv(g.b,origin);let c=material_mirror_uv(g.c,origin);
+  return (material_swap(material_sample(a,layer,lod),a>=vec2f(1.0))*g.w.x+material_swap(material_sample(b,layer,lod),b>=vec2f(1.0))*g.w.y
+    +material_swap(material_sample(c,layer,lod),c>=vec2f(1.0))*g.w.z)/(g.w.x+g.w.y+g.w.z);
+}
+// World distance along t (texels per world unit) to the nearest axis run's contour: exact for axis-aligned walls.
+fn material_reach(runs:vec4f,t:vec2f)->f32 {
+  let d=max(vec2f(select(runs.y,runs.x,t.x>=0.0),select(runs.w,runs.z,t.y>=0.0)),vec2f(1e-3));
+  return 1.0/max(max(abs(t.x)/d.x,abs(t.y)/d.y),1e-30);
 }
 // Zero keeps raw height differentials; one limits byte noise in shading normals.
 fn material_tile(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32, normal_filter:f32) -> MaterialTile {

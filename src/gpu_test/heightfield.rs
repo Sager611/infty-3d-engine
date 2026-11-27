@@ -179,7 +179,7 @@ fn leaf_gpu_resources_are_lazy_and_growth_never_reverts() -> Result<(), Box<dyn 
     assert!(!tiles.ensure(&device, &queue, false)?);
     assert!(tiles.ensure(&device, &queue, true)?);
     assert_eq!(tiles.buffer.size(), 960);
-    assert_eq!(tiles.texture.size().depth_or_array_layers, 12);
+    assert_eq!(tiles.texture.size().depth_or_array_layers, 3 * 12);
     assert!(!tiles.ensure(&device, &queue, true)?);
     assert!(!tiles.ensure(&device, &queue, false)?);
     assert_eq!(tiles.update(&queue, [1.0; 3], false)?, 640);
