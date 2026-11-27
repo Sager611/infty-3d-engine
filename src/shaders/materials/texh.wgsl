@@ -1,4 +1,4 @@
-// Shared direct hit approximation. One height sample; no root search or gap work.
+// Shared direct relief approximation for hits and gaps. No root search or gap solver.
 struct TexhContext {base:SceneSample,object:SceneObject,delta:vec3f,footprint:f32,span:f32,coarse:f32,along:vec3f};
 fn texh_footprint(base:SceneSample,d:vec3f,pixel_span:f32)->f32 {
   return max(1e-30,pixel_span*base.query.t/max(0.01,abs(dot(d,base.query.n))));
@@ -14,7 +14,9 @@ fn texh_context(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,p
       span=pixel_span*closest/object.position_size.w;
     }
   }
-  return TexhContext(base,object,scene_local_vector(object,origin_delta+d*base.query.t),texh_footprint(base,d,pixel_span),span,coarse,vec3f(0.0));
+  // Hits anchor at the ray point, gaps at their witness: both fixed in object space.
+  let at=select(base.local*object.position_size.w,scene_local_vector(object,origin_delta+d*base.query.t),base.base_hit!=0u);
+  return TexhContext(base,object,at,texh_footprint(base,d,pixel_span),span,coarse,vec3f(0.0));
 }
 fn texh_delta(foot:SurfacePoint,context:TexhContext)->vec3f {
   return context.delta+(foot.p-context.base.local)*context.object.position_size.w;
@@ -104,12 +106,25 @@ fn texh_ramp(top:f32,span:f32,centre:f32,half:f32,lo:f32,hi:f32)->f32 {
   let k=(hi-lo)/max(centre+half-start,1e-6);let meet=(top-lo+k*start)/(span+k);
   return select(hi,top-meet*span,meet<=centre+half);
 }
-// Sample depth where the ray meets the median-height plane: brick tops sit ~1 mm above the face.
-fn texh_source(base:SceneSample,d:vec3f,object:SceneObject,context:TexhContext)->SurfacePoint {
-  let carrier=geometry_surface(base.local,base,object);let c=dot(d,base.query.n);
-  let reach=texh_height(carrier,carrier,context,true).height*c/max(0.0025,c*c);
-  if(reach==0.0){return carrier;}
-  return geometry_surface(fma(vec3f(reach),scene_local_vector(object,d),base.local),base,object);
+// Ray through the relief: anchor at height g above the carrier with slope c (hit: carrier crossing, g=0; gap: closest
+// approach, c=0) on a carrier curving k along the ray, so heights follow z=g+cτ+kτ²/2. Hits and gaps share all else.
+struct TexhRay {anchor:vec3f,ld:vec3f,g:f32,c:f32,k:f32};
+fn texh_ray(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f)->TexhRay {
+  let gap=base.base_hit==0u;let c=select(dot(d,base.query.n),0.0,gap);let size=object.position_size.w;
+  let anchor=select(base.local,scene_local_vector(object,origin_delta+d*base.query.t)/size,gap);
+  return TexhRay(anchor,scene_local_vector(object,d),select(0.0,base.query.gap/size,gap),c,geometry_curvature(base,d,object));
+}
+// Ray offset from the anchor to height z: the entry side, or the lowest point when z is out of reach (a groove under
+// a grazing ray). Steep hits reduce to z/c; flat carriers keep it, faded below |c|=.05 instead of exploding.
+fn texh_ray_at(ray:TexhRay,z:f32)->f32 {
+  let dz=z-ray.g;let r=ray.c*ray.c+2.0*ray.k*dz;
+  if(ray.k<=0.0){return dz*ray.c/max(0.0025,ray.c*ray.c);}
+  return select(-1.0,1.0,ray.c>0.0)*select(2.0*dz/max(abs(ray.c)+sqrt(max(r,0.0)),1e-30),-abs(ray.c)/ray.k,r<0.0);
+}
+fn texh_reached(ray:TexhRay,z:f32)->bool {return ray.k<=0.0||ray.c*ray.c+2.0*ray.k*(z-ray.g)>=0.0;}
+// Foot under the ray at height z: q at the median plane (brick face, not tops), bottom at the deepest plane.
+fn texh_source(ray:TexhRay,base:SceneSample,object:SceneObject,z:f32)->SurfacePoint {
+  return geometry_surface(fma(vec3f(texh_ray_at(ray,z)),ray.ld,ray.anchor),base,object);
 }
 fn texh_gradient(point:vec3f,foot:SurfacePoint,context:TexhContext,normal_filter:f32)->vec3f {
   if(material_field(context.object.params.w)){
@@ -140,31 +155,33 @@ fn texh_filter_footprint(base:SceneSample,depth:f32,d:vec3f,g:vec3f,pixel_span:f
 fn texh_shading_context(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->TexhContext {
   var context=texh_context(base,d,object,origin_delta,pixel_span);
   if(pixel_span>0.0&&sample.query.hit&&base.base_hit!=0u){
-    let g=texh_gradient(base.local,texh_source(base,d,object,context),context,0.0);
+    let carrier=geometry_surface(base.local,base,object);let z=texh_height(carrier,carrier,context,true).height;
+    let g=texh_gradient(base.local,texh_source(texh_ray(base,d,object,origin_delta),base,object,z),context,0.0);
     context.footprint=texh_filter_footprint(base,sample.query.t,d,scene_world_vector(object,g),pixel_span);
   }
   return context;
 }
 fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32,relief:f32)->SceneSample {
-  if(base.base_hit==0u){return base;}
+  // Gaps share the hit path; only exact gaps of curved carriers under the highest relief reach a lookup.
+  let gap=base.base_hit==0u;
+  if(gap&&(base.status!=0u||base.query.gap>=relief*material_rise(object.params.w))){return base;}
+  let ray=texh_ray(base,d,object,origin_delta);if(gap&&ray.k<=0.0){return base;}
   var context=texh_context(base,d,object,origin_delta,pixel_span);
-  let incidence=dot(d,base.query.n);
-  // Reciprocal incidence above |cos|=.05; fade instead of exploding at grazing angles.
-  let rcp=incidence/max(0.0025,incidence*incidence);
   // Direct walls, at most 4 lookups: heights at q (ray at the typical plane); for the largest-step level also its
   // contour distance ahead of q, and its height and contour distance behind the deepest point. Others stay at q.
   let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
-  let ld=scene_local_vector(object,d);context.along=material_unit(ld-carrier.n*dot(ld,carrier.n),vec3f(0.0));
-  let q=texh_source(base,d,object,context);
-  let bottom=geometry_surface(fma(vec3f(shell.deepest*rcp),ld,base.local),base,object);
+  if(gap&&ray.g>=relief*shell.highest){return base;}
+  context.along=material_unit(ray.ld-carrier.n*dot(ray.ld,carrier.n),vec3f(0.0));
+  let q=texh_source(ray,base,object,shell.height);let bottom=texh_source(ray,base,object,shell.deepest);
   let s=texh_height(q,bottom,context,false);
-  let depth=texh_depth(s,shell,max(length(bottom.p-q.p),1e-30));
-  let offset=relief*rcp*depth;
+  let depth=relief*texh_depth(s,shell,max(length(bottom.p-q.p),1e-30));
+  let offset=texh_ray_at(ray,depth);
   var result=base;result.query.t+=offset*object.position_size.w;
   result.query.p=fma(vec3f(offset*object.position_size.w),d,base.query.p);
-  result.local=fma(vec3f(offset),scene_local_vector(object,d),base.local);
+  result.local=fma(vec3f(offset),ray.ld,base.local);
   let foot=geometry_surface(result.local,base,object);
-  result.query.hit=result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
+  result.query.hit=texh_reached(ray,depth)&&result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
+  if(gap&&!result.query.hit){return base;}
   result.query.uv=foot.uv;
   if(material_field(object.params.w)){result.query.hit=result.query.hit&&leaf_covered(leaf_uv_unit(foot.uv));}
   if(result.query.hit){

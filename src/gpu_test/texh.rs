@@ -629,3 +629,84 @@ fn direct_texh_fades_grazing_offsets_instead_of_searching() -> TestResult {
     assert!((q[1] - q[2] - expected).abs() < 0.0001, "{q:?}");
     Ok(())
 }
+
+/// Axis rays at signed gap g from a unit sphere (inside: chord depth -g), lowest at t*; `tag` fills ray[3] and ray[7].
+fn grazing_rays(gaps: &[f32], at: f32, tag: [f32; 2]) -> Vec<[f32; 8]> {
+    let mut rays = Vec::new();
+    for i in 0..48_u8 {
+        let (sin, cos) = (0.29 * f32::from(i)).sin_cos();
+        let axis = usize::from(i % 3);
+        for g in gaps {
+            let mut ray = [0.0, 0.0, 0.0, tag[0], 0.0, 0.0, 0.0, tag[1]];
+            (ray[axis], ray[4 + axis]) = (-at, 1.0);
+            ray[(axis + 1) % 3] = (1.0 + g) * cos;
+            ray[(axis + 2) % 3] = (1.0 + g) * sin;
+            rays.push(ray);
+        }
+    }
+    rays
+}
+
+#[test]
+fn silhouette_rays_meet_relief_like_the_reference_march() -> TestResult {
+    // Steel relief rises above its carrier, carved brick sinks below it; rays just outside and inside both.
+    let mut rays = grazing_rays(&[1e-6, 5e-7, -5e-7, -2e-6], 0.2, [0.0, 1.0]);
+    rays.extend(grazing_rays(&[1e-4, -5e-4, -2e-3, -8e-3], 0.2, [0.0, 0.0]));
+    let q = run("verify_texh_march", &rays, rays.len() * 16)?;
+    let height = |ray: &[f32; 8], t: f32| {
+        (0..3)
+            .map(|k| f64::from(ray[4 + k]).mul_add(f64::from(t), f64::from(ray[k])))
+            .fold(0.0, f64::hypot)
+            - 1.0
+    };
+    let (mut agree, mut gap_hits, mut chord_misses, mut error) = (0, 0, 0, Vec::new());
+    for (row, ray) in q.chunks_exact(16).zip(&rays) {
+        let (hit, marched) = (row[3] > 0.5, row[5] >= 0.0);
+        agree += usize::from(hit == marched);
+        gap_hits += usize::from(hit && row[0] < 0.5);
+        chord_misses += usize::from(!hit && row[0] > 0.5);
+        if hit && marched {
+            error.push((height(ray, row[4]) - height(ray, row[5])).abs());
+        }
+    }
+    error.sort_by(f64::total_cmp);
+    let (median, tail) = (error[error.len() / 2], error[error.len() * 9 / 10]);
+    assert!(
+        agree * 10 >= rays.len() * 9 && gap_hits >= 8 && chord_misses >= 8,
+        "agree {agree}/{}, gap hits {gap_hits}, chord misses {chord_misses}",
+        rays.len()
+    );
+    assert!(
+        median < 1e-4 && tail < 5e-4,
+        "silhouette depth strays from the march: median {median}, p90 {tail}"
+    );
+    Ok(())
+}
+
+#[test]
+fn flat_carriers_and_texh_off_add_no_silhouettes() -> TestResult {
+    // Plane rays leave it, finite-plane rays pass its edge: relief reaching their gap must not graze.
+    let mut flat = Vec::new();
+    for x in [-0.35_f32, -0.25, -0.15, -0.05, 0.05, 0.15, 0.25, 0.35] {
+        flat.push([x, 2e-7, 0.2, 0.0, 0.6, 0.8, 0.0, 3.0]);
+        flat.push([1.000_000_2, x, 1.0, 0.0, 0.0, 0.0, -1.0, 5.0]);
+    }
+    let q = run("verify_material_hit_full", &flat, flat.len() * 16)?;
+    assert!(
+        q.chunks_exact(16)
+            .all(|row| row[0] < 0.5 && row[1].to_bits() == row[2].to_bits()),
+        "flat carrier grazed: {q:?}"
+    );
+    assert!(
+        q.chunks_exact(16).any(|row| row[10] > 1e-6),
+        "flat relief never reached its gap"
+    );
+    let steel = grazing_rays(&[5e-7], 0.1, [0.0, 1.0]);
+    let on = run("verify_texh_borrow", &steel, steel.len() * 16)?;
+    let off = run("verify_texh_flat", &steel, steel.len() * 16)?;
+    assert!(
+        on.chunks_exact(16).any(|row| row[0] > 0.5) && off.chunks_exact(16).all(|row| row[0] < 0.5),
+        "Texh toggle ignored relief gaps"
+    );
+    Ok(())
+}

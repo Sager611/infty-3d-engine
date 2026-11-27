@@ -151,10 +151,12 @@ fn material_spec(material:u32)->MaterialSpec {
     default:{return MaterialSpec(0.5,0.0,0.0);}
   }
 }
-// Generated from material data: relief carved below the carrier; relief, coverage and colour from the surface heightfield.
+// Generated from material data: relief carved below the carrier; relief, coverage and colour from the surface heightfield;
+// metres any layered relief rises above the carrier (0 for field relief, which keeps its witness rule).
 const MATERIAL_CARVE=0u;
 fn material_field(material:f32)->bool {return false/*@material-field*/;}
 fn material_first(material:u32)->u32 {return 0u/*@material-first*/;}
+fn material_rise(material:f32)->f32 {return 0.0/*@material-rise*/;}
 struct MaterialLayers {base:vec3f,modulation:vec3f,gradient:vec3f,variance:f32,occlusion:f32};
 fn material_layer(input:MaterialLayers,index:u32,material:u32,delta:vec3f,weights:vec3f,footprint:f32,normal_filter:f32)->MaterialLayers {
   var state=input;
