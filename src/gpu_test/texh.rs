@@ -790,10 +790,7 @@ fn silhouette_rays_meet_relief_like_the_reference_march() -> TestResult {
     } = tally(&rays)?;
     let (median, tail) = (error[error.len() / 2], error[error.len() * 9 / 10]);
     assert!(
-        holes * 100 <= rays.len()
-            && agree * 10 >= rays.len() * 9
-            && gap_hits >= 8
-            && chord_misses >= 8,
+        holes == 0 && agree * 10 >= rays.len() * 9 && gap_hits >= 8 && chord_misses >= 8,
         "holes {holes}, agree {agree}/{}, gap hits {gap_hits}, chord misses {chord_misses}",
         rays.len()
     );
@@ -806,7 +803,8 @@ fn silhouette_rays_meet_relief_like_the_reference_march() -> TestResult {
 
 #[test]
 fn close_brick_limb_rays_meet_relief_like_the_reference_march() -> TestResult {
-    // The user's limb views, 40 px inside their carrier silhouette to 8 px out, versus the whole-chord march.
+    // The user's limb views, 40 px inside their carrier silhouette to 8 px out, versus the whole-chord march: holes
+    // are grazes no lookup samples; extras lie within the pixel-cone margin.
     for view in [
         [0.0, 0.0, 0.06],
         [0.0, 0.0, 0.02],
@@ -825,7 +823,7 @@ fn close_brick_limb_rays_meet_relief_like_the_reference_march() -> TestResult {
         } = tally(&rays)?;
         let (median, tail) = (error[error.len() / 2], error[error.len() * 9 / 10]);
         assert!(
-            holes * 25 <= rays.len() && agree * 25 >= rays.len() * 24 && chord_misses >= 8,
+            holes * 40 <= rays.len() && agree * 25 >= rays.len() * 24 && chord_misses >= 8,
             "{view:?}: holes {holes}, agree {agree}/{}, chord misses {chord_misses}",
             rays.len()
         );

@@ -38,15 +38,15 @@ fn texh_project(level:MaterialLevel,uv:vec2f,origin:vec2f,t:vec2f,lod:f32,walls:
   return vec3f(alpha,material_reach(runs,t,ramp),material_reach(runs,-t,ramp));
 }
 // Typical mode: typical, deepest and highest heights. Otherwise the height at foot; texh_walls then adds the
-// material's largest-step level's classes, heights and contour distances ahead of foot and behind bottom, once.
-struct TexhLevel {height:f32,deepest:f32,highest:f32,ahead:f32,back:f32,behind:f32,near:f32,far:f32,groove:f32,bevel:f32,near_high:bool,far_high:bool,structural:bool,index:u32};
+// material's largest-step level's classes, heights and contour distances around foot and bottom, once.
+struct TexhLevel {height:f32,deepest:f32,highest:f32,ahead:f32,back:f32,behind:f32,onward:f32,near:f32,far:f32,groove:f32,bevel:f32,near_high:bool,far_high:bool,structural:bool,index:u32};
 fn texh_merge(sum:TexhLevel,level:TexhLevel)->TexhLevel {
   var merged=sum;if(level.structural){merged=level;}
   merged.height=sum.height+level.height;merged.deepest=sum.deepest+level.deepest;merged.highest=sum.highest+level.highest;
   return merged;
 }
 fn texh_level(index:u32,foot:SurfacePoint,context:TexhContext,typical:bool)->TexhLevel {
-  var result=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false,index);
+  var result=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false,index);
   if(index>=arrayLength(&material_levels)){return result;}
   let level=material_levels[index];let material=u32(context.object.params.w);
   if(level.identity.x!=material){return result;}
@@ -63,10 +63,10 @@ fn texh_walls(sum:TexhLevel,foot:SurfacePoint,bottom:SurfacePoint,context:TexhCo
   let datum=select(level.mean.a,1.0,(level.identity.z&1u&(MATERIAL_CARVE>>material))!=0u);
   let near=texh_sample(level,foot,context,lod,true);let far=texh_sample(level,bottom,context,lod,true);
   let edge=f32(level.identity.z>>24u)/255.0;let bevel=f32((level.identity.z>>2u)&63u)/8.0*level.surface.x/512.0;// half ramp width
-  return TexhLevel(sum.height,0.0,0.0,near.y,near.z,far.z,(near.x-datum)*gain,(far.x-datum)*gain,(level.border.a-datum)*gain,bevel,near.x>=edge,far.x>=edge,true,sum.index);
+  return TexhLevel(sum.height,0.0,0.0,near.y,near.z,far.z,far.y,(near.x-datum)*gain,(far.x-datum)*gain,(level.border.a-datum)*gain,bevel,near.x>=edge,far.x>=edge,true,sum.index);
 }
 fn texh_height(foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext,typical:bool)->TexhLevel {
-  var sum=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false,0u);
+  var sum=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false,0u);
   if(material_field(context.object.params.w)){
     if(!typical){sum.height=context.coarse+hf_render_details(leaf_uv_unit(foot.uv),context.span);}
     return sum;
@@ -74,7 +74,7 @@ fn texh_height(foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext,typical
   // @texh-levels
   if(!typical&&sum.structural){sum=texh_walls(sum,foot,bottom,context);}
   let size=context.object.position_size.w;
-  sum.height/=size;sum.deepest/=size;sum.highest/=size;sum.ahead/=size;sum.back/=size;sum.behind/=size;sum.near/=size;sum.far/=size;sum.groove/=size;sum.bevel/=size;
+  sum.height/=size;sum.deepest/=size;sum.highest/=size;sum.ahead/=size;sum.back/=size;sum.behind/=size;sum.onward/=size;sum.near/=size;sum.far/=size;sum.groove/=size;sum.bevel/=size;
   return sum;
 }
 // Hit height above the carrier, shared by hit and gap paths: s sums heights at q (ray at the typical plane) with the
@@ -126,6 +126,7 @@ fn texh_ray_at(ray:TexhRay,z:f32)->f32 {
 }
 // Lowest height the ray reaches: its closest approach over curved carriers; flat carriers keep descending.
 fn texh_lowest(ray:TexhRay)->f32 {return ray.g-0.5*ray.c*ray.c/max(ray.k,1e-30);}
+fn texh_z(ray:TexhRay,t:f32)->f32 {return ray.g+t*(ray.c+0.5*ray.k*t);}
 // Landing offset at the wall depth, and whether relief is met: there, or out of reach by bottom's plateau within margin.
 // Out of reach the landing is the lowest point, which the wall depth reaches too as it sinks to it: landings never jump.
 fn texh_land(ray:TexhRay,depth:f32,plateau:f32,margin:f32)->vec2f {
@@ -206,12 +207,17 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   // Bottom's plateau: its largest-step level, q's others. Out of reach it is met within a pixel cone at the lowest
   // point, at most 1/128 of the relief range: unsampled relief rarely rises more.
   let margin=min(pixel_span*(base.query.t/object.position_size.w+v),relief*(shell.highest-shell.deepest)/128.0);
-  let land=texh_land(ray,depth,relief*(s.height-s.near+s.far),margin);let offset=land.x;
+  let land=texh_land(ray,depth,relief*(s.height-s.near+s.far),margin);
+  // Past its lowest point the ray climbs again: over a groove there it meets the groove's far wall while still under
+  // the typical face, or q's if higher, within the margin.
+  let wall=tb+s.onward;let face=relief*max(shell.height,select(shell.height,s.height,s.near_high));
+  let rise=land.y<0.5&&!s.far_high&&texh_z(ray,wall)<face+margin;
+  let offset=select(land.x,wall,rise);
   // Land on the ray itself: gaps start at their ray point, not their witness.
   var result=base;result.query.t+=offset*object.position_size.w;result.local=fma(vec3f(offset),ray.ld,ray.anchor);
   result.query.p+=scene_world_vector(object,fma(vec3f(offset),ray.ld,ray.anchor-base.local))*object.position_size.w;
   let foot=geometry_surface(result.local,base,object);
-  result.query.hit=land.y>0.5&&result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
+  result.query.hit=(land.y>0.5||rise)&&result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
   if(gap&&!result.query.hit){return base;}
   result.query.uv=foot.uv;
   if(material_field(object.params.w)){result.query.hit=result.query.hit&&leaf_covered(leaf_uv_unit(foot.uv));}
