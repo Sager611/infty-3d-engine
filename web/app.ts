@@ -1,5 +1,5 @@
 // biome-ignore-all lint/nursery/useQwikValidLexicalScope: Vanilla DOM coordination.
-import init, { PreparedScene, Renderer } from "../pkg/infty.js";
+import init, { PreparedScene, Renderer, shader_source } from "../pkg/infty.js";
 import {
 	cameraBasis,
 	frameCamera,
@@ -9,6 +9,7 @@ import {
 	stepSpeed,
 	travelSpeed,
 } from "./camera.ts";
+import { type CompileGpu, compileExclusively, prewarm } from "./compile.ts";
 import {
 	type ControlsEvent,
 	type ControlsNodes,
@@ -676,7 +677,11 @@ const start = async (): Promise<void> => {
 		// Show the step before compiling, which can stall the page's frames.
 		loading.textContent = "Compiling shaders";
 		await presented(request);
-		await acquireResource(() => Renderer.create(canvas), acceptRenderer);
+		await compileExclusively(navigator.locks, async () => {
+			const gpu = (navigator as Navigator & { gpu?: CompileGpu }).gpu;
+			await prewarm(gpu, shader_source());
+			await acquireResource(() => Renderer.create(canvas), acceptRenderer);
+		});
 		if (disposed) {
 			return;
 		}

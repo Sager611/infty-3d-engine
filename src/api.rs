@@ -11,6 +11,13 @@ const SCREEN_ARITY: usize = 4;
 const RAY_ARITY: usize = 6;
 const PACKED_STRIDE: usize = 24;
 
+/// The scene shader's WGSL, so the page can compile it off the browser's GPU thread before the renderer needs it.
+#[wasm_bindgen]
+#[must_use]
+pub fn shader_source() -> String {
+    crate::shader::source()
+}
+
 /// Immutable validated instances, shared definitions and reusable hierarchy.
 #[wasm_bindgen]
 pub struct PreparedScene {
