@@ -37,14 +37,14 @@ fn texh_project(level:MaterialLevel,uv:vec2f,origin:vec2f,t:vec2f,lod:f32,walls:
 }
 // Typical mode: typical, deepest and highest heights. Otherwise height at foot; the material's largest-step level also
 // reports its classes, heights and contour distances ahead of foot and behind bottom.
-struct TexhLevel {height:f32,deepest:f32,highest:f32,ahead:f32,behind:f32,near:f32,far:f32,groove:f32,bevel:f32,near_high:bool,far_high:bool,structural:bool};
+struct TexhLevel {height:f32,deepest:f32,highest:f32,ahead:f32,back:f32,behind:f32,near:f32,far:f32,groove:f32,bevel:f32,near_high:bool,far_high:bool,structural:bool};
 fn texh_merge(sum:TexhLevel,level:TexhLevel)->TexhLevel {
   var merged=sum;if(level.structural){merged=level;}
   merged.height=sum.height+level.height;merged.deepest=sum.deepest+level.deepest;merged.highest=sum.highest+level.highest;
   return merged;
 }
 fn texh_level(index:u32,foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext,typical:bool)->TexhLevel {
-  var result=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false);
+  var result=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false);
   if(index>=arrayLength(&material_levels)){return result;}
   let level=material_levels[index];let material=u32(context.object.params.w);
   if(level.identity.x!=material){return result;}
@@ -57,19 +57,19 @@ fn texh_level(index:u32,foot:SurfacePoint,bottom:SurfacePoint,context:TexhContex
   if(structural){
     let far=texh_sample(level,bottom,context,lod,true);let edge=f32(level.identity.z>>24u)/255.0;
     let bevel=f32((level.identity.z>>2u)&63u)/8.0*level.surface.x/512.0;// half ramp width
-    result=TexhLevel(result.height,0.0,0.0,near.y,far.z,result.height,(far.x-datum)*gain,(level.border.a-datum)*gain,bevel,near.x>=edge,far.x>=edge,true);
+    result=TexhLevel(result.height,0.0,0.0,near.y,near.z,far.z,result.height,(far.x-datum)*gain,(level.border.a-datum)*gain,bevel,near.x>=edge,far.x>=edge,true);
   }
   return result;
 }
 fn texh_height(foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext,typical:bool)->TexhLevel {
-  var sum=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false);
+  var sum=TexhLevel(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,false,false,false);
   if(material_field(context.object.params.w)){
     if(!typical){sum.height=context.coarse+hf_render_details(leaf_uv_unit(foot.uv),context.span);}
     return sum;
   }
   // @texh-levels
   let size=context.object.position_size.w;
-  sum.height/=size;sum.deepest/=size;sum.highest/=size;sum.ahead/=size;sum.behind/=size;sum.near/=size;sum.far/=size;sum.groove/=size;sum.bevel/=size;
+  sum.height/=size;sum.deepest/=size;sum.highest/=size;sum.ahead/=size;sum.back/=size;sum.behind/=size;sum.near/=size;sum.far/=size;sum.groove/=size;sum.bevel/=size;
   return sum;
 }
 // Hit height above the carrier, shared by hit and gap paths: s sums heights at q (ray at the typical plane) with the
@@ -81,10 +81,17 @@ fn texh_depth(s:TexhLevel,shell:TexhLevel,reach:f32)->f32 {
   let ahead=s.ahead/reach;let behind=1.0-s.behind/reach;let plateau=s.height-s.near+s.far;let groove=s.height-s.near+s.groove;
   if(!s.structural||s.height>=top){return s.height;}
   var depth=s.height;
-  // Crest runs end at 80 % of the fall; rounded shoulders start about a ramp earlier, so pass unless landing first.
-  if(s.near_high){if(landing>ahead-2.0*half){depth=select(plateau,texh_ramp(top,span,max(behind-half,ahead+half),half,groove,plateau),s.far_high);}}
-  // A groove point on a falling slope still drops to the groove floor; on the rising ramp it keeps its own height.
-  else{depth=texh_ramp(top,span,ahead+half,half,select(min(s.height,groove),s.height,ahead<=0.0),select(top,plateau,s.far_high));}
+  // A top point whose fall lies just behind it sits on a ramp still rising ahead. Crest runs end at 80 % of the fall;
+  // rounded shoulders start about a ramp earlier, so pass unless landing first.
+  if(s.near_high&&s.back<0.25*s.bevel){depth=texh_ramp(top,span,half,half,s.height,max(plateau,s.height));}
+  else if(s.near_high){if(landing>ahead-2.0*half){depth=select(plateau,texh_ramp(top,span,max(behind-half,ahead+half),half,groove,plateau),s.far_high);}}
+  // A groove point on a falling slope (its own ramp rises behind it) drops to the groove floor and meets the far wall
+  // seen from bottom; on a rising ramp it keeps its own height.
+  else{
+    let falling=s.back<0.25*s.bevel&&s.ahead>0.25*s.bevel&&s.far_high;
+    let centre=select(ahead+half,max(behind-half,ahead+half),falling);
+    depth=texh_ramp(top,span,centre,half,select(min(s.height,groove),s.height,ahead<=0.0&&!falling),select(top,plateau,s.far_high));
+  }
   return max(depth,shell.deepest);
 }
 // First meeting of the ray z = top - λ·span with a floor lo, then a straight wall up to hi across centre ± half, then hi.
