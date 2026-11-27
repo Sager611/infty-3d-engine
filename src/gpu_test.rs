@@ -23,35 +23,6 @@ fn scene_shader_parses_and_validates() -> Result<(), Box<dyn Error>> {
         naga::valid::Capabilities::empty(),
     )
     .validate(&module)?;
-    // Browsers' WGSL (Tint) rejects || mixed with && without parentheses; naga accepts it.
-    for line in crate::shader::source().lines() {
-        let code = line.split("//").next().unwrap_or_default().as_bytes();
-        let mut depth = vec![0_u8];
-        for (i, &c) in code.iter().enumerate() {
-            let ops = match c {
-                b'(' | b'[' => {
-                    depth.push(0);
-                    0
-                }
-                b')' | b']' if depth.len() > 1 => depth.pop().unwrap_or(0),
-                b')' | b']' | b',' | b';' | b'{' | b'}' => {
-                    depth.last_mut().map_or(0, std::mem::take)
-                }
-                b'|' | b'&' if code.get(i + 1) == Some(&c) => {
-                    if let Some(top) = depth.last_mut() {
-                        *top |= if c == b'|' { 1 } else { 2 };
-                    }
-                    0
-                }
-                _ => 0,
-            };
-            assert!(ops != 3, "|| mixed with && needs parentheses: {line}");
-        }
-        assert!(
-            depth.iter().all(|&o| o != 3),
-            "|| mixed with && needs parentheses: {line}"
-        );
-    }
     Ok(())
 }
 

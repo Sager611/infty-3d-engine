@@ -106,23 +106,32 @@ fn texh_ramp(top:f32,span:f32,centre:f32,half:f32,lo:f32,hi:f32)->f32 {
   let k=(hi-lo)/max(centre+half-start,1e-6);let meet=(top-lo+k*start)/(span+k);
   return select(hi,top-meet*span,meet<=centre+half);
 }
-// Ray through the relief: anchor at height g above the carrier with slope c (hit: carrier crossing, g=0; gap: closest
-// approach, c=0) on a carrier curving k along the ray, so heights follow z=g+cτ+kτ²/2. Hits and gaps share all else.
+// Ray through the relief from anchor, its point at the base t: signed height g over the carrier and slope c along its
+// normal there (hit: crossing, g=0; gap: closest approach, c≈0 on closed carriers), curving k along the ray, so heights
+// follow z=g+cτ+kτ²/2. Hits and gaps share all else.
 struct TexhRay {anchor:vec3f,ld:vec3f,g:f32,c:f32,k:f32};
 fn texh_ray(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f)->TexhRay {
-  let gap=base.base_hit==0u;let c=select(dot(d,base.query.n),0.0,gap);let size=object.position_size.w;
-  let anchor=select(base.local,scene_local_vector(object,origin_delta+d*base.query.t)/size,gap);
-  return TexhRay(anchor,scene_local_vector(object,d),select(0.0,base.query.gap/size,gap),c,geometry_curvature(base,d,object));
+  let gap=base.base_hit==0u;let size=object.position_size.w;let n=scene_local_vector(object,base.query.n);
+  let anchor=select(base.local,scene_local_vector(object,origin_delta+d*base.query.t)/size,gap);let ld=scene_local_vector(object,d);
+  let g=select(0.0,sign(dot(anchor-base.local,n))*base.query.gap/size,gap);
+  return TexhRay(anchor,ld,g,dot(ld,n),geometry_curvature(base,d,object));
 }
-// Ray offset from the anchor to height z: the entry side, or the lowest point when z is out of reach (a groove under
-// a grazing ray). Steep hits reduce to z/c; flat carriers keep it, faded below |c|=.05 instead of exploding.
+// Slope magnitude for offsets: |c|, steepened below .05 over carriers curving less than .005 per size, so flat grazing
+// offsets fade (z·c/max(c²,.0025)) instead of exploding; curved carriers keep the exact parabola, continuous in k and c.
+fn texh_slope(ray:TexhRay)->f32 {let c=abs(ray.c);return c+2.0*max(max(0.0025-0.5*ray.k,0.0)-c*c,0.0)/max(max(c,sqrt(ray.k)),1e-30);}
+// Ray offset from the anchor to height z: the entry side, or the lowest point when z is out of reach.
 fn texh_ray_at(ray:TexhRay,z:f32)->f32 {
-  let dz=z-ray.g;let r=ray.c*ray.c+2.0*ray.k*dz;
-  if(ray.k<=0.0){return dz*ray.c/max(0.0025,ray.c*ray.c);}
-  return select(-1.0,1.0,ray.c>0.0)*select(2.0*dz/max(abs(ray.c)+sqrt(max(r,0.0)),1e-30),-abs(ray.c)/ray.k,r<0.0);
+  let dz=z-ray.g;let a=texh_slope(ray);let r=ray.c*ray.c+2.0*ray.k*dz;
+  return select(-1.0,1.0,ray.c>0.0)*select(2.0*dz/max(a+sqrt(max(r,0.0)),1e-30),-ray.c*ray.c/max(ray.k*a,1e-30),r<0.0);
 }
 // Lowest height the ray reaches: its closest approach over curved carriers; flat carriers keep descending.
 fn texh_lowest(ray:TexhRay)->f32 {return ray.g-0.5*ray.c*ray.c/max(ray.k,1e-30);}
+// Landing offset at the wall depth, and whether relief is met: there, or out of reach by bottom's plateau within margin.
+// Out of reach the landing is the lowest point, which the wall depth reaches too as it sinks to it: landings never jump.
+fn texh_land(ray:TexhRay,depth:f32,plateau:f32,margin:f32)->vec2f {
+  let lowest=texh_lowest(ray);
+  return vec2f(texh_ray_at(ray,depth),f32(depth>lowest||plateau+margin>lowest));
+}
 // Share of the descent q→bottom made at distance x along it (inside only): the ray bows below their chord, a and b
 // being q's and bottom's offsets from its lowest point, so straight-descent walls land where the ray meets them.
 fn texh_warp(x:f32,reach:f32,a:f32,b:f32)->f32 {
@@ -161,18 +170,20 @@ fn texh_filter_footprint(base:SceneSample,depth:f32,d:vec3f,g:vec3f,pixel_span:f
 }
 fn texh_shading_context(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->TexhContext {
   var context=texh_context(base,d,object,origin_delta,pixel_span);
-  if(pixel_span>0.0&&sample.query.hit&&base.base_hit!=0u){
+  if(pixel_span>0.0&&sample.query.hit){
     let carrier=geometry_surface(base.local,base,object);let z=texh_height(carrier,carrier,context,true).height;
     let g=texh_gradient(base.local,texh_source(texh_ray(base,d,object,origin_delta),base,object,z),context,0.0);
-    context.footprint=texh_filter_footprint(base,sample.query.t,d,scene_world_vector(object,g),pixel_span);
+    // Curved rays run flatter toward their lowest point than at the carrier: widen to the landing's own slope.
+    let ray=texh_ray(base,d,object,origin_delta);let slope=abs(ray.c+ray.k*(sample.query.t-base.query.t)/object.position_size.w);
+    context.footprint=max(texh_filter_footprint(base,sample.query.t,d,scene_world_vector(object,g),pixel_span),pixel_span*sample.query.t/max(0.01,slope));
   }
   return context;
 }
 fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32,relief:f32)->SceneSample {
-  // Gaps share the hit path; only exact gaps of curved carriers under the highest relief reach a lookup.
+  // Gaps share the hit path; only exact gaps under the highest relief reach a lookup.
   let gap=base.base_hit==0u;
-  if(gap&&(base.status!=0u||base.query.gap>=relief*material_rise(object.params.w))){return base;}
-  let ray=texh_ray(base,d,object,origin_delta);if(gap&&ray.k<=0.0){return base;}
+  if(gap&&(base.status!=0u||base.query.gap>=relief*material_spec(u32(object.params.w)).rise)){return base;}
+  let ray=texh_ray(base,d,object,origin_delta);
   var context=texh_context(base,d,object,origin_delta,pixel_span);
   // Direct walls, at most 4 lookups: heights at q (ray at the typical plane); for the largest-step level also its
   // contour distance ahead of q, and its height and contour distance behind the deepest point. Others stay at q.
@@ -180,7 +191,7 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   if(gap&&ray.g>=relief*shell.highest){return base;}
   context.along=material_unit(ray.ld-carrier.n*dot(ray.ld,carrier.n),vec3f(0.0));
   // A chord above the deepest plane descends only to its lowest point: relief below it is never met.
-  let v=select(0.0,-ray.c/ray.k,ray.k>0.0);
+  let v=select(0.0,-ray.c*abs(ray.c)/max(ray.k*texh_slope(ray),1e-30),ray.k>0.0);
   let lowest=texh_lowest(ray);var descent=shell;descent.deepest=max(shell.deepest,lowest);
   let tq=texh_ray_at(ray,shell.height);let tb=texh_ray_at(ray,descent.deepest);
   let q=geometry_surface(fma(vec3f(tq),ray.ld,ray.anchor),base,object);let bottom=geometry_surface(fma(vec3f(tb),ray.ld,ray.anchor),base,object);
@@ -192,18 +203,15 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
     w.ahead=texh_warp(w.ahead,reach,tq-v,tb-v);w.behind=reach-texh_warp(reach-s.behind,reach,tq-v,tb-v);
   }
   let depth=relief*texh_depth(w,descent,reach);
-  var offset=texh_ray_at(ray,depth);
-  // Out of reach, the height sampled under the lowest point (bottom's largest-step level, q's others) is still met past
-  // bottom's wall within a pixel cone there, at most 1/128 of the relief range: unsampled relief rarely rises more.
-  let plateau=relief*(s.height-s.near+s.far);
+  // Bottom's plateau: its largest-step level, q's others. Out of reach it is met within a pixel cone at the lowest
+  // point, at most 1/128 of the relief range: unsampled relief rarely rises more.
   let margin=min(pixel_span*(base.query.t/object.position_size.w+v),relief*(shell.highest-shell.deepest)/128.0);
-  let met=depth>lowest||plateau+margin>lowest;
-  if(depth<=lowest){offset=max(tb-s.behind,texh_ray_at(ray,plateau));}
-  var result=base;result.query.t+=offset*object.position_size.w;
-  result.query.p=fma(vec3f(offset*object.position_size.w),d,base.query.p);
-  result.local=fma(vec3f(offset),ray.ld,base.local);
+  let land=texh_land(ray,depth,relief*(s.height-s.near+s.far),margin);let offset=land.x;
+  // Land on the ray itself: gaps start at their ray point, not their witness.
+  var result=base;result.query.t+=offset*object.position_size.w;result.local=fma(vec3f(offset),ray.ld,ray.anchor);
+  result.query.p+=scene_world_vector(object,fma(vec3f(offset),ray.ld,ray.anchor-base.local))*object.position_size.w;
   let foot=geometry_surface(result.local,base,object);
-  result.query.hit=met&&result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
+  result.query.hit=land.y>0.5&&result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
   if(gap&&!result.query.hit){return base;}
   result.query.uv=foot.uv;
   if(material_field(object.params.w)){result.query.hit=result.query.hit&&leaf_covered(leaf_uv_unit(foot.uv));}
@@ -214,7 +222,7 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
 }
 // Normals are needed only after nearest-hit selection; probes retain the full adapter.
 fn texh_shade_normal(sample:SceneSample,base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f,pixel_span:f32)->vec3f {
-  if(!sample.query.hit||base.base_hit==0u){return sample.query.n;}
+  if(!sample.query.hit){return sample.query.n;}
   let context=texh_shading_context(sample,base,d,object,origin_delta,pixel_span);
   return scene_world_vector(object,texh_normal(sample.local,geometry_surface(sample.local,base,object),context));
 }

@@ -178,25 +178,35 @@ fn verify_material_display(@builtin(global_invocation_id) id: vec3u) {
   results[id.x]=ProbeResult(vec4f(material_display(rays[id.x].o.xyz),1.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)
-// Direct depth/hit versus a 400-step reference march down the same ray through the same heights (test-only loop).
-// Sphere at the origin, radius o.w (0: 1); ray d.w: 0 brick, 1 steel. Hits and gaps alike; t -1: no crossing.
+// Direct hit versus a 480-step reference march over the same heights along the whole chord through the relief shell:
+// from its exact entry (or the origin) to its exit (or the deepest sphere), test-only. Sphere at the origin, radius
+// o.w (0: 1); ray d.w: 0 brick, 1 steel. Hits and gaps alike; march t -1: no crossing.
 fn verify_texh_march(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let r=rays[id.x];let d=normalize(r.d.xyz);let span=2.0/(1.8*791.0);let size=select(1.0,r.o.w,r.o.w>0.0);
   let object=SceneObject(vec4u(1u,1u,0u,0u),vec4f(0.0,0.0,0.0,size),vec4f(0.0,0.0,0.0,1.0-r.d.w),POSE_IDENTITY);
   let base=scene_object(r.o.xyz,d,object);let context=texh_context(base,d,object,r.o.xyz,span);
   let sample=material_texh_depth(base,d,object,r.o.xyz,span,1.0);let depth=dot(sample.local-base.local,base.query.n);
-  let ray=texh_ray(base,d,object,r.o.xyz);
   let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
-  // March τ from above all relief to the deepest plane, or the ray's lowest point, with true sphere heights.
-  let t0=texh_ray_at(ray,max(shell.highest,2.0*shell.height-shell.deepest));let t1=texh_ray_at(ray,shell.deepest);
+  let o=r.o.xyz/size;let b=dot(o,d);let outer=b*b-dot(o,o)+(1.0+shell.highest)*(1.0+shell.highest);
+  let inner=b*b-dot(o,o)+(1.0+shell.deepest)*(1.0+shell.deepest);
+  let t0=max(-b-sqrt(max(outer,0.0)),0.0);let t1=select(-b+sqrt(max(outer,0.0)),-b-sqrt(inner),inner>=0.0&&-b-sqrt(inner)>t0);
   var pt=t0;var pg=1.0;var md=shell.deepest;var mt=-1.0;
-  for(var i=0u;i<=400u;i++){
-    let t=mix(t0,t1,f32(i)/400.0);let p=fma(vec3f(t),ray.ld,ray.anchor);
+  for(var i=0u;i<=480u&&outer>=0.0&&t1>t0;i++){
+    let t=mix(t0,t1,f32(i)/480.0);let p=o+t*d;
     let foot=geometry_surface(p,base,object);let g=length(p)-1.0-texh_height(foot,foot,context,false).height;
-    if(g<=0.0){let at=mix(pt,t,pg/(pg-g));md=length(fma(vec3f(at),ray.ld,ray.anchor))-1.0;mt=base.query.t+at*size;break;}pt=t;pg=g;
+    if(g<=0.0){let at=mix(pt,t,select(pg/(pg-g),0.0,i==0u));md=length(o+at*d)-1.0;mt=at*size;break;}pt=t;pg=g;
   }
-  results[id.x]=ProbeResult(vec4f(f32(base.base_hit),depth,md,f32(sample.query.hit)),vec4f(sample.query.t,mt,0.0,0.0),vec4f(0.0),vec4f(0.0));
+  results[id.x]=ProbeResult(vec4f(f32(base.base_hit),depth,md,f32(sample.query.hit)),vec4f(sample.query.t,mt,0.0,0.0),
+    vec4f(sample.query.p,0.0),vec4f(sample.local*size,0.0));
+}
+@compute @workgroup_size(1)
+// Ray map and landing on a synthetic ray o=(g,c,k,depth), d=(plateau,margin,z): offset to z, landing, met, lowest.
+fn verify_texh_land(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}
+  let r=rays[id.x];let ray=TexhRay(vec3f(0.0),vec3f(1.0,0.0,0.0),r.o.x,r.o.y,r.o.z);
+  let land=texh_land(ray,r.o.w,r.d.x,r.d.y);
+  results[id.x]=ProbeResult(vec4f(texh_ray_at(ray,r.d.z),land,texh_lowest(ray)),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)
 fn verify_material_mapping(@builtin(global_invocation_id) id: vec3u) {

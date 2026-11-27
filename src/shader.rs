@@ -83,17 +83,18 @@ pub fn source_for(levels: &[crate::material::Level], orders: usize) -> String {
             "color=leaf_level(color,first+{k}u,material,p,size,footprint);"
         );
     }
-    let (mut specs, mut carve, mut field, mut rise) = (
-        String::new(),
-        0_u32,
-        String::from("false"),
-        String::from("0.0"),
-    );
+    let (mut specs, mut carve, mut field) = (String::new(), 0_u32, String::from("false"));
     for m in crate::material::Material::ALL {
         let s = m.spec();
+        // Carved bases never rise above the carrier; other orders rise at most their gain; field relief keeps its own rule.
+        let rise: f32 = levels
+            .iter()
+            .filter(|l| l.material == m && !s.field && !(s.carve && l.order == 0))
+            .map(|l| l.relief)
+            .sum();
         let _ = writeln!(
             specs,
-            "case {}u:{{return MaterialSpec({:?},{:?},{:?});}}",
+            "case {}u:{{return MaterialSpec({:?},{:?},{:?},{rise:?});}}",
             m.tag(),
             s.roughness,
             s.metallic,
@@ -103,14 +104,6 @@ pub fn source_for(levels: &[crate::material::Level], orders: usize) -> String {
         // Float equality keeps Metal compile time flat; bit tests here cost ~9 s.
         if s.field {
             let _ = write!(field, "||material=={}.0", m.tag());
-        } else {
-            // Carved bases never rise above the carrier; other orders rise at most their gain.
-            let bound: f32 = levels
-                .iter()
-                .filter(|l| l.material == m && !(s.carve && l.order == 0))
-                .map(|l| l.relief)
-                .sum();
-            rise = format!("select({rise},{bound:?},material=={}.0)", m.tag());
         }
     }
     let source = SOURCE
@@ -118,7 +111,6 @@ pub fn source_for(levels: &[crate::material::Level], orders: usize) -> String {
         .replace("MATERIAL_CARVE=0u", &format!("MATERIAL_CARVE={carve}u"))
         .replace("false/*@material-field*/", &field)
         .replace("0u/*@material-first*/", &first)
-        .replace("0.0/*@material-rise*/", &rise)
         .replace("// @texh-levels", &height)
         .replace("// @material-levels", &material)
         .replace("// @leaf-levels", &leaf);
