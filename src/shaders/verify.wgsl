@@ -179,17 +179,23 @@ fn verify_material_display(@builtin(global_invocation_id) id: vec3u) {
 }
 @compute @workgroup_size(1)
 // Direct depth/hit versus a 400-step reference march down the same ray through the same heights (test-only loop).
-// Unit sphere; ray d.w: 0 brick, 1 steel. Hits and gaps alike; the march stops at the ray's lowest point (t -1: miss).
+// Sphere at the origin, radius o.w (0: 1); ray d.w: 0 brick, 1 steel. Hits and gaps alike; t -1: no crossing.
 fn verify_texh_march(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
-  let r=rays[id.x];let d=normalize(r.d.xyz);let span=2.0/(1.8*791.0);
-  let object=SceneObject(vec4u(1u,1u,0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,1.0-r.d.w),POSE_IDENTITY);
+  let r=rays[id.x];let d=normalize(r.d.xyz);let span=2.0/(1.8*791.0);let size=select(1.0,r.o.w,r.o.w>0.0);
+  let object=SceneObject(vec4u(1u,1u,0u,0u),vec4f(0.0,0.0,0.0,size),vec4f(0.0,0.0,0.0,1.0-r.d.w),POSE_IDENTITY);
   let base=scene_object(r.o.xyz,d,object);let context=texh_context(base,d,object,r.o.xyz,span);
   let sample=material_texh_depth(base,d,object,r.o.xyz,span,1.0);let depth=dot(sample.local-base.local,base.query.n);
   let ray=texh_ray(base,d,object,r.o.xyz);
   let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
-  let top=max(shell.highest,2.0*shell.height-shell.deepest);var pz=top;var pg=1.0;var md=shell.deepest;var mt=-1.0;
-  for(var i=1u;i<=400u;i++){let z=mix(top,shell.deepest,f32(i)/400.0);if(!texh_reached(ray,z)){break;}let foot=texh_source(ray,base,object,z);let g=z-texh_height(foot,foot,context,false).height;if(g<=0.0){md=mix(pz,z,pg/(pg-g));mt=base.query.t+texh_ray_at(ray,md);break;}pz=z;pg=g;}
+  // March τ from above all relief to the deepest plane, or the ray's lowest point, with true sphere heights.
+  let t0=texh_ray_at(ray,max(shell.highest,2.0*shell.height-shell.deepest));let t1=texh_ray_at(ray,shell.deepest);
+  var pt=t0;var pg=1.0;var md=shell.deepest;var mt=-1.0;
+  for(var i=0u;i<=400u;i++){
+    let t=mix(t0,t1,f32(i)/400.0);let p=fma(vec3f(t),ray.ld,ray.anchor);
+    let foot=geometry_surface(p,base,object);let g=length(p)-1.0-texh_height(foot,foot,context,false).height;
+    if(g<=0.0){let at=mix(pt,t,pg/(pg-g));md=length(fma(vec3f(at),ray.ld,ray.anchor))-1.0;mt=base.query.t+at*size;break;}pt=t;pg=g;
+  }
   results[id.x]=ProbeResult(vec4f(f32(base.base_hit),depth,md,f32(sample.query.hit)),vec4f(sample.query.t,mt,0.0,0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)

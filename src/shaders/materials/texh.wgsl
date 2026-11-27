@@ -121,7 +121,14 @@ fn texh_ray_at(ray:TexhRay,z:f32)->f32 {
   if(ray.k<=0.0){return dz*ray.c/max(0.0025,ray.c*ray.c);}
   return select(-1.0,1.0,ray.c>0.0)*select(2.0*dz/max(abs(ray.c)+sqrt(max(r,0.0)),1e-30),-abs(ray.c)/ray.k,r<0.0);
 }
-fn texh_reached(ray:TexhRay,z:f32)->bool {return ray.k<=0.0||ray.c*ray.c+2.0*ray.k*(z-ray.g)>=0.0;}
+// Lowest height the ray reaches: its closest approach over curved carriers; flat carriers keep descending.
+fn texh_lowest(ray:TexhRay)->f32 {return ray.g-0.5*ray.c*ray.c/max(ray.k,1e-30);}
+// Share of the descent q→bottom made at distance x along it (inside only): the ray bows below their chord, a and b
+// being q's and bottom's offsets from its lowest point, so straight-descent walls land where the ray meets them.
+fn texh_warp(x:f32,reach:f32,a:f32,b:f32)->f32 {
+  let f=x/reach;let g=clamp(f,0.0,1.0);
+  return select(x,reach*g*(2.0*a+g*(b-a))/min(a+b,-1e-30),f==g);
+}
 // Foot under the ray at height z: q at the median plane (brick face, not tops), bottom at the deepest plane.
 fn texh_source(ray:TexhRay,base:SceneSample,object:SceneObject,z:f32)->SurfacePoint {
   return geometry_surface(fma(vec3f(texh_ray_at(ray,z)),ray.ld,ray.anchor),base,object);
@@ -172,15 +179,31 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
   if(gap&&ray.g>=relief*shell.highest){return base;}
   context.along=material_unit(ray.ld-carrier.n*dot(ray.ld,carrier.n),vec3f(0.0));
-  let q=texh_source(ray,base,object,shell.height);let bottom=texh_source(ray,base,object,shell.deepest);
-  let s=texh_height(q,bottom,context,false);
-  let depth=relief*texh_depth(s,shell,max(length(bottom.p-q.p),1e-30));
-  let offset=texh_ray_at(ray,depth);
+  // A chord above the deepest plane descends only to its lowest point: relief below it is never met.
+  let v=select(0.0,-ray.c/ray.k,ray.k>0.0);
+  let lowest=texh_lowest(ray);var descent=shell;descent.deepest=max(shell.deepest,lowest);
+  let tq=texh_ray_at(ray,shell.height);let tb=texh_ray_at(ray,descent.deepest);
+  let q=geometry_surface(fma(vec3f(tq),ray.ld,ray.anchor),base,object);let bottom=geometry_surface(fma(vec3f(tb),ray.ld,ray.anchor),base,object);
+  let s=texh_height(q,bottom,context,false);let reach=max(length(bottom.p-q.p),1e-30);
+  var w=s;
+  // From a groove toward a top, the far wall is the nearer of the runs from q and from bottom (capped or oblique runs).
+  if(ray.k>0.0){
+    if(!s.near_high&&s.far_high){w.ahead=min(s.ahead,reach-s.behind);}
+    w.ahead=texh_warp(w.ahead,reach,tq-v,tb-v);w.behind=reach-texh_warp(reach-s.behind,reach,tq-v,tb-v);
+  }
+  let depth=relief*texh_depth(w,descent,reach);
+  var offset=texh_ray_at(ray,depth);
+  // Out of reach, the height sampled under the lowest point (bottom's largest-step level, q's others) is still met past
+  // bottom's wall within a pixel cone there, at most 1/128 of the relief range: unsampled relief rarely rises more.
+  let plateau=relief*(s.height-s.near+s.far);
+  let margin=min(pixel_span*(base.query.t/object.position_size.w+v),relief*(shell.highest-shell.deepest)/128.0);
+  let met=depth>lowest||plateau+margin>lowest;
+  if(depth<=lowest){offset=max(tb-s.behind,texh_ray_at(ray,plateau));}
   var result=base;result.query.t+=offset*object.position_size.w;
   result.query.p=fma(vec3f(offset*object.position_size.w),d,base.query.p);
   result.local=fma(vec3f(offset),ray.ld,base.local);
   let foot=geometry_surface(result.local,base,object);
-  result.query.hit=texh_reached(ray,depth)&&result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
+  result.query.hit=met&&result.query.t>=0.0&&fi_finite(result.query.t)&&foot.valid;
   if(gap&&!result.query.hit){return base;}
   result.query.uv=foot.uv;
   if(material_field(object.params.w)){result.query.hit=result.query.hit&&leaf_covered(leaf_uv_unit(foot.uv));}

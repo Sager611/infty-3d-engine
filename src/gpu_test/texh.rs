@@ -630,14 +630,14 @@ fn direct_texh_fades_grazing_offsets_instead_of_searching() -> TestResult {
     Ok(())
 }
 
-/// Axis rays at signed gap g from a unit sphere (inside: chord depth -g), lowest at t*; `tag` fills ray[3] and ray[7].
-fn grazing_rays(gaps: &[f32], at: f32, tag: [f32; 2]) -> Vec<[f32; 8]> {
+/// Axis rays at signed gap g from a unit sphere (inside: chord depth -g), lowest at t*; ray[7]: material.
+fn grazing_rays(gaps: &[f32], at: f32, material: f32) -> Vec<[f32; 8]> {
     let mut rays = Vec::new();
     for i in 0..48_u8 {
         let (sin, cos) = (0.29 * f32::from(i)).sin_cos();
         let axis = usize::from(i % 3);
         for g in gaps {
-            let mut ray = [0.0, 0.0, 0.0, tag[0], 0.0, 0.0, 0.0, tag[1]];
+            let mut ray = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, material];
             (ray[axis], ray[4 + axis]) = (-at, 1.0);
             ray[(axis + 1) % 3] = (1.0 + g) * cos;
             ray[(axis + 2) % 3] = (1.0 + g) * sin;
@@ -647,38 +647,230 @@ fn grazing_rays(gaps: &[f32], at: f32, tag: [f32; 2]) -> Vec<[f32; 8]> {
     rays
 }
 
+/// The user's limb camera, 6 cm off the limb point of a 0.42 m sphere at the origin, turned by yaw/pitch: per screen
+/// row, `count` rays `step` pixels apart from `inside` pixels inside the carrier silhouette outwards.
+fn limb_rays(
+    yaw: f32,
+    pitch: f32,
+    inside: f32,
+    step: f32,
+    count: u16,
+    material: f32,
+) -> Vec<[f32; 8]> {
+    let forward = [
+        -pitch.cos() * yaw.sin(),
+        -pitch.sin(),
+        -pitch.cos() * yaw.cos(),
+    ];
+    let right = [yaw.cos(), 0.0, -yaw.sin()];
+    let up = [0, 1, 2].map(|k| {
+        let (i, j) = ((k + 1) % 3, (k + 2) % 3);
+        right[i].mul_add(forward[j], -(right[j] * forward[i]))
+    });
+    let origin = [
+        0.06_f32.mul_add(-forward[0], 0.42),
+        -0.06 * forward[1],
+        -0.06 * forward[2],
+    ];
+    let ray = |sx: f32, sy: f32| {
+        [0, 1, 2].map(|k| 1.8_f32.mul_add(forward[k], sx.mul_add(right[k], sy * up[k])))
+    };
+    // Closest approach to the centre.
+    let miss = |d: [f32; 3]| {
+        let along =
+            (0..3).map(|k| origin[k] * d[k]).sum::<f32>() / d.iter().map(|v| v * v).sum::<f32>();
+        (0..3)
+            .map(|k| along.mul_add(-d[k], origin[k]).powi(2))
+            .sum::<f32>()
+            .sqrt()
+    };
+    let mut rays = Vec::new();
+    for row in 0..8_u8 {
+        let sy = f32::from(row).mul_add(0.24, -0.84);
+        let (mut inner, mut outer) = (-1.6_f32, 1.6_f32);
+        for _ in 0..40 {
+            let mid = 0.5 * (inner + outer);
+            if miss(ray(mid, sy)) < 0.42 {
+                inner = mid;
+            } else {
+                outer = mid;
+            }
+        }
+        for i in 0..count {
+            let d = ray(
+                f32::from(i)
+                    .mul_add(step, -inside)
+                    .mul_add(2.0 / 791.0, inner),
+                sy,
+            );
+            rays.push([
+                origin[0], origin[1], origin[2], 0.42, d[0], d[1], d[2], material,
+            ]);
+        }
+    }
+    rays
+}
+
+// Height above a sphere at the origin (radius ray[3], 0: 1) of ray point t, in radii.
+fn height(ray: &[f32; 8], t: f32) -> f64 {
+    let size = if ray[3] > 0.0 { f64::from(ray[3]) } else { 1.0 };
+    let length = f64::from(ray[4])
+        .hypot(f64::from(ray[5]))
+        .hypot(f64::from(ray[6]));
+    (0..3)
+        .map(|k| (f64::from(ray[4 + k]) / length).mul_add(f64::from(t), f64::from(ray[k])))
+        .fold(0.0, f64::hypot)
+        / size
+        - 1.0
+}
+
+/// Per ray: carrier hit, then the direct and the reference-march crossing heights (None: miss).
+type Crossing = (bool, Option<f64>, Option<f64>);
+fn crossings(rays: &[[f32; 8]]) -> Result<Vec<Crossing>, Box<dyn std::error::Error>> {
+    let q = run("verify_texh_march", rays, rays.len() * 16)?;
+    Ok(q.chunks_exact(16)
+        .zip(rays)
+        .map(|(row, ray)| {
+            let at = |hit: bool, t: f32| hit.then(|| height(ray, t));
+            (
+                row[0] > 0.5,
+                at(row[3] > 0.5, row[4]),
+                at(row[5] >= 0.0, row[5]),
+            )
+        })
+        .collect())
+}
+
+/// Direct texh versus the reference march: agreements, holes (march hits missed), gap hits, chord misses and sorted
+/// hit height errors.
+struct Tally {
+    agree: usize,
+    holes: usize,
+    gap_hits: usize,
+    chord_misses: usize,
+    error: Vec<f64>,
+}
+fn tally(rays: &[[f32; 8]]) -> Result<Tally, Box<dyn std::error::Error>> {
+    let mut tally = Tally {
+        agree: 0,
+        holes: 0,
+        gap_hits: 0,
+        chord_misses: 0,
+        error: Vec::new(),
+    };
+    for (base, direct, marched) in crossings(rays)? {
+        tally.agree += usize::from(direct.is_some() == marched.is_some());
+        tally.holes += usize::from(direct.is_none() && marched.is_some());
+        tally.gap_hits += usize::from(direct.is_some() && !base);
+        tally.chord_misses += usize::from(direct.is_none() && base);
+        if let (Some(d), Some(m)) = (direct, marched) {
+            tally.error.push((d - m).abs());
+        }
+    }
+    tally.error.sort_by(f64::total_cmp);
+    Ok(tally)
+}
+
 #[test]
 fn silhouette_rays_meet_relief_like_the_reference_march() -> TestResult {
     // Steel relief rises above its carrier, carved brick sinks below it; rays just outside and inside both.
-    let mut rays = grazing_rays(&[1e-6, 5e-7, -5e-7, -2e-6], 0.2, [0.0, 1.0]);
-    rays.extend(grazing_rays(&[1e-4, -5e-4, -2e-3, -8e-3], 0.2, [0.0, 0.0]));
-    let q = run("verify_texh_march", &rays, rays.len() * 16)?;
-    let height = |ray: &[f32; 8], t: f32| {
-        (0..3)
-            .map(|k| f64::from(ray[4 + k]).mul_add(f64::from(t), f64::from(ray[k])))
-            .fold(0.0, f64::hypot)
-            - 1.0
-    };
-    let (mut agree, mut gap_hits, mut chord_misses, mut error) = (0, 0, 0, Vec::new());
-    for (row, ray) in q.chunks_exact(16).zip(&rays) {
-        let (hit, marched) = (row[3] > 0.5, row[5] >= 0.0);
-        agree += usize::from(hit == marched);
-        gap_hits += usize::from(hit && row[0] < 0.5);
-        chord_misses += usize::from(!hit && row[0] > 0.5);
-        if hit && marched {
-            error.push((height(ray, row[4]) - height(ray, row[5])).abs());
-        }
-    }
-    error.sort_by(f64::total_cmp);
+    let mut rays = grazing_rays(&[1e-6, 5e-7, -5e-7, -2e-6], 0.2, 1.0);
+    rays.extend(grazing_rays(&[1e-4, -5e-4, -2e-3, -8e-3], 0.2, 0.0));
+    let Tally {
+        agree,
+        holes,
+        gap_hits,
+        chord_misses,
+        error,
+    } = tally(&rays)?;
     let (median, tail) = (error[error.len() / 2], error[error.len() * 9 / 10]);
     assert!(
-        agree * 10 >= rays.len() * 9 && gap_hits >= 8 && chord_misses >= 8,
-        "agree {agree}/{}, gap hits {gap_hits}, chord misses {chord_misses}",
+        holes == 0 && agree * 10 >= rays.len() * 9 && gap_hits >= 8 && chord_misses >= 8,
+        "holes {holes}, agree {agree}/{}, gap hits {gap_hits}, chord misses {chord_misses}",
         rays.len()
     );
     assert!(
         median < 1e-4 && tail < 5e-4,
         "silhouette depth strays from the march: median {median}, p90 {tail}"
+    );
+    Ok(())
+}
+
+#[test]
+fn close_brick_limb_rays_meet_relief_like_the_reference_march() -> TestResult {
+    // The user's limb view and grazing turns of it, 40 px inside its carrier silhouette to 8 px out: march hits are
+    // hit but for under 1 in 200 rays it grazes where no lookup samples; extras are relief within the pixel-cone margin.
+    let mut rays = Vec::new();
+    for (yaw, pitch) in [
+        (0.0, 0.0),
+        (0.1, 0.0),
+        (0.3, 0.0),
+        (0.0, 0.3),
+        (0.0, -0.3),
+        (0.2, 0.2),
+    ] {
+        rays.extend(limb_rays(yaw, pitch, 40.0, 1.0, 48, 0.0));
+    }
+    let Tally {
+        agree,
+        holes,
+        chord_misses,
+        error,
+        ..
+    } = tally(&rays)?;
+    let (median, tail) = (error[error.len() / 2], error[error.len() * 9 / 10]);
+    assert!(
+        holes * 200 <= rays.len() && agree * 50 >= rays.len() * 49 && chord_misses >= 8,
+        "holes {holes}, agree {agree}/{}, chord misses {chord_misses}",
+        rays.len()
+    );
+    assert!(
+        median < 1e-4 && tail < 1e-3,
+        "limb depth strays from the march: median {median}, p90 {tail}"
+    );
+    Ok(())
+}
+
+#[test]
+fn relief_depth_is_continuous_where_carrier_hits_turn_into_gaps() -> TestResult {
+    // 1/16-pixel steps across the limb views' carrier silhouette, steel rising above it and brick carved below: no
+    // march hit is missed, depth stays within 2e-6 radii (1/100 px) of the march's and steps like it there.
+    let mut seams = 0;
+    for (yaw, pitch, material) in [
+        (0.0, 0.0, 1.0),
+        (0.3, 0.0, 1.0),
+        (0.0, 0.3, 1.0),
+        (0.2, 0.2, 1.0),
+        (0.0, 0.0, 0.0),
+        (0.3, 0.0, 0.0),
+    ] {
+        for row in
+            crossings(&limb_rays(yaw, pitch, 2.0, 1.0 / 16.0, 64, material))?.chunks_exact(64)
+        {
+            for (_, direct, marched) in row {
+                if let Some(m) = marched {
+                    assert!(
+                        direct.is_some_and(|d| (d - m).abs() < 2e-6),
+                        "{yaw} {pitch} {material}: {direct:?} vs {m}"
+                    );
+                }
+            }
+            for pair in row.windows(2) {
+                if let [(a, Some(da), Some(ma)), (b, Some(db), Some(mb))] = pair
+                    && a != b
+                {
+                    seams += 1;
+                    assert!(
+                        ((db - da) - (mb - ma)).abs() < 2e-6,
+                        "{yaw} {pitch} {material}: seam step"
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        seams >= 2,
+        "only {seams} relief seams across the carrier silhouette"
     );
     Ok(())
 }
@@ -701,7 +893,7 @@ fn flat_carriers_and_texh_off_add_no_silhouettes() -> TestResult {
         q.chunks_exact(16).any(|row| row[10] > 1e-6),
         "flat relief never reached its gap"
     );
-    let steel = grazing_rays(&[5e-7], 0.1, [0.0, 1.0]);
+    let steel = grazing_rays(&[5e-7], 0.1, 1.0);
     let on = run("verify_texh_borrow", &steel, steel.len() * 16)?;
     let off = run("verify_texh_flat", &steel, steel.len() * 16)?;
     assert!(
