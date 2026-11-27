@@ -116,3 +116,26 @@ fn transformed_scene_packets_match_cpu() -> Result<(), Box<dyn std::error::Error
     }
     Ok(())
 }
+
+#[test]
+fn relief_runs_once_per_pixel_after_a_lookup_free_traversal() {
+    let render = include_str!("../shaders/render.wgsl");
+    let shadow = include_str!("../shaders/materials/shadow.wgsl");
+    let after = render
+        .find("// One relief pass per pixel")
+        .unwrap_or(usize::MAX);
+    assert_eq!(render.matches("material_texh_depth(").count(), 1);
+    assert!(
+        render
+            .find("material_texh_depth(")
+            .is_some_and(|at| at > after)
+    );
+    assert!(render.contains("scene_canonical(local_o,local_d,object,false)"));
+    assert!(shadow.contains("scene_canonical(local,local_d,other,false)"));
+    for source in [render, shadow] {
+        assert!(
+            !source.contains("leaf_covered("),
+            "traversal coverage lookup"
+        );
+    }
+}

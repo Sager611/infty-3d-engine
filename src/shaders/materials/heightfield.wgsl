@@ -79,6 +79,13 @@ fn hf_gradient_lod(uv:vec2f,footprint:f32,span:f32,quantum_axes:f32)->vec2f {
   return vec2f(0.0)/*@field-slopes*/;
 }
 fn hf_gradient(uv:vec2f,footprint:f32)->vec2f {return hf_gradient_lod(uv,footprint,0.0,0.0);}
+// Precomputed convex outline holding all coverage: does UV segment a..b cross it? Traversal culls without lookups.
+fn field_outline(a:vec2f,b:vec2f)->bool {
+  if(height_data.info.x<2u){return true;}
+  let e=b-a;var lo=0.0;var hi=1.0;var inside=true;
+  /*@field-outline*/
+  return inside&&lo<=hi;
+}
 fn leaf_covered(uv:vec2f)->bool {
   return height_data.info.x<2u||hf_bilinear(FIELD_ORDERS,uv,1.0)>=127.5;
 }

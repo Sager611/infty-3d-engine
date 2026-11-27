@@ -24,7 +24,7 @@ fn scene_object(o:vec3f,d:vec3f,object:SceneObject)->SceneSample {
 }
 fn scene_object_precise(o:vec3f,low:vec3f,d:vec3f,object:SceneObject)->SceneSample {
   let local=scene_local_vector(object,scene_origin_delta(o,low,object)/object.position_size.w);
-  return scene_canonical(local,scene_local_vector(object,d),object);
+  return scene_canonical(local,scene_local_vector(object,d),object,true);
 }
 // Full height envelope includes direct hits and witness-gap hits. Reject only
 // a certified miss/occluded leaf; never run nine-region gap math for it.
@@ -47,7 +47,18 @@ fn scene_leaf_relevant(local_o:vec3f,local_d:vec3f,object:SceneObject,limit:f32,
   }
   return true;
 }
-fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
+// Relief may land on this object: a carrier hit, or a near miss under its highest relief; a card's relief slab
+// must also cross its coverage outline. Lookup-free, so traversal cost stays independent of overlaps.
+fn scene_relief_candidate(carrier:SceneSample,local_o:vec3f,local_d:vec3f,object:SceneObject,relief:f32)->bool {
+  if(carrier.base_hit==0u&&(carrier.status!=0u||carrier.query.gap>=relief*material_spec(u32(object.params.w)).rise)){return false;}
+  if(!material_field(object.params.w)||object.identity.y!=5u){return true;}
+  let o=plane_frame(local_o,scene_axis(object));let d=plane_frame(local_d,scene_axis(object));
+  if(abs(d.z)<1e-6){return true;}
+  let reach=fi_up(hf_reach());let a=o.xy+d.xy*((reach-o.z)/d.z);let b=o.xy+d.xy*((-reach-o.z)/d.z);
+  return field_outline(fma(a,vec2f(0.5),vec2f(0.5)),fma(b,vec2f(0.5),vec2f(0.5)));
+}
+// Exact adds field lookups (coverage, witness-gap relief); traversal passes false and lets the one relief pass decide.
+fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject,exact:bool)->SceneSample {
   let id=obj.identity.x;let kind=obj.identity.y;let position=obj.position_size.xyz;let size=obj.position_size.w;
   var query=Query(false,0.0,0.0,local_o,vec3f(0.0,1.0,0.0),vec2f(0.0));
   var gap_lower=0.0;var error=0.0;var status=3u;var pending=Pending(0.0,false);
@@ -64,9 +75,11 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject)->SceneSample {
     query=canonical.query;gap_lower=canonical.gap_lower;error=canonical.error;status=canonical.status;
   }else if(kind==3u){query=plane(local_o,d);gap_lower=query.gap;status=0u;}
   let base_hit=query.hit;
-  if(material_field(obj.params.w)&&kind==5u&&base_hit){query.hit=leaf_covered(query.uv);}
+  if(material_field(obj.params.w)&&kind==5u&&base_hit){
+    if(exact){query.hit=leaf_covered(query.uv);}else{query.hit=field_outline(query.uv,query.uv);}
+  }
   let local_error=error;let local=query.p;let canonical_gap=query.gap;let canonical_lower=gap_lower;
-  if(material_field(obj.params.w)&&!base_hit&&status==0u){
+  if(exact&&material_field(obj.params.w)&&!base_hit&&status==0u){
     query=texh(local_o,d,query,gap_lower,kind==5u);
     if(query.hit){gap_lower=0.0;}
   }

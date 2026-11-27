@@ -119,6 +119,7 @@ pub fn source_for(levels: &[crate::material::Level], orders: usize) -> String {
 
 // Unroll the heightfield's data-defined order count; no per-hit traversal over orders.
 fn field_orders(source: &str, orders: usize) -> String {
+    use std::fmt::Write as _;
     let join = |items: Vec<String>, empty: &str| {
         if items.is_empty() {
             empty.to_owned()
@@ -160,6 +161,18 @@ fn field_orders(source: &str, orders: usize) -> String {
         })
         .collect();
     let repeats: Vec<_> = (0..orders).map(repeat).chain(["1.0".to_owned()]).collect();
+    // Clip a..b against each outline side n·p <= c (Cyrus–Beck), unrolled from the coverage data.
+    let outline = crate::heightfield::LEAF.outline(16).unwrap_or_default();
+    let mut clips = String::new();
+    for (a, b) in outline.iter().zip(outline.iter().cycle().skip(1)) {
+        let n = [b[1] - a[1], a[0] - b[0]];
+        let c = n[0].mul_add(a[0], n[1] * a[1]);
+        let _ = writeln!(
+            clips,
+            "{{let n=vec2f({:.9},{:.9});let num={c:.9}-dot(a,n);let den=dot(e,n);let r=num/select(den,1.0,den==0.0);hi=select(hi,min(hi,r),den>0.0);lo=select(lo,max(lo,r),den<0.0);inside=inside&&(den!=0.0||num>=0.0);}}",
+            n[0], n[1]
+        );
+    }
     source
         .replace(
             "const FIELD_ORDERS=4u;",
@@ -180,6 +193,7 @@ fn field_orders(source: &str, orders: usize) -> String {
         )
         .replace("0.0/*@field-detail-bound*/", &join(detail, "0.0"))
         .replace("0.0/*@field-details*/", &join(details, "0.0"))
+        .replace("/*@field-outline*/", &clips)
         .replace(
             "vec2f(0.0)/*@field-slopes*/",
             &format!("({})/255.0", slopes.join("+")),

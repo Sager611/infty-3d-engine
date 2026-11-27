@@ -406,3 +406,27 @@ fn preset_height_bytes_equal_the_uploaded_rgba_height_channels()
     assert_eq!(STEPS, 64);
     Ok(())
 }
+
+#[test]
+fn coverage_outline_is_a_small_tight_superset_of_every_covered_uv() -> Result<(), Error> {
+    let outline = LEAF.outline(16)?;
+    assert!((3..=16).contains(&outline.len()), "{} sides", outline.len());
+    let inside = |p: [f64; 2]| {
+        (0..outline.len()).all(|k| cross(outline[k], outline[(k + 1) % outline.len()], p) >= 0.0)
+    };
+    let (mut covered, mut enclosed) = (0_u32, 0_u32);
+    for j in 0..512_u32 {
+        for i in 0..512_u32 {
+            let uv = [(f64::from(i) + 0.37) / 512.0, (f64::from(j) + 0.71) / 512.0];
+            let hit = LEAF.uv(uv)?.coverage >= 127.5;
+            assert!(!hit || inside(uv), "covered UV outside the outline: {uv:?}");
+            covered += u32::from(hit);
+            enclosed += u32::from(inside(uv));
+        }
+    }
+    assert!(
+        f64::from(enclosed) < 1.35 * f64::from(covered),
+        "{enclosed} vs {covered}"
+    );
+    Ok(())
+}

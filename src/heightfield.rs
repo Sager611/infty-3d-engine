@@ -107,6 +107,70 @@ fn repeat(order: usize) -> u32 {
         .and_then(|o| 10_u32.checked_pow(o))
         .unwrap_or(u32::MAX)
 }
+fn cross(o: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    (a[0] - o[0]).mul_add(b[1] - o[1], -(a[1] - o[1]) * (b[0] - o[0]))
+}
+/// Andrew's monotone chain: counter-clockwise, no collinear points.
+fn convex_hull(mut points: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+    points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    points.dedup();
+    if points.len() < 3 {
+        return points;
+    }
+    let chain = |order: &mut dyn Iterator<Item = [f64; 2]>| {
+        let mut side: Vec<[f64; 2]> = Vec::new();
+        for p in order {
+            while let [.., a, b] = side[..] {
+                if cross(a, b, p) > 0.0 {
+                    break;
+                }
+                side.pop();
+            }
+            side.push(p);
+        }
+        side.pop();
+        side
+    };
+    let mut hull = chain(&mut points.iter().copied());
+    hull.extend(chain(&mut points.iter().rev().copied()));
+    hull
+}
+/// Drop the side whose extended neighbours meet with the least added area; None when no pair converges.
+fn merge_cheapest(hull: &[[f64; 2]]) -> Option<Vec<[f64; 2]>> {
+    let count = hull.len();
+    let mut best: Option<(f64, usize, [f64; 2])> = None;
+    for side in 0..count {
+        let [before, start, end, after] = [count - 1, 0, 1, 2].map(|k| hull[(side + k) % count]);
+        let incoming = [start[0] - before[0], start[1] - before[1]];
+        let outgoing = [after[0] - end[0], after[1] - end[1]];
+        let turn = incoming[0].mul_add(outgoing[1], -incoming[1] * outgoing[0]);
+        if turn <= 0.0 {
+            continue;
+        }
+        let ahead =
+            (end[0] - start[0]).mul_add(outgoing[1], -(end[1] - start[1]) * outgoing[0]) / turn;
+        let back =
+            (start[0] - end[0]).mul_add(incoming[1], -(start[1] - end[1]) * incoming[0]) / turn;
+        let corner = [
+            ahead.mul_add(incoming[0], start[0]),
+            ahead.mul_add(incoming[1], start[1]),
+        ];
+        let added = cross(start, corner, end).abs();
+        if ahead >= 0.0 && back >= 0.0 && best.is_none_or(|(area, _, _)| added < area) {
+            best = Some((added, side, corner));
+        }
+    }
+    let (_, side, corner) = best?;
+    Some(
+        (0..count)
+            .filter_map(|k| match (k + count - side) % count {
+                0 => Some(corner),
+                1 => None,
+                _ => Some(hull[k]),
+            })
+            .collect(),
+    )
+}
 fn polynomial(c: [f64; 4], x: f64, y: f64) -> f64 {
     c[3].mul_add(x * y, c[1].mul_add(x, c[2].mul_add(y, c[0])))
 }
@@ -174,6 +238,46 @@ impl<'a> Field<'a> {
         bytes.resize(16 + 4 * padded, 0);
         bytes.extend_from_slice(field.data);
         Ok(bytes)
+    }
+    /// Conservative convex outline of the coverage plane in UV, counter-clockwise, with at most `sides` sides.
+    /// Every bilinearly covered UV lies inside, so traversal can reject and stand in without lookups.
+    ///
+    /// # Errors
+    /// Invalid field layout.
+    pub fn outline(self, sides: usize) -> Result<Vec<[f64; 2]>, Error> {
+        let field = Self::new(self.data, self.edge, self.amplitudes, self.anchor)?;
+        let texels = usize::try_from(field.edge * field.edge).map_err(|_| Error::Numeric)?;
+        let coverage = field
+            .data
+            .get(field.orders() * field.stride()?..)
+            .and_then(|plane| plane.get(..texels))
+            .ok_or(Error::InvalidParameter)?;
+        let scale = f64::from(field.edge);
+        // A covered bilinear sample lies within one texel of a covered texel; two leave rounding room.
+        let reach = 2.0 / scale;
+        let mut corners = Vec::new();
+        for (at, _) in (0_u32..).zip(coverage).filter(|&(_, &value)| value >= 128) {
+            let centre = [
+                f64::from(at % field.edge) / scale,
+                f64::from(at / field.edge) / scale,
+            ];
+            for [x, y] in [
+                [-reach, -reach],
+                [reach, -reach],
+                [reach, reach],
+                [-reach, reach],
+            ] {
+                corners.push([centre[0] + x, centre[1] + y]);
+            }
+        }
+        let mut hull = convex_hull(corners);
+        while hull.len() > sides.max(3) {
+            match merge_cheapest(&hull) {
+                Some(merged) => hull = merged,
+                None => break,
+            }
+        }
+        Ok(hull)
     }
     pub const fn orders(self) -> usize {
         self.amplitudes.len()

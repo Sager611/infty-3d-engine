@@ -10,7 +10,7 @@ fn verify_finite_branch(@builtin(global_invocation_id) id:vec3u) {
 fn verify_finite_shadow(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let input=rays[id.x];let object=resolved_object(u32(input.o.w));
-  let sample=scene_canonical(vec3f(input.o.xy,input.o.z),vec3f(0.0,0.0,-1.0),object);
+  let sample=scene_canonical(vec3f(input.o.xy,input.o.z),vec3f(0.0,0.0,-1.0),object,true);
   let shadow=scene_shadow(sample,object,sample.query.n,input.d.xyz,u32(input.d.w));
   results[id.x]=ProbeResult(vec4f(f32(sample.query.hit),shadow_value(shadow),f32(shadow.uncertain),f32(shadow.blocked)),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
@@ -75,7 +75,7 @@ fn verify_texh(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let r=rays[id.x];
   let object=SceneObject(vec4u(7u,u32(r.o.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.d.w),POSE_IDENTITY);
-  let sample=scene_canonical(r.o.xyz,r.d.xyz,object);let q=sample.query;
+  let sample=scene_canonical(r.o.xyz,r.d.xyz,object,true);let q=sample.query;
   results[id.x]=ProbeResult(vec4f(f32(q.hit),q.t,q.gap,f32(sample.status)),
     vec4f(q.p,sample.gap_lower),vec4f(q.n,0.0),vec4f(q.uv,0.0,0.0));
 }

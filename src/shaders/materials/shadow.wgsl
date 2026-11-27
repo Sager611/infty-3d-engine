@@ -47,8 +47,8 @@ fn scene_shadow(source:SceneSample,object:SceneObject,n:vec3f,light:vec3f,count:
       if(!legacy){local=shadow_local_origin(source,object,other,n);}
       let local_d=scene_local_vector(other,direction);
       if(!scene_leaf_relevant(local,local_d,other,distance,0.0)){i++;continue;}
-      var sample=scene_canonical(local,local_d,other);
-      if(material_field(other.params.w)&&sample.query.hit&&!leaf_covered(leaf_uv_unit(sample.query.uv))){sample.query.hit=false;}
+      // Cards block within their precomputed coverage outline: no lookups per occluder.
+      let sample=scene_canonical(local,local_d,other,false);
       if(legacy){
         if(sample.query.hit&&sample.query.t>=2.0*bias&&sample.query.t<distance){return Shadow(true,false);}
       }else{

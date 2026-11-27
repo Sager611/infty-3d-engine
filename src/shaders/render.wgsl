@@ -47,6 +47,13 @@ fn outline_eligible(sample: SceneSample, selected: bool, thickness: f32) -> bool
     sample.base_hit==0u && !sample.query.hit && sample.status<2u && sample.query.gap < thickness;
 }
 
+struct RenderCarrier {sample:SceneSample,object:SceneObject,delta:vec3f};
+fn render_carrier(index:u32,origin:vec3f,direction:vec3f)->RenderCarrier {
+  let object=resolved_object(index);
+  let delta=scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),object);
+  let local_o=scene_local_vector(object,delta/object.position_size.w);
+  return RenderCarrier(scene_canonical(local_o,scene_local_vector(object,direction),object,false),object,delta);
+}
 @compute @workgroup_size(8, 8)
 fn draw(@builtin(global_invocation_id) id: vec3u) {
   let size = textureDimensions(pixels);
@@ -82,6 +89,11 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   var outline_found = false;
   var outline_t=0.0;
   var outline_thickness = 0.0;
+  // Relief candidate and its flat stand-in, tracked by index and distance: no lookups, little state.
+  let relief=f32(frame_params.screen.z<4u);
+  var nearest_index=0u;
+  var behind_t=0.0;var behind_error=0.0;var behind_index=0u;var behind_hit=false;
+  var candidate_t=0.0;var candidate_index=0u;var candidate_found=false;
 
   var i = 0u;
   while (i < count) {
@@ -100,31 +112,31 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
 
       let delta=scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),object);
       let local_o=scene_local_vector(object,delta/object.position_size.w);let local_d=scene_local_vector(object,direction);
-      let limit=select(1e30,nearest_t/max(0.01,1.0-6.0/(1.8*height))+nearest.error,nearest_hit&&height>4.0);
+      // Cull past the runner-up hit: it is the flat stand-in when the one relief pass misses.
+      let limit=select(1e30,behind_t/max(0.01,1.0-6.0/(1.8*height))+behind_error,behind_hit&&height>4.0);
       let padding=select(0.0,6.0*(length(local_o)+2.0)/(1.8*height),selected);
       if(material_view&&!scene_leaf_relevant(local_o,local_d,object,limit,padding)){i++;continue;}
-      let carrier=scene_canonical(local_o,local_d,object);
-      var sample=carrier;
-      if(material_view||material_field(object.params.w)){sample=material_texh_depth(carrier,direction,object,delta,pixel_span,f32(frame_params.screen.z<4u));}
-      pending=pending_min(pending,sample.pending);
-      if (sample.query.hit && (!nearest_hit || sample.query.t < nearest_t || (sample.query.t == nearest_t && sample.id < nearest.id))) {
-        nearest = sample;
-        nearest_object=object;
-        nearest_t = sample.query.t;
-        nearest_size = object.position_size.w;
-        nearest_carrier = carrier;
-        nearest_hit = true;
+      let carrier=scene_canonical(local_o,local_d,object,false);
+      pending=pending_min(pending,carrier.pending);
+      if (carrier.query.hit && (!nearest_hit || carrier.query.t < nearest_t || (carrier.query.t == nearest_t && carrier.id < nearest.id))) {
+        behind_t=nearest_t;behind_error=nearest.error;behind_index=nearest_index;behind_hit=nearest_hit;
+        nearest=carrier;nearest_object=object;nearest_t=carrier.query.t;nearest_index=i;nearest_hit=true;
+      } else if (carrier.query.hit && (!behind_hit || carrier.query.t < behind_t)) {
+        behind_t=carrier.query.t;behind_error=carrier.error;behind_index=i;behind_hit=true;
+      }
+      if((material_view||material_field(object.params.w))&&(!candidate_found||carrier.query.t<candidate_t)&&scene_relief_candidate(carrier,local_o,local_d,object,relief)){
+        candidate_t=carrier.query.t;candidate_index=i;candidate_found=true;
       }
 
-      if (display_gap && object.identity.y != 3u && !sample.query.hit &&
-          sample.status<2u && (!halo_found||sample.query.gap<halo_gap)) {
-        halo_gap = sample.query.gap;halo_found=true;
-        halo_uv = sample.query.uv;
+      if (display_gap && object.identity.y != 3u && !carrier.query.hit &&
+          carrier.status<2u && (!halo_found||carrier.query.gap<halo_gap)) {
+        halo_gap = carrier.query.gap;halo_found=true;
+        halo_uv = carrier.query.uv;
       }
-      let witness_t = sample.query.t;
+      let witness_t = carrier.query.t;
       let thickness = 2.0 * witness_t * 3.0 / (1.8 * height);
-      if (outline_eligible(sample, selected, thickness) && (!outline_found||witness_t<outline_t)) {
-        outline_uv = sample.query.uv;
+      if (outline_eligible(carrier, selected, thickness) && (!outline_found||witness_t<outline_t)) {
+        outline_uv = carrier.query.uv;
         outline_t = witness_t;
         outline_thickness = thickness;
         outline_found = true;
@@ -132,6 +144,25 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     }
     i++;
   }
+
+  // One relief pass per pixel: only the nearest candidate in front of the nearest flat hit. If it misses, the flat
+  // hit behind it stands in (the runner-up when the candidate is that flat hit itself). Others re-query by index.
+  nearest_carrier=nearest;
+  if(candidate_found&&(!nearest_hit||candidate_t<=nearest_t)){
+    let own=nearest_hit&&candidate_index==nearest_index;
+    let back_t=select(nearest_t,behind_t,own);let back_hit=select(nearest_hit,behind_hit,own);
+    var source=RenderCarrier(nearest,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object));
+    if(!own){source=render_carrier(candidate_index,origin,direction);}
+    let relief_sample=material_texh_depth(source.sample,direction,source.object,source.delta,pixel_span,relief);
+    if(relief_sample.query.hit&&(!back_hit||relief_sample.query.t<=back_t)){
+      nearest=relief_sample;nearest_carrier=source.sample;nearest_object=source.object;nearest_hit=true;
+    }else if(own){
+      nearest_hit=behind_hit;
+      if(behind_hit){let flat=render_carrier(behind_index,origin,direction);nearest=flat.sample;nearest_carrier=flat.sample;nearest_object=flat.object;}
+    }
+    nearest_t=nearest.query.t;
+  }
+  if(nearest_hit){nearest_size=nearest_object.position_size.w;}
 
   var color = vec3f(0.96862745, 0.9647059, 0.9490196);
   let unknown=pending_before(pending,nearest_hit,nearest_t,nearest.error);
