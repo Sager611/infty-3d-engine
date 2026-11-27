@@ -15,10 +15,11 @@ bun run dev   # http://127.0.0.1:4173
 
 ## Credits
 
-Texture and relief sources, licenses and changes: [materials](src/material/REFERENCES.md), [leaf](src/heightfield/REFERENCES.md).
+Code: [MIT](LICENSE). Textures and relief keep their own licenses (CC0, CC BY 4.0); sources and changes: [materials](src/material/REFERENCES.md), [leaf](src/heightfield/REFERENCES.md).
 
 ## Changelog
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
 | 2026-11-27 | Assistant | Created README with demo link and credits | Public repo and demo |
+| 2026-11-27 | User | Licensed code under MIT | Public reuse |
