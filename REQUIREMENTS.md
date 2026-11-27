@@ -13,11 +13,13 @@
 - Texh rendered hits and gaps: one shared, geometry-independent direct calculation. NO LOOPS or recursion; always prefer fast approximation over accurate displacement. No root search, traversal, ray marching or fitted geometry. At most 4 texture lookups per pixel; precompute freely. Read heights where the ray meets the median-height plane and at its deepest plane; each material's largest-step level adds precomputed axis runs to its Otsu contour, placing walls directly instead of repeating the texture; filter shifted RGB/normals by the direct warp's pixel span; bound byte-height slope noise without weakening relief; orient bumps by the carrier side. Over curved carriers heights follow the ray's closest-approach parabola from its signed gap, so silhouettes join seamlessly: relief out of a grazing ray's reach misses, relief reaching a gap hits. Bound grazing offsets. No exact first-crossing or displaced-silhouette guarantee. A Texh checkbox beside Mode disables/re-enables displacement: carrier depth, same colour, relief normals, cutouts and outlines.
 - Preserve carrier queries/picking, independent point queries and the existing miss rule: one bilinear height sample at the witness accepts signed height reaching the gap. No new gap solver.
 - Scene → Leaf · relief and Red brick · relief: share texh, preserve matching source assets, cutouts, all four height bands and carrier cast-shadow behavior. Brick fine height gains are8× stronger; mortar and Leaf depth stay unchanged. Admit finer Leaf height/normal orders only when their bounded height exceeds¼pixel, fading fully over2× approach; preserve full close-up gains. Bound-cull irrelevant Leaf render/shadow work without losing selection outlines or changing raw queries. Break up visible repeats in the two finest Leaf bands without flattening them; manually approach/orbit both textures from normal through very close distances and several angles. Both localhost previews target60 warm FPS at1265×791; report measured limits.
+- A loading screen names the current step (engine, shaders) until the first frame shows.
 
 ## Changelog
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-27 | User | Loading screen until the first frame | Startup showed a blank canvas |
 | 2026-11-27 | User | Reverse wheel speed direction | Wheel up should speed up |
 | 2026-11-27 | User | Seamless relief silhouettes on near-miss rays | Relief never reached past the carrier silhouette |
 | 2026-11-27 | User | Place relief walls directly, at most 4 lookups | Side views showed the texture twice at mortar joints |

@@ -48,4 +48,14 @@ function createFrames(driver: FrameDriver): Frames {
 	}
 	return Object.freeze({ invalidate, visibility, dispose });
 }
-export { createFrames, type FrameDriver, type Frames };
+// Resolves on the frame after the next: a frame starts only once the previous one is shown.
+function presented(request: FrameDriver["request"]): Promise<void> {
+	return new Promise((resolve) => {
+		request(() => {
+			request(() => {
+				resolve();
+			});
+		});
+	});
+}
+export { createFrames, type FrameDriver, type Frames, presented };

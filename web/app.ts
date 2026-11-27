@@ -27,7 +27,7 @@ import {
 	type Editor,
 	undoEdit,
 } from "./editing.ts";
-import { createFrames, type Frames } from "./frames.ts";
+import { createFrames, type Frames, presented } from "./frames.ts";
 import { createGizmo, type GizmoWidget } from "./gizmo-view.ts";
 import {
 	bindInput,
@@ -91,6 +91,7 @@ const focusNode: HTMLElement | null = document.getElementById("focus");
 const metricsNode: HTMLElement | null = document.getElementById("metrics");
 const inspectorNode: HTMLElement | null = document.getElementById("inspector");
 const statusNode: HTMLElement | null = document.getElementById("status");
+const loadingNode: HTMLElement | null = document.getElementById("loading");
 if (
 	!(
 		canvas instanceof HTMLCanvasElement &&
@@ -102,11 +103,13 @@ if (
 		focusNode instanceof HTMLButtonElement &&
 		metricsNode instanceof HTMLElement &&
 		inspectorNode instanceof HTMLElement &&
-		statusNode instanceof HTMLElement
+		statusNode instanceof HTMLElement &&
+		loadingNode instanceof HTMLElement
 	)
 ) {
 	throw new Error("Renderer controls are missing.");
 }
+const loading: HTMLElement = loadingNode;
 const controls: ControlsNodes = controlsNodes(document);
 const metrics: HTMLElement = metricsNode;
 const inspector: HTMLElement = inspectorNode;
@@ -543,8 +546,10 @@ const renderFrame = (now: number): void => {
 	}
 };
 
+const request = (tick: FrameRequestCallback): number =>
+	window.requestAnimationFrame(tick);
 const frames: Frames = createFrames({
-	request: (tick: FrameRequestCallback) => window.requestAnimationFrame(tick),
+	request,
 	cancel: (id: number) => window.cancelAnimationFrame(id),
 	visible: () => !(disposed || document.hidden),
 	moving: () => hasMovement(movement),
@@ -668,6 +673,9 @@ const start = async (): Promise<void> => {
 			return;
 		}
 		wasmMemory = wasm.memory;
+		// Show the step before compiling, which can stall the page's frames.
+		loading.textContent = "Compiling shaders";
+		await presented(request);
 		await acquireResource(() => Renderer.create(canvas), acceptRenderer);
 		if (disposed) {
 			return;
@@ -675,9 +683,11 @@ const start = async (): Promise<void> => {
 		resizeCanvas();
 		meter = startMetrics(metrics, wasmMemory);
 		invalidate();
+		await presented(request);
 	} catch (error) {
 		setStatus(`WebGPU initialization failed: ${errorMessage(error)}`);
 	}
+	loading.setAttribute("aria-busy", "false");
 };
 
 const uiBlocked = (): boolean =>

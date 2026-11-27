@@ -1,6 +1,11 @@
 // biome-ignore lint/nursery/noUnresolvedImports: Bun provides this virtual module.
 import { expect, test } from "bun:test";
-import { createFrames, type FrameDriver, type Frames } from "./frames.ts";
+import {
+	createFrames,
+	type FrameDriver,
+	type Frames,
+	presented,
+} from "./frames.ts";
 
 interface Fixture {
 	frames: Frames;
@@ -102,4 +107,23 @@ test("a draw failure propagates without starting a retry loop", () => {
 	f.frames.invalidate();
 	expect(() => fire(f)).toThrow("draw failed");
 	expect(f.queue.size).toBe(0);
+});
+
+test("presented waits for the frame after the next one", async () => {
+	const queue: ((now: number) => void)[] = [];
+	let shown = false;
+	const done = (async (): Promise<void> => {
+		await presented((tick) => queue.push(tick));
+		shown = true;
+	})();
+	for (const tick of queue.splice(0)) {
+		tick(0);
+	}
+	await Promise.resolve();
+	expect(shown).toBe(false);
+	for (const tick of queue.splice(0)) {
+		tick(0);
+	}
+	await done;
+	expect(shown).toBe(true);
 });

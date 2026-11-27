@@ -405,6 +405,45 @@
 		[hidden] {
 			display: none;
 		}
+		#loading {
+			position: fixed;
+			inset: 0;
+			z-index: 5;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 14px;
+			background: var(--background);
+			color: var(--muted-foreground);
+			font-size: 12.5px;
+			transition:
+				opacity 0.3s,
+				visibility 0.3s;
+		}
+		#loading::before {
+			content: "";
+			width: 28px;
+			height: 28px;
+			border: 2px solid var(--border);
+			border-top-color: var(--primary);
+			border-radius: 50%;
+			animation: spin 0.8s linear infinite;
+		}
+		#loading[aria-busy="false"] {
+			opacity: 0;
+			visibility: hidden;
+		}
+		@keyframes spin {
+			to {
+				transform: rotate(1turn);
+			}
+		}
+		@media (prefers-reduced-motion: reduce) {
+			#loading::before {
+				animation: none;
+			}
+		}
 		button:focus-visible,
 		select:focus-visible,
 		input:focus-visible,
@@ -530,6 +569,7 @@
 			aria-label="Interactive 3D ray intersection view"
 			title="WASD moves. Drag or arrows look. Wheel or plus/minus changes speed. F frames; R resets."
 		></canvas>
+		<div id="loading" role="status" aria-busy="true">Loading engine</div>
 
 		<div class="glass brand" aria-label="Infty 3D">∞ infty</div>
 		<div class="glass velocity" role="group" aria-label="Travel speed control">

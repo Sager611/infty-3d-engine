@@ -116,3 +116,25 @@ test("scene controls stay inside a collapsed, accessible disclosure", async () =
 	await parser.transform(new Response(source)).text();
 	expect(found).toEqual({ panels: 1, toggles: 1, controls: 1 });
 });
+
+test("a loading screen names its step until the first frame", async () => {
+	const source = await Bun.file(
+		new URL("../index.html", import.meta.url),
+	).text();
+	const screens: unknown[] = [];
+	const parser = new HTMLRewriter().on("body > #loading", {
+		element(element: HTMLRewriterTypes.Element): void {
+			screens.push(
+				element.getAttribute("role"),
+				element.getAttribute("aria-busy"),
+			);
+		},
+		text(text: HTMLRewriterTypes.Text): void {
+			if (text.text.trim() !== "") {
+				screens.push(text.text.trim());
+			}
+		},
+	});
+	await parser.transform(new Response(source)).text();
+	expect(screens).toEqual(["status", "true", "Loading engine"]);
+});
