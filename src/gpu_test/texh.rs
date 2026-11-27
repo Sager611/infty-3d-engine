@@ -707,9 +707,12 @@ fn limb_rays(view: [f32; 3], inside: f32, step: f32, count: u16, material: f32) 
 
 /// Per ray: carrier hit, then the direct crossing t with its distances from the ray point there (world, local) and the
 /// reference-march t, world metres (None: miss).
-type Crossing = (bool, Option<(f64, f64, f64)>, Option<f64>);
+type Crossing = (bool, Option<(f64, f64, f64, f64, f64)>, Option<f64>);
 fn crossings(rays: &[[f32; 8]]) -> Result<Vec<Crossing>, Box<dyn std::error::Error>> {
     let q = run("verify_texh_march", rays, rays.len() * 16)?;
+    if q.iter().any(|v| !v.is_finite()) {
+        return Err("reference march output is not finite".into());
+    }
     Ok(q.chunks_exact(16)
         .zip(rays)
         .map(|(row, ray)| {
@@ -724,11 +727,14 @@ fn crossings(rays: &[[f32; 8]]) -> Result<Vec<Crossing>, Box<dyn std::error::Err
                     })
                     .fold(0.0, f64::hypot)
             };
+            // Direct hit: t, world and local distance off its ray, shading footprint, normal·carrier normal.
             let direct = (row[3] > 0.5).then(|| {
                 (
                     f64::from(row[4]),
                     off(row[4], &row[8..11]),
                     off(row[4], &row[12..15]),
+                    f64::from(row[6]),
+                    f64::from(row[7]),
                 )
             });
             (
@@ -764,7 +770,7 @@ fn tally(rays: &[[f32; 8]]) -> Result<Tally, Box<dyn std::error::Error>> {
         tally.holes += usize::from(direct.is_none() && marched.is_some());
         tally.gap_hits += usize::from(direct.is_some() && !base);
         tally.chord_misses += usize::from(direct.is_none() && base);
-        if let Some((t, world, local)) = direct {
+        if let Some((t, world, local, ..)) = direct {
             tally.off_ray = tally.off_ray.max(world).max(local);
             if let Some(m) = marched {
                 tally.error.push((t - m).abs());
@@ -838,8 +844,9 @@ fn close_brick_limb_rays_meet_relief_like_the_reference_march() -> TestResult {
 #[test]
 fn relief_depth_is_continuous_where_carrier_hits_turn_into_gaps() -> TestResult {
     // 1/16-pixel steps across the limb views' carrier silhouette, steel rising above it and brick carved below: no
-    // march hit is missed, every crossing lies on its ray, and t steps from the last carrier hit to the first gap
-    // like the march's, within its 1/480-chord step.
+    // march hit is missed, every crossing lies on its ray with a bounded shading footprint, and t, footprint and
+    // normal step from the last carrier hit to the first gap like neighbours: t like the march's, within its
+    // 1/480-chord step.
     let mut seams = 0;
     for (view, material) in [
         ([0.0, 0.0, 0.06], 1.0),
@@ -856,18 +863,25 @@ fn relief_depth_is_continuous_where_carrier_hits_turn_into_gaps() -> TestResult 
                     "{view:?} {material}: hole"
                 );
                 assert!(
-                    direct.is_none_or(|(_, world, local)| world.max(local) < 1e-6),
-                    "{view:?} {material}: crossing off its ray: {direct:?}"
+                    direct.is_none_or(|(_, world, local, footprint, _)| world.max(local) < 1e-6
+                        && footprint > 0.0
+                        && footprint < 0.05),
+                    "{view:?} {material}: crossing off its ray or unbounded footprint: {direct:?}"
                 );
             }
             for pair in row.windows(2) {
-                if let [(a, Some((ta, ..)), Some(ma)), (b, Some((tb, ..)), Some(mb))] = pair
+                if let [
+                    (a, Some((ta, _, _, fa, na)), Some(ma)),
+                    (b, Some((tb, _, _, fb, nb)), Some(mb)),
+                ] = pair
                     && a != b
                 {
                     seams += 1;
                     assert!(
-                        ((tb - ta) - (mb - ma)).abs() < 5e-5,
-                        "{view:?} {material}: seam steps {} vs {}",
+                        ((tb - ta) - (mb - ma)).abs() < 5e-5
+                            && (fb / fa).ln().abs() < 0.5
+                            && (nb - na).abs() < 0.05,
+                        "{view:?} {material}: seam steps t {} vs {}, footprint {fa} → {fb}, normal {na} → {nb}",
                         tb - ta,
                         mb - ma
                     );
@@ -884,7 +898,8 @@ fn relief_depth_is_continuous_where_carrier_hits_turn_into_gaps() -> TestResult 
 
 #[test]
 fn texh_ray_map_and_landing_are_continuous() -> TestResult {
-    // Synthetic rays o=(g,c,k,depth), d=(plateau,margin,z): offset to z, landing, met, lowest.
+    // Synthetic rays o=(g,c,k,depth), d=(plateau,margin,z,±wall: rising when positive): offset to z, landing, met,
+    // lowest.
     let mut rays = Vec::new();
     for c in [-0.2_f32, -0.04, -0.01, 0.0] {
         for dz in [-0.01_f32, 0.001] {
@@ -892,6 +907,10 @@ fn texh_ray_map_and_landing_are_continuous() -> TestResult {
                 rays.push([0.0, c, k, 0.0, 0.0, 0.0, dz, 0.0]);
             }
         }
+    }
+    // Gaps at their closest approach: slopes ±1e-6 keep the entry root.
+    for c in [1e-6_f32, -1e-6] {
+        rays.push([0.0, c, 1.0, 0.0, 0.0, 0.0, 0.001, 0.0]);
     }
     // Through depth = lowest (-2e-4) with bottom's plateau within the margin, then beyond it.
     for plateau in [-2.5e-4_f32, -3.5e-4] {
@@ -927,7 +946,14 @@ fn texh_ray_map_and_landing_are_continuous() -> TestResult {
         (tangent + 0.002_f32.sqrt()).abs() < 1e-6,
         "tangent gap entry {tangent}"
     );
-    for (row, ray) in rows[24..].iter().zip(&rays[24..]) {
+    for row in &rows[24..26] {
+        assert!(
+            (row[0] + 0.002_f32.sqrt()).abs() < 1e-5,
+            "near-zero slope flips the entry root: {}",
+            row[0]
+        );
+    }
+    for (row, ray) in rows[26..].iter().zip(&rays[26..]) {
         let (depth, plateau, lowest, vertex) = (ray[3], ray[4], row[3], 0.02_f32);
         let reach = (2.0 * (depth - lowest)).max(0.0).sqrt();
         assert!(
@@ -936,10 +962,42 @@ fn texh_ray_map_and_landing_are_continuous() -> TestResult {
             row[1]
         );
         assert!(
-            (row[2] > 0.5) == (depth > lowest || plateau + 1e-4 > lowest),
+            (row[2] > 0.5) == (depth.max(plateau) + 1e-4 > lowest),
             "depth {depth}, plateau {plateau}: met {}",
             row[2]
         );
+    }
+    // Sinking the wall depth through the lowest point, a rising far wall (offset 0.05) takes over the landing within
+    // two margins without a jump; with none, relief stops being met one margin under the lowest point.
+    let mut sweep = Vec::new();
+    for wall in [0.05_f32, -0.05] {
+        for i in 0..401_u16 {
+            let depth = f32::from(i).mul_add(-1e-6, -1.8e-4);
+            sweep.push([0.0, -0.02, 1.0, depth, -1.0, 1e-4, 0.0, wall]);
+        }
+    }
+    let q = run("verify_texh_land", &sweep, sweep.len() * 16)?;
+    for (rows, rise) in q.chunks_exact(16 * 401).zip([true, false]) {
+        let rows: Vec<&[f32]> = rows.chunks_exact(16).collect();
+        for pair in rows.windows(2) {
+            assert!(
+                (0.0..2e-3).contains(&(pair[1][1] - pair[0][1])),
+                "rise {rise}: landing steps {} → {}",
+                pair[0][1],
+                pair[1][1]
+            );
+        }
+        for (row, ray) in rows.iter().zip(&sweep) {
+            let sink = (row[3] - ray[3]) / 1e-4;
+            assert!(
+                (row[2] > 0.5) == (rise || sink < 1.0),
+                "rise {rise}, sink {sink}: met {}",
+                row[2]
+            );
+            if sink >= 2.0 && rise {
+                assert!((row[1] - 0.05).abs() < 1e-6, "far wall landing {}", row[1]);
+            }
+        }
     }
     Ok(())
 }

@@ -42,7 +42,7 @@ fn verify_texh_filter(@builtin(global_invocation_id) id:vec3u) {
   let c=input.o.z;let d=vec3f(sqrt(max(0.0,1.0-c*c)),0.0,-c);
   var base:SceneSample;base.query.t=input.o.x;base.query.n=vec3f(0.0,0.0,1.0);
   let depth=max(0.0,input.o.x-input.o.y*c/max(0.0025,c*c));
-  let span=texh_filter_footprint(base,depth,d,vec3f(input.o.w,input.d.y,0.0),input.d.x);
+  let span=texh_filter_footprint(base,depth,d,vec3f(input.o.w,input.d.y,0.0),input.d.x,dot(base.query.n,d));
   results[id.x]=ProbeResult(vec4f(span,depth,0.0,0.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 
@@ -190,14 +190,18 @@ fn verify_texh_march(@builtin(global_invocation_id) id:vec3u) {
   let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
   let o=r.o.xyz/size;let b=dot(o,d);let outer=b*b-dot(o,o)+(1.0+shell.highest)*(1.0+shell.highest);
   let inner=b*b-dot(o,o)+(1.0+shell.deepest)*(1.0+shell.deepest);
-  let t0=max(-b-sqrt(max(outer,0.0)),0.0);let t1=select(-b+sqrt(max(outer,0.0)),-b-sqrt(inner),inner>=0.0&&-b-sqrt(inner)>t0);
+  let t0=max(-b-sqrt(max(outer,0.0)),0.0);let deep=-b-sqrt(max(inner,0.0));
+  let t1=select(-b+sqrt(max(outer,0.0)),deep,inner>=0.0&&deep>t0);
   var pt=t0;var pg=1.0;var md=shell.deepest;var mt=-1.0;
   for(var i=0u;i<=480u&&outer>=0.0&&t1>t0;i++){
     let t=mix(t0,t1,f32(i)/480.0);let p=o+t*d;
     let foot=geometry_surface(p,base,object);let g=length(p)-1.0-texh_height(foot,foot,context,false).height;
     if(g<=0.0){let at=mix(pt,t,select(pg/(pg-g),0.0,i==0u));md=length(o+at*d)-1.0;mt=at*size;break;}pt=t;pg=g;
   }
-  results[id.x]=ProbeResult(vec4f(f32(base.base_hit),depth,md,f32(sample.query.hit)),vec4f(sample.query.t,mt,0.0,0.0),
+  // Shading footprint and normal at the landing: continuous across the silhouette.
+  let footprint=texh_shading_context(sample,base,d,object,r.o.xyz,span).footprint;
+  let normal=texh_shade_normal(sample,base,d,object,r.o.xyz,span);
+  results[id.x]=ProbeResult(vec4f(f32(base.base_hit),depth,md,f32(sample.query.hit)),vec4f(sample.query.t,mt,footprint,dot(normal,base.query.n)),
     vec4f(sample.query.p,0.0),vec4f(sample.local*size,0.0));
 }
 @compute @workgroup_size(1)
@@ -205,7 +209,7 @@ fn verify_texh_march(@builtin(global_invocation_id) id:vec3u) {
 fn verify_texh_land(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let r=rays[id.x];let ray=TexhRay(vec3f(0.0),vec3f(1.0,0.0,0.0),r.o.x,r.o.y,r.o.z);
-  let land=texh_land(ray,r.o.w,r.d.x,r.d.y);
+  let land=texh_land(ray,r.o.w,r.d.x,abs(r.d.w),r.d.w>0.0,r.d.y);
   results[id.x]=ProbeResult(vec4f(texh_ray_at(ray,r.d.z),land,texh_lowest(ray)),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)

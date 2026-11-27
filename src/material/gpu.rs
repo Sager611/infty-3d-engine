@@ -102,8 +102,8 @@ impl Tiles {
         for (layer, level) in (0..layers).zip(levels) {
             let pixels = texture(*level)?;
             let (threshold, contrast, low, high) = split(&pixels);
-            let cells = level.atlas.map_or([1, 1], |a| a.cells.map(usize::from));
-            let (to_top, to_groove) = runs(&pixels, threshold, low, high, cells);
+            let (to_top, to_groove) =
+                runs(&pixels, threshold, low, high, level.atlas.map(|a| a.cells));
             upload(queue, &texture_array, layer + layers, to_top)?;
             upload(queue, &texture_array, layer + 2 * layers, to_groove)?;
             stats.push((
@@ -321,7 +321,8 @@ fn bevel(pixels: &[u8], threshold: u32, low: f64, high: f64) -> u32 {
 // Quarter texels (up to 63.75) along +u, -u, +v, -v (RGBA) from a groove texel to the foot (20 % of the class gap)
 // of the next rising wall, and from a top texel to the crest (80 %) of the next falling one; zero on that ramp itself.
 // Interpolated crossings, mirror-extended like the sampler at tile and atlas-cell edges (neighbouring cells are
-// unrelated faces), split by Otsu class so filtering never mixes classes.
+// unrelated faces), past atlas rows into a typical face half a cell over (the bond), split by Otsu class so
+// filtering never mixes classes.
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -332,8 +333,9 @@ fn runs(
     threshold: u32,
     low: f64,
     high: f64,
-    cells: [usize; 2],
+    atlas: Option<[u16; 2]>,
 ) -> (Vec<u8>, Vec<u8>) {
+    let cells = atlas.map_or([1, 1], |a| a.map(usize::from));
     let edge = EDGE as usize;
     let middle = f64::from(threshold) - 0.5;
     let (foot, crest) = (
@@ -341,6 +343,26 @@ fn runs(
         0.2_f64.mul_add(low - high, high),
     );
     let (mut to_top, mut to_groove) = (vec![0_u8; pixels.len()], vec![0_u8; pixels.len()]);
+    // A typical face: alpha averaged over atlas faces and their flips.
+    let (width, rows) = (edge / cells[0], edge / cells[1]);
+    let typical = atlas.map(|faces| {
+        let mut face = vec![0.0_f64; width * rows];
+        for (cell, x, y) in (0..cells[0] * cells[1] * width * rows)
+            .map(|k| (k / (width * rows), k / rows % width, k % rows))
+        {
+            let at = (cell / cells[0] * edge / cells[1] + y) * edge + cell % cells[0] * width + x;
+            for (x, y) in [
+                (x, y),
+                (width - 1 - x, y),
+                (x, rows - 1 - y),
+                (width - 1 - x, rows - 1 - y),
+            ] {
+                face[x * rows + y] += f64::from(pixels[4 * at + 3]);
+            }
+        }
+        let share = 0.25 / f64::from(faces[0]) / f64::from(faces[1]);
+        face.iter().map(|v| v * share).collect::<Vec<_>>()
+    });
     for line in 0..edge {
         for (channel, start, stride, count) in
             [(0, line * edge, 1, cells[0]), (2, line, edge, cells[1])]
@@ -353,7 +375,13 @@ fn runs(
                         let i = if i < size { i } else { 2 * size - 1 - i };
                         start + stride * (cell + if reverse { size - 1 - i } else { i })
                     };
-                    let alpha = |i: usize| f64::from(pixels[4 * texel(i) + 3]);
+                    let alpha = |i: usize| match &typical {
+                        Some(face) if channel == 2 && i >= size => {
+                            face[(line % width + width / 2) % width * rows
+                                + (i - size).min(rows - 1)]
+                        }
+                        _ => f64::from(pixels[4 * texel(i) + 3]),
+                    };
                     // (distance, on that ramp): toward the next rising wall's foot and the next falling wall's crest.
                     let (mut rise, mut fall) = ((64.0_f64, false), (64.0_f64, false));
                     for i in (0..2 * size).rev() {

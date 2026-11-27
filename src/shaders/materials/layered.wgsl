@@ -110,12 +110,11 @@ fn material_runs(uv:vec2f,origin:vec2f,level:MaterialLevel,lod:f32,top:bool)->ve
   return (material_swap(material_sample(a,layer,lod),a>=vec2f(1.0))*g.w.x+material_swap(material_sample(b,layer,lod),b>=vec2f(1.0))*g.w.y
     +material_swap(material_sample(c,layer,lod),c>=vec2f(1.0))*g.w.z)/(g.w.x+g.w.y+g.w.z);
 }
-// World distance along t (texels per world unit) to the nearest axis run's contour: exact for axis-aligned walls.
-// Cross-axis runs shorter than a ramp are edge wiggle the ray soon leaves, not walls ahead.
-fn material_reach(runs:vec4f,t:vec2f,ramp:f32)->f32 {
-  var d=max(vec2f(select(runs.y,runs.x,t.x>=0.0),select(runs.w,runs.z,t.y>=0.0)),vec2f(1e-3));
-  d=select(d,vec2f(1e30),vec2<bool>(d.x<ramp&&abs(t.x)<abs(t.y),d.y<ramp&&abs(t.y)<abs(t.x)));
-  return 1.0/max(max(abs(t.x)/d.x,abs(t.y)/d.y),1e-30);
+// World distance along t (texels per world unit) to the nearest axis run's contour, exact for axis-aligned walls, and
+// how much longer that wall's ramp runs along t than across it.
+fn material_reach(runs:vec4f,t:vec2f)->vec2f {
+  let d=max(vec2f(select(runs.y,runs.x,t.x>=0.0),select(runs.w,runs.z,t.y>=0.0)),vec2f(1e-3));let rate=abs(t)/d;
+  return vec2f(1.0/max(max(rate.x,rate.y),1e-30),length(t)/max(select(abs(t.y),abs(t.x),rate.x>=rate.y),1e-30));
 }
 // Zero keeps raw height differentials; one limits byte noise in shading normals.
 fn material_tile(uv: vec2f, origin: vec2f, level: MaterialLevel, lod: f32, normal_filter:f32) -> MaterialTile {
