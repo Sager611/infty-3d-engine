@@ -94,7 +94,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   // Relief candidate and its flat stand-in, tracked by index and distance: no lookups, little state.
   let relief=f32(frame_params.screen.z<4u);
   var nearest_index=0u;
-  var behind=empty_sample();var behind_object=nearest_object;var behind_hit=false;
+  var behind_t=0.0;var behind_error=0.0;var behind_index=0u;var behind_id=0u;var behind_hit=false;
   var candidate_t=0.0;var candidate_index=0u;var candidate_id=0u;var candidate_found=false;
 
   var i = 0u;
@@ -115,16 +115,16 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
       let delta=scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),object);
       let local_o=scene_local_vector(object,delta/object.position_size.w);let local_d=scene_local_vector(object,direction);
       // Cull past the runner-up hit: it is the flat stand-in when the one relief pass misses.
-      let limit=select(1e30,behind.query.t/max(0.01,1.0-6.0/(1.8*height))+behind.error,behind_hit&&height>4.0);
+      let limit=select(1e30,behind_t/max(0.01,1.0-6.0/(1.8*height))+behind_error,behind_hit&&height>4.0);
       let padding=select(0.0,6.0*(length(local_o)+2.0)/(1.8*height),selected);
       if(material_view&&!scene_leaf_relevant(local_o,local_d,object,limit,padding)){i++;continue;}
       let carrier=scene_canonical(local_o,local_d,object,false);
       pending=pending_min(pending,carrier.pending);
       if (carrier.query.hit && (!nearest_hit || render_before(carrier.query.t,carrier.id,nearest_t,nearest.id))) {
-        behind=nearest;behind_object=nearest_object;behind_hit=nearest_hit;
+        behind_t=nearest_t;behind_error=nearest.error;behind_index=nearest_index;behind_id=nearest.id;behind_hit=nearest_hit;
         nearest=carrier;nearest_object=object;nearest_t=carrier.query.t;nearest_index=i;nearest_hit=true;
-      } else if (carrier.query.hit && (!behind_hit || render_before(carrier.query.t,carrier.id,behind.query.t,behind.id))) {
-        behind=carrier;behind_object=object;behind_hit=true;
+      } else if (carrier.query.hit && (!behind_hit || render_before(carrier.query.t,carrier.id,behind_t,behind_id))) {
+        behind_t=carrier.query.t;behind_error=carrier.error;behind_index=i;behind_id=carrier.id;behind_hit=true;
       }
       if((material_view||material_field(object.params.w))&&(!candidate_found||render_before(carrier.query.t,carrier.id,candidate_t,candidate_id))&&scene_relief_candidate(carrier,local_o,local_d,object,relief)){
         candidate_t=carrier.query.t;candidate_index=i;candidate_id=carrier.id;candidate_found=true;
@@ -148,18 +148,20 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   }
 
   // One relief pass per pixel: only the nearest candidate in front of the nearest flat hit. If it misses, the flat
-  // hit behind it stands in (the runner-up when the candidate is that flat hit itself). Only a candidate in front
-  // of the nearest hit is re-queried: one carrier query site, since each inlines every geometry kind.
+  // hit behind it stands in (the runner-up when the candidate is that flat hit itself). Others re-query by index.
   nearest_carrier=nearest;
   if(candidate_found&&(!nearest_hit||!render_before(nearest_t,nearest.id,candidate_t,candidate_id))){
     let own=nearest_hit&&candidate_index==nearest_index;
-    let back_t=select(nearest_t,behind.query.t,own);let back_id=select(nearest.id,behind.id,own);let back_hit=select(nearest_hit,behind_hit,own);
+    let back_t=select(nearest_t,behind_t,own);let back_id=select(nearest.id,behind_id,own);let back_hit=select(nearest_hit,behind_hit,own);
     var source=RenderCarrier(nearest,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object));
     if(!own){source=render_carrier(candidate_index,origin,direction);}
     let relief_sample=material_texh_depth(source.sample,direction,source.object,source.delta,pixel_span,relief);
     if(relief_sample.query.hit&&(!back_hit||!render_before(back_t,back_id,relief_sample.query.t,relief_sample.id))){
       nearest=relief_sample;nearest_carrier=source.sample;nearest_object=source.object;nearest_hit=true;
-    }else if(own){nearest=behind;nearest_carrier=behind;nearest_object=behind_object;nearest_hit=behind_hit;}
+    }else if(own){
+      nearest_hit=behind_hit;
+      if(behind_hit){let flat=render_carrier(behind_index,origin,direction);nearest=flat.sample;nearest_carrier=flat.sample;nearest_object=flat.object;}
+    }
     nearest_t=nearest.query.t;
   }
   if(nearest_hit){nearest_size=nearest_object.position_size.w;}

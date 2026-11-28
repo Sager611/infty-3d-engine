@@ -236,6 +236,8 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   // contour distance ahead of q, its height and contour distance behind the deepest point, and both where the ray
   // lands. Others stay at q.
   let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
+  // A gap passing above the highest visible relief cannot meet it: no lookups (the candidate rule's rise is looser).
+  if(gap&&ray.g>=relief*shell.highest){return base;}
   context.along=material_unit(ray.ld-carrier.n*dot(ray.ld,carrier.n),vec3f(0.0));
   // A chord above the deepest plane descends only to its lowest point: relief below it is never met.
   let v=select(0.0,texh_vertex(ray),ray.k>0.0);
