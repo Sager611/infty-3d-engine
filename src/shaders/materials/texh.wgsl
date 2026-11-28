@@ -270,12 +270,14 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   if(s.structural&&land.y>0.5&&land.x>=front){
     let p=texh_probe(s.index,geometry_surface(fma(vec3f(land.x),ray.ld,ray.anchor),base,object),context);
     let m=ray.c+ray.k*land.x;let hs=sqrt(max(1.0-m*m,1e-6));let fine=s.height-s.near;let centre=select(p.ahead,-p.behind,p.high);
-    let x=texh_meet(texh_z(ray,land.x),m/hs,centre-p.half,centre+p.half,relief*(fine+s.groove),relief*(fine+select(shell.height,s.far,s.far_high)));
+    let x=texh_meet(texh_z(ray,land.x),m/hs,centre-p.half,centre+p.half,relief*(fine+s.groove),relief*select(shell.height,fine+s.far,s.far_high));
     if(x.y>0.5&&(!s.near_high||!p.high)){land.x=max(land.x+saturate(reach/max(s.bevel,1e-4)-1.0)*x.x/hs,front);}
     // On tops, a landing two ramps inside its top under that top's own wall height met it earlier: half way back to
     // where the ray meets that height (whole steps overshoot on rough tops).
-    else if(s.near_high&&p.high&&min(p.ahead,p.behind)>2.0*p.half){
-      let h=relief*(fine+p.height);let t=texh_ray_at(ray,h);if(h>=lowest&&t<land.x){land.x=max(0.5*(land.x+t),front);}
+    // Faded in from two to three ramps inside the top, so the landing never jumps where the correction starts.
+    else if(s.near_high&&p.high){
+      let w=saturate((min(p.ahead,p.behind)-2.0*p.half)/max(p.half,1e-6));
+      let h=relief*(fine+p.height);let t=texh_ray_at(ray,h);if(h>=lowest&&t<land.x){land.x=max(mix(land.x,0.5*(land.x+t),w),front);}
     }
   }
   // Land on the ray itself: gaps start at their ray point, not their witness.
