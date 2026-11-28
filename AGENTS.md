@@ -6,7 +6,7 @@
 - Every implementation MUST be general for any current or future material: no material-specific code, files, shaders or branches; drive behavior from material data/capabilities.
 - After every completed change, commit and push.
 - Write tests first; preserve behavior; run strict format, compile, lint, and relevant tests; fully stage all non-ignored files before committing.
-- No workers or subagents; work directly.
+- No workers, subagents or other worktrees; work directly in this folder.
 - No Docker or local Vitest; keep idle CPU and memory low.
 - For visual changes, perform manual QA and report honest metrics and limits.
 - Rust/wgpu/WGSL: use analytic ray intersections and closest-approach math, never ray marching; align layout, address spaces, bindings, and precision; validate shader, pipeline, resize, and device-loss paths.
@@ -25,3 +25,4 @@
 | 2026-11-07 | User | Prohibited workers and subagents | Require direct execution |
 | 2026-11-08 | Assistant | Made REQUIREMENTS.md authoritative | Centralize project requirements |
 | 2026-11-26 | User | Required material-general implementations | Stop material-specific paths |
+| 2026-11-28 | User | Banned other worktrees | Keep all work in the main folder |
