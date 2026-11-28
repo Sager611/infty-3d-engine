@@ -4,6 +4,7 @@ use crate::math::{Ray, footprint, plane, pureweight, sphere};
 
 mod finite;
 mod finite_shadow;
+mod geometry;
 mod goursat;
 mod heightfield;
 mod material;

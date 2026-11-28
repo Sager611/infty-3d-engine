@@ -402,3 +402,28 @@ fn verify_spatial_gaps(@builtin(global_invocation_id) id: vec3u) {
 }
 
 
+
+// Geometry interface accuracy probe. o.xyz/d.xyz: canonical ray; o.w: tag; d.w: parameter (Goursat beta, card axis).
+@compute @workgroup_size(1)
+fn verify_geometry(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= arrayLength(&rays)) { return; }
+  let ray=rays[id.x];let kind=u32(ray.o.w);let d=normalize(ray.d.xyz);
+  let object=SceneObject(vec4u(7u,kind,u32(ray.d.w)<<8u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(ray.d.w,0.0,0.0,0.0),POSE_IDENTITY);
+  let base=scene_canonical(ray.o.xyz,d,object,false);
+  let n=base.query.n;let p=base.local;let tangent=d-n*dot(d,n);let u=tangent/max(length(tangent),1e-20);
+  // A neighbour along the ray's tangent direction, reached straight down the normal.
+  let near=scene_canonical(p+u*0x1p-10+n*0.05,-n,object,false);
+  let predicted=geometry_surface(near.local,base,object);
+  var field=object;field.params.w=2.0;
+  let exact=scene_canonical(ray.o.xyz,d,field,true);
+  let s0=geometry_shade(kind,base.query,n,p,d,900.0,1.0,0u,0.7,1.0);
+  let s1=geometry_shade(kind,base.query,n,p,d,900.0,1.0,1u,0.7,1.0);
+  let s2=geometry_shade(kind,base.query,n,p,d,900.0,1.0,2u,0.7,1.0);
+  let low=min(min(s0,s1),s2);let high=max(max(s0,s1),s2);
+  results[2u*id.x]=ProbeResult(
+    vec4f(select(0.0,1.0,base.query.hit),base.query.t,geometry_curvature(base,d,object),geometry_enclosing_curvature(object)),
+    vec4f(n,select(0.0,1.0,near.query.hit)),vec4f(near.local,select(0.0,1.0,predicted.valid)),vec4f(near.query.n,0.0));
+  results[2u*id.x+1u]=ProbeResult(vec4f(p,min(low.x,min(low.y,low.z))),vec4f(predicted.uv,near.query.uv),
+    vec4f(select(0.0,1.0,exact.query.hit),select(0.0,1.0,geometry_field_relevant(ray.o.xyz,d,field,1e30,0.0)),
+      select(0.0,1.0,geometry_field_chord(ray.o.xyz,d,field)),max(high.x,max(high.y,high.z))),vec4f(0.0));
+}
