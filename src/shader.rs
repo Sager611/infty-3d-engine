@@ -111,7 +111,8 @@ pub fn source_for(levels: &[crate::material::Level], orders: usize) -> String {
         .replace("0u/*@material-first*/", &first)
         .replace("// @texh-levels", &height)
         .replace("// @material-levels", &material)
-        .replace("// @leaf-levels", &leaf);
+        .replace("// @leaf-levels", &leaf)
+        .replace("// @geometry-api", &crate::geometry::api::wgsl());
     field_orders(&source, orders)
 }
 

@@ -146,3 +146,41 @@ fn finite_plane(o:vec3f,d:vec3f,axis:u32)->GeometryQuery {
   query.query.p=plane_unframe(query.query.p,axis);
   query.query.n=plane_unframe(query.query.n,axis);return query;
 }
+
+// Geometry interface (geometry::api): a two-sided unit card on its axis plane.
+fn finite_axis(object:SceneObject)->u32 {return (object.identity.z>>8u)&3u;}
+fn finite_query(o:vec3f,d:vec3f,object:SceneObject)->GeometryQuery {return finite_plane(o,d,finite_axis(object));}
+fn finite_surface_uv(surface:SurfacePoint,point:vec3f,base:SceneSample,object:SceneObject)->SurfacePoint {
+  var s=surface;s.uv+=0.5*plane_frame(s.p-base.local,finite_axis(object)).xy;
+  s.valid=all(s.uv>=vec2f(0.0))&&all(s.uv<=vec2f(1.0));return s;
+}
+fn finite_curvature(base:SceneSample,d:vec3f,object:SceneObject)->f32 {return 0.0;}
+fn finite_enclosing_curvature(object:SceneObject)->f32 {return 0.0;}
+// Full height envelope includes direct hits and witness-gap hits. Reject only a certified miss/occluded card.
+fn finite_field_relevant(local_o:vec3f,local_d:vec3f,object:SceneObject,limit:f32,padding:f32)->bool {
+  let o=plane_frame(local_o,finite_axis(object));let d=plane_frame(local_d,finite_axis(object));
+  let reach=fi_up(hf_reach());
+  let bounds=vec3f(1.0+reach,1.0+reach,reach)+vec3f(padding+plane_rounding(o,length(o)+2.0));
+  var span=plane_axis(plane_range(),o.z,d.z,-bounds.z,bounds.z);
+  span=plane_axis(span,o.x,d.x,-bounds.x,bounds.x);
+  span=plane_axis(span,o.y,d.y,-bounds.y,bounds.y);
+  if(span.uncertain){return true;}
+  if(!span.valid||span.near>fi_up(limit/object.position_size.w)){return false;}
+  // Unselected cards: relief can only land where the ray's chord through the relief slab crosses the
+  // conservative coverage outline.
+  if(padding==0.0&&abs(d.z)>1e-6){
+    let a=o.xy+d.xy*((reach-o.z)/d.z);let b=o.xy+d.xy*((-reach-o.z)/d.z);
+    if(!field_outline(fma(a,vec2f(0.5),vec2f(0.5)),fma(b,vec2f(0.5),vec2f(0.5)))){return false;}
+  }
+  return true;
+}
+fn finite_field_chord(local_o:vec3f,local_d:vec3f,object:SceneObject)->bool {
+  let o=plane_frame(local_o,finite_axis(object));let d=plane_frame(local_d,finite_axis(object));
+  if(abs(d.z)<1e-6){return true;}
+  let reach=fi_up(hf_reach());let a=o.xy+d.xy*((reach-o.z)/d.z);let b=o.xy+d.xy*((-reach-o.z)/d.z);
+  return field_outline(fma(a,vec2f(0.5),vec2f(0.5)),fma(b,vec2f(0.5),vec2f(0.5)));
+}
+fn finite_shade(kind:u32,q:Query,n:vec3f,local:vec3f,ray:vec3f,height:f32,size:f32,mode:u32,diffuse:f32,shadow:f32)->vec3f {
+  if(mode!=2u){return surface_lit(SURFACE_PAPER,diffuse,shadow);}
+  return surface_lit(mix(SURFACE_LOW,SURFACE_HIGH,pureweight(q.uv,surface_rho(q,ray,height,size,1.0))),diffuse,shadow);
+}

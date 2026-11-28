@@ -1,4 +1,5 @@
 //! Validated canonical kernels; instances and presentation do not own geometry.
+pub mod api;
 pub mod finite;
 pub mod point;
 use crate::diagnostic::{Recorder, Tag};
@@ -9,27 +10,51 @@ use crate::math::{
     types::{GeometrySample, finite3},
 };
 
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Sphere = 1,
-    Goursat = 2,
-    Plane = 3,
-    FinitePlane = 5,
+/// Every geometry, listed once; tags are stable (saved scenes).
+macro_rules! kinds {
+    ($($kind:ident = $tag:literal),+) => {
+        #[repr(u32)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Kind { $($kind = $tag),+ }
+        impl Kind {
+            pub const ALL: [Self; [$($tag),+].len()] = [$(Self::$kind),+];
+        }
+    };
+}
+kinds!(Sphere = 1, Goursat = 2, Plane = 3, FinitePlane = 5);
+
+/// Shader identity and traits; WGSL defines `<prefix>_<name>` for every `api::FUNCTIONS` entry.
+#[derive(Clone, Copy)]
+pub struct Spec {
+    pub prefix: &'static str,
+    /// Finite extent: silhouettes, outlines and gap halos.
+    pub bounded: bool,
+    /// Flat two-sided card: exact low-order origin, certified bounds and material cutouts.
+    pub card: bool,
+    /// U wraps around at a seam.
+    pub wraps_u: bool,
 }
 
 impl Kind {
-    pub const fn from_tag(tag: u32) -> Option<Self> {
-        match tag {
-            1 => Some(Self::Sphere),
-            2 => Some(Self::Goursat),
-            3 => Some(Self::Plane),
-            5 => Some(Self::FinitePlane),
-            _ => None,
-        }
+    pub fn from_tag(tag: u32) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.tag() == tag)
     }
     pub const fn tag(self) -> u32 {
         self as u32
+    }
+    pub const fn spec(self) -> Spec {
+        let (prefix, bounded, card, wraps_u) = match self {
+            Self::Sphere => ("sphere", true, false, true),
+            Self::Goursat => ("goursat", true, false, false),
+            Self::Plane => ("plane", false, false, false),
+            Self::FinitePlane => ("finite", true, true, false),
+        };
+        Spec {
+            prefix,
+            bounded,
+            card,
+            wraps_u,
+        }
     }
 }
 

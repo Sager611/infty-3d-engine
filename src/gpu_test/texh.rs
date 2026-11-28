@@ -368,6 +368,10 @@ fn leaf_height_orders_wait_for_visible_bounded_amplitude() -> TestResult {
 }
 
 #[test]
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "only nesting and calls matter among naga's many statement kinds"
+)]
 fn displacement_and_shading_are_direct_loop_free_and_nonrecursive() -> TestResult {
     let module = naga::front::wgsl::parse_str(&crate::shader::source())?;
     naga::valid::Validator::new(

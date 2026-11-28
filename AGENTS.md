@@ -3,7 +3,7 @@
 - REQUIREMENTS.md is the complete source of project requirements.
 - Every change: maximum deletion, minimum addition; minimize final words/characters/code across all files, including AGENTS.md; preserve required behavior/tests.
 - Architecture MUST be modular and functional-first at every level: dynamic, readable, maintainable, changeable, debuggable; specify module behavior, interfaces, state, and errors for every edge case; no hidden state; idempotent updates; pure cores isolated from effects.
-- Every implementation MUST be general for any current or future material: no material-specific code, files, shaders or branches; drive behavior from material data/capabilities.
+- Every implementation MUST be general for any current or future material or geometry: drive behavior from material data and the geometry interface (`src/geometry/api.rs`); no material- or geometry-specific branches elsewhere.
 - After every completed change, commit and push.
 - Write tests first; preserve behavior; run strict format, compile, lint, and relevant tests; fully stage all non-ignored files before committing.
 - No workers, subagents or other worktrees; work directly in this folder.
@@ -26,3 +26,4 @@
 | 2026-11-08 | Assistant | Made REQUIREMENTS.md authoritative | Centralize project requirements |
 | 2026-11-26 | User | Required material-general implementations | Stop material-specific paths |
 | 2026-11-28 | User | Banned other worktrees | Keep all work in the main folder |
+| 2026-11-28 | User | Required one geometry interface | Every geometry must implement every function |

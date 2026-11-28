@@ -154,3 +154,23 @@ fn goursat(o: vec3f, d: vec3f, beta: f32) -> GoursatQuery {
   query.gap = best.upper;
   return GoursatQuery(query, ray_gap, best.error, max(status, best.uncertain));
 }
+
+// Geometry interface (geometry::api).
+fn goursat_query(o:vec3f,d:vec3f,object:SceneObject)->GeometryQuery {return goursat(o,d,object.params.x);}
+fn goursat_surface_uv(surface:SurfacePoint,point:vec3f,base:SceneSample,object:SceneObject)->SurfacePoint {
+  var s=surface;s.uv+=goursat_uv(s.p-base.local,s.n);return s;
+}
+// Normal curvature: the quartic's Hessian diag(12p²-4) along the tangent, over the gradient length.
+fn goursat_curvature(base:SceneSample,d:vec3f,object:SceneObject)->f32 {
+  let p=base.local;let n=scene_local_vector(object,base.query.n);let v=scene_local_vector(object,d);
+  let u=v-n*dot(v,n);
+  return dot(u*u,12.0*p*p-vec3f(4.0))/max(1e-30,dot(u,u)*length(goursat_gradient(p)));
+}
+fn goursat_enclosing_curvature(object:SceneObject)->f32 {return inverseSqrt(3.0+sqrt(3.0*object.params.x));}
+fn goursat_field_relevant(o:vec3f,d:vec3f,object:SceneObject,limit:f32,padding:f32)->bool {return true;}
+fn goursat_field_chord(o:vec3f,d:vec3f,object:SceneObject)->bool {return true;}
+fn goursat_shade(kind:u32,q:Query,n:vec3f,local:vec3f,ray:vec3f,height:f32,size:f32,mode:u32,diffuse:f32,shadow:f32)->vec3f {
+  let low=vec3f(0.37,0.16,0.18);let high=vec3f(0.86,0.28,0.31);
+  if(mode!=2u){return surface_lit(mix(low,high,surface_cell(local.yz,2.0)),diffuse,shadow);}
+  return surface_lit(mix(low,high,surface_triplanar(local,n,surface_rho(q,ray,height,size,1.0))),diffuse,shadow);
+}

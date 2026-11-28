@@ -43,3 +43,22 @@ fn sphere_at(o: vec3f, d: vec3f, c: vec3f, r: f32) -> Query {
 fn sphere(o: vec3f, d: vec3f, c: vec3f, r: f32) -> Query {
   return sphere_at(o, d, c, r);
 }
+
+// Geometry interface (geometry::api).
+fn sphere_query(o:vec3f,d:vec3f,object:SceneObject)->GeometryQuery {
+  let query=sphere_at(o,d,vec3f(0.0),1.0);return GeometryQuery(query,query.gap,0.0,0u);
+}
+fn sphere_surface_uv(surface:SurfacePoint,point:vec3f,base:SceneSample,object:SceneObject)->SurfacePoint {
+  let p=material_unit(point,surface.n);return SurfacePoint(p,surface.n,sphere_uv(p),true);
+}
+fn sphere_curvature(base:SceneSample,d:vec3f,object:SceneObject)->f32 {return 1.0;}
+fn sphere_enclosing_curvature(object:SceneObject)->f32 {return 1.0;}
+fn sphere_field_relevant(o:vec3f,d:vec3f,object:SceneObject,limit:f32,padding:f32)->bool {return true;}
+fn sphere_field_chord(o:vec3f,d:vec3f,object:SceneObject)->bool {return true;}
+fn sphere_shade(kind:u32,q:Query,n:vec3f,local:vec3f,ray:vec3f,height:f32,size:f32,mode:u32,diffuse:f32,shadow:f32)->vec3f {
+  let low=vec3f(0.31,0.40,0.48);let high=vec3f(0.48,0.55,0.59);
+  if(mode!=2u){return surface_lit(surface_base(sphere_uv(n),12.0,low,high),diffuse,shadow);}
+  // UV density grows toward the poles; undefined on the axis.
+  let radial=length(q.n.xz);let density=select(max(1.0/PI,1.0/(TAU*radial)),0.0,radial==0.0);
+  return surface_lit(mix(low,high,pureweight(sphere_uv(n),surface_rho(q,ray,height,size,density))),diffuse,shadow);
+}

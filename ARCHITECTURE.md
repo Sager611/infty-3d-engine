@@ -38,7 +38,7 @@ Query24: `[id,kind,hit,t,gapLower,gapUpper,px,py,pz,nx,ny,nz,u,v,rayX,rayY,rayZ,
 
 ## Geometry and display
 
-Extension seam: `geometry.rs` supplies validated canonical definitions, analytic queries and an optional enclosing radius. Add a kind/tag, validated parameters, its CPU kernel and matching WGSL dispatch, then web metadata/material mapping. Transforms, hierarchy, shared-geometry interning and selection stay unchanged. This is a compiled analytic-kernel interface, not runtime shader loading; sphere, quartic, plane and finite plane share it.
+Extension seam: `geometry.rs` supplies validated canonical definitions, analytic queries and an optional enclosing radius. Add a kind/tag and `Spec` (`kinds!`, `Kind::spec`), validated parameters, its CPU kernel and `<prefix>_<function>` WGSL for every `geometry::api` function, then web metadata/material mapping. Dispatchers and trait tests are generated; shader validation fails on any missing or mistyped function, and shared WGSL never compares geometry tags. Transforms, hierarchy, shared-geometry interning and selection stay unchanged. This is a compiled analytic-kernel interface, not runtime shader loading; sphere, quartic, plane and finite plane share it.
 
 Primary GPU traversal expands branch bounds for the maximum possible pixel outline cone and the visible gap halo; ray-only rejection is reserved for shadows and CPU hit queries. Thus misses just outside an object's ray bounds remain candidates. Slab tests explicitly handle parallel rays and inflate for rounding. Overlapping geometry or many infinite planes can degrade to exhaustive traversal; no acceleration changes exact first/all ordering or inspection cardinality.
 
@@ -124,3 +124,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-27 | Assistant | Documented the flat-texh mode bit | Keep the display-mode interface explicit |
 | 2026-11-27 | Assistant | Documented rendered relief silhouettes | Texh gaps now hit where relief reaches the ray |
 | 2026-11-28 | Assistant | Removed the crystalline cluster | User request |
+| 2026-11-28 | Assistant | Documented the generated geometry interface | Geometry code is forced through one interface |

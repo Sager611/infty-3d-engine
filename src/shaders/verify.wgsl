@@ -326,7 +326,7 @@ fn verify_surface(@builtin(global_invocation_id) id: vec3u) {
   let q = Query(true, 4.0, 0.0, vec3f(1.1, 0.0, 0.2),
     vec3f(0.0, 1.0, 0.0), vec2f(0.6, 0.2));
   let direction = vec3f(0.0, -1.0, 0.0);
-  let rho = surface_rho(q, vec3f(0.6, 0.0, 0.2), direction, 100.0, ray.d.w, false);
+  let rho = surface_rho(q, direction, 100.0, ray.d.w, 1.0);
   let color = surface_shade(q, q.n, vec3f(0.6, 0.0, 0.2), 3u, direction, 100.0,
     ray.d.w, u32(ray.o.w), q.p + vec3f(0.0, 1.0, 0.0), 1.0);
   results[id.x] = ProbeResult(vec4f(rho, color), vec4f(0.0), vec4f(0.0), vec4f(0.0));
@@ -390,7 +390,7 @@ fn verify_spatial_gaps(@builtin(global_invocation_id) id: vec3u) {
       }
     } else {
       let sample = scene_object(ray.o.xyz, ray.d.xyz, resolved_object(i));
-      if (!sample.query.hit && sample.kind != 3u && sample.status < 2u) {
+      if (!sample.query.hit && geometry_bounded(sample.kind) && sample.status < 2u) {
         gap = min(gap, sample.query.gap);
       }
       let thickness = 6.0 * sample.query.t / 1800.0;

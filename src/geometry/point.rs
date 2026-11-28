@@ -124,7 +124,9 @@ impl Closest {
             super::Kind::Plane => Multiplicity::Unique,
             super::Kind::FinitePlane if !geometry.leaf => Multiplicity::Unique,
             super::Kind::Sphere if distance(point, [0.0; 3])?.lo() > error => Multiplicity::Unique,
-            _ => Multiplicity::Unknown,
+            super::Kind::Sphere | super::Kind::Goursat | super::Kind::FinitePlane => {
+                Multiplicity::Unknown
+            }
         };
         self.resolution = Resolution::Unresolved;
         Ok(self)

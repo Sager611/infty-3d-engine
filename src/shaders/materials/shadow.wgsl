@@ -5,13 +5,13 @@ fn shadow_value(shadow:Shadow)->f32 {
 }
 fn shadow_local_origin(source:SceneSample,object:SceneObject,other:SceneObject,n:vec3f)->vec3f {
   var error=source.local_error;
-  if(source.kind==5u){error=0.0;} // Exact carrier projection.
+  if(geometry_card(source.kind)){error=0.0;} // Exact carrier projection.
   let p=abs(source.local);
   let bias=max(0x1p-30,4.0*max(error,FI_U*max(p.x,max(p.y,p.z))));
   let local=source.local+scene_local_vector(object,n)*bias;
   if(source.id!=0u&&source.id==other.identity.x){return local;}
   var a=vec3f(0.0);var b=vec3f(0.0);
-  if(object.identity.y==5u){a=object.params.xyz;}if(other.identity.y==5u){b=other.params.xyz;}
+  if(geometry_card(object.identity.y)){a=object.params.xyz;}if(geometry_card(other.identity.y)){b=other.params.xyz;}
   let delta=(object.position_size.xyz-other.position_size.xyz)+(a-b)+scene_world_vector(object,local)*object.position_size.w;
   return scene_local_vector(other,delta/other.position_size.w);
 }
@@ -32,7 +32,7 @@ fn scene_shadow(source:SceneSample,object:SceneObject,n:vec3f,light:vec3f,count:
   if(!fi_finite(distance)){return Shadow(false,true);}if(distance<=0.0){return Shadow(false,false);}
   let bias=max(1e-4*object.position_size.w,8.0*EPS*max(1.0,length(p)));
   let origin=p+n*bias;let direction=to_light/distance;
-  let leaves_plane=source.kind==5u&&source.query.hit&&dot(n,direction)>=0.0;
+  let leaves_plane=geometry_card(source.kind)&&source.query.hit&&dot(n,direction)>=0.0;
   var result=Shadow(false,false);var i=0u;
   while(i<count){
     let record=scene_objects[i];
@@ -42,7 +42,8 @@ fn scene_shadow(source:SceneSample,object:SceneObject,n:vec3f,light:vec3f,count:
       let other=resolved_object(i);
       // An outward ray from a biased plane cannot recross it. Leaf omits self-shadows.
       if(source.id==other.identity.x&&(leaves_plane||material_field(object.params.w))){i++;continue;}
-      let legacy=source.kind!=5u&&other.identity.y!=5u;
+      let source_card=geometry_card(source.kind);let other_card=geometry_card(other.identity.y);
+      let legacy=!source_card&&!other_card;
       var local=scene_local_vector(other,(origin-other.position_size.xyz)/other.position_size.w);
       if(!legacy){local=shadow_local_origin(source,object,other,n);}
       let local_d=scene_local_vector(other,direction);

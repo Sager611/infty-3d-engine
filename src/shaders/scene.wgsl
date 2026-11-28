@@ -10,14 +10,13 @@ fn scene_world_vector(object:SceneObject,point:vec3f)->vec3f {return scene_rotat
 fn scene_local_vector(object:SceneObject,point:vec3f)->vec3f {return scene_rotate(vec4f(-object.rotation.xyz,object.rotation.w),point);}
 fn scene_origin_delta(o:vec3f,low:vec3f,object:SceneObject)->vec3f {
   var delta=o-object.position_size.xyz;
-  if(object.identity.y==5u){delta+=low-object.params.xyz;}
+  if(geometry_card(object.identity.y)){delta+=low-object.params.xyz;}
   return delta;
 }
 struct SceneSample {
   query:Query,local:vec3f,id:u32,kind:u32,gap_lower:f32,error:f32,status:u32,
   pending:Pending,local_error:f32,base_hit:u32, // Full word avoids Metal's 24-bit padding-read bug.
 };
-fn scene_axis(object:SceneObject)->u32 {return (object.identity.z>>8u)&3u;}
 fn scene_selected(object:SceneObject)->bool {return (object.identity.z&1u)!=0u;}
 fn scene_object(o:vec3f,d:vec3f,object:SceneObject)->SceneSample {
   return scene_object_precise(o,vec3f(0.0),d,object);
@@ -26,25 +25,10 @@ fn scene_object_precise(o:vec3f,low:vec3f,d:vec3f,object:SceneObject)->SceneSamp
   let local=scene_local_vector(object,scene_origin_delta(o,low,object)/object.position_size.w);
   return scene_canonical(local,scene_local_vector(object,d),object,true);
 }
-// Full height envelope includes direct hits and witness-gap hits. Reject only
-// a certified miss/occluded leaf; never run nine-region gap math for it.
+// Field reliefs skip only through their geometry's conservative envelope; never run nine-region gap math.
 fn scene_leaf_relevant(local_o:vec3f,local_d:vec3f,object:SceneObject,limit:f32,padding:f32)->bool {
-  if(object.identity.y!=5u||!material_field(object.params.w)){return true;}
-  let o=plane_frame(local_o,scene_axis(object));let d=plane_frame(local_d,scene_axis(object));
-  let reach=fi_up(hf_reach());
-  let bounds=vec3f(1.0+reach,1.0+reach,reach)+vec3f(padding+plane_rounding(o,length(o)+2.0));
-  var span=plane_axis(plane_range(),o.z,d.z,-bounds.z,bounds.z);
-  span=plane_axis(span,o.x,d.x,-bounds.x,bounds.x);
-  span=plane_axis(span,o.y,d.y,-bounds.y,bounds.y);
-  if(span.uncertain){return true;}
-  if(!span.valid||span.near>fi_up(limit/object.position_size.w)){return false;}
-  // Unselected cards: relief can only land where the ray's chord through the relief slab crosses the
-  // conservative coverage outline.
-  if(padding==0.0&&abs(d.z)>1e-6){
-    let a=o.xy+d.xy*((reach-o.z)/d.z);let b=o.xy+d.xy*((-reach-o.z)/d.z);
-    if(!field_outline(fma(a,vec2f(0.5),vec2f(0.5)),fma(b,vec2f(0.5),vec2f(0.5)))){return false;}
-  }
-  return true;
+  if(!material_field(object.params.w)){return true;}
+  return geometry_field_relevant(local_o,local_d,object,limit,padding);
 }
 // Relief may land on this object: a carrier hit, or a near miss under its highest relief; a card's relief slab
 // must also cross its coverage outline. Lookup-free, so traversal cost stays independent of overlaps.
@@ -53,35 +37,22 @@ fn scene_relief_candidate(carrier:SceneSample,local_o:vec3f,local_d:vec3f,object
   let field=material_field(object.params.w);
   let bound=relief*select(material_spec(u32(object.params.w)).rise,fi_up(hf_reach())*object.position_size.w,field);
   if(carrier.base_hit==0u&&(carrier.status!=0u||select(carrier.query.gap,carrier.gap_lower,field)>=bound)){return false;}
-  if(!material_field(object.params.w)||object.identity.y!=5u){return true;}
-  let o=plane_frame(local_o,scene_axis(object));let d=plane_frame(local_d,scene_axis(object));
-  if(abs(d.z)<1e-6){return true;}
-  let reach=fi_up(hf_reach());let a=o.xy+d.xy*((reach-o.z)/d.z);let b=o.xy+d.xy*((-reach-o.z)/d.z);
-  return field_outline(fma(a,vec2f(0.5),vec2f(0.5)),fma(b,vec2f(0.5),vec2f(0.5)));
+  if(!material_field(object.params.w)){return true;}
+  return geometry_field_chord(local_o,local_d,object);
 }
 // Exact adds field lookups (coverage, witness-gap relief); traversal passes false and lets the one relief pass decide.
 fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject,exact:bool)->SceneSample {
   let id=obj.identity.x;let kind=obj.identity.y;let position=obj.position_size.xyz;let size=obj.position_size.w;
-  var query=Query(false,0.0,0.0,local_o,vec3f(0.0,1.0,0.0),vec2f(0.0));
-  var gap_lower=0.0;var error=0.0;var status=3u;var pending=Pending(0.0,false);
-  if(kind==1u){
-    query=sphere_at(local_o,d,vec3f(0.0),1.0);gap_lower=query.gap;status=0u;
-  }else if(kind==2u){
-    let canonical=goursat(local_o,d,obj.params.x);
-    query=canonical.query;gap_lower=canonical.gap_lower;error=canonical.error;status=canonical.status;
-  }else if(kind==5u){
-    var canonical:GeometryQuery;
-    canonical=finite_plane(local_o,d,scene_axis(obj));
-    pending=Pending(0.0,canonical.status==1u||canonical.status==3u);
-    query=canonical.query;gap_lower=canonical.gap_lower;error=canonical.error;status=canonical.status;
-  }else if(kind==3u){query=plane(local_o,d);gap_lower=query.gap;status=0u;}
+  let card=geometry_card(kind);let canonical=geometry_query(local_o,d,obj);
+  var query=canonical.query;var gap_lower=canonical.gap_lower;var error=canonical.error;var status=canonical.status;
+  var pending=Pending(0.0,card&&(status==1u||status==3u));
   let base_hit=query.hit;
-  if(material_field(obj.params.w)&&kind==5u&&base_hit){
+  if(material_field(obj.params.w)&&card&&base_hit){
     if(exact){query.hit=leaf_covered(query.uv);}else{query.hit=field_outline(query.uv,query.uv);}
   }
   let local_error=error;let local=query.p;let canonical_gap=query.gap;let canonical_lower=gap_lower;
   if(exact&&material_field(obj.params.w)&&!base_hit&&status==0u){
-    query=texh(local_o,d,query,gap_lower,kind==5u);
+    query=texh(local_o,d,query,gap_lower,card);
     if(query.hit){gap_lower=0.0;}
   }
   query.p=position+size*scene_world_vector(obj,query.p);query.n=scene_world_vector(obj,query.n);
@@ -90,7 +61,7 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject,exact:bool)->SceneSampl
     let bound=fi_scale(fi_exact(pending.lower),size);
     pending.lower=select(0.0,max(0.0,bound.v.x),bound.valid);
   }
-  if(kind==5u){
+  if(card){
     query.p+=obj.params.xyz;
     let magnitude=abs(position)+vec3f(size*length(local))+abs(obj.params.xyz);
     let operations=select(32.0,8.0,all(obj.rotation==POSE_IDENTITY));

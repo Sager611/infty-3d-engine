@@ -141,7 +141,9 @@ fn texh_ray(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f)->Tex
   let g=select(0.0,sign(dot(anchor-base.local,n))*base.query.gap/size,gap);let c=dot(ld,n);
   // Over a sphere of the carrier's curvature the parabola keeps the ray's lowest point (exact at tangency, half the
   // curvature at normal incidence, where it shallows only q²/4 below the straight ray).
-  return TexhRay(anchor,ld,g,c,geometry_curvature(base,d,object)*0.5*(1.0+sqrt(max(1.0-c*c,0.0))));
+  // Closed carriers never curve less than their enclosing sphere here, bounding grazing offsets.
+  let k=max(geometry_curvature(base,d,object),geometry_enclosing_curvature(object));
+  return TexhRay(anchor,ld,g,c,k*0.5*(1.0+sqrt(max(1.0-c*c,0.0))));
 }
 // Flat grazing fade: below |c|=.05 over carriers curving less than .005 per size, offsets fade to z·c/.0025 instead of
 // exploding. x: twice the slope excess, y: the scale dividing it; both 0 or finite, x=0 on curved carriers.

@@ -38,12 +38,14 @@ fn branch_padding(node: SceneObject, origin: vec3f, height: f32, display_gap: bo
 
 fn resolved_object(index: u32) -> SceneObject {
   var object = scene_objects[index];
-  if(object.identity.y!=5u){object.params=vec4f(scene_objects[object.identity.w].params.xyz,object.params.w);}
+  if(!geometry_card(object.identity.y)){object.params=vec4f(scene_objects[object.identity.w].params.xyz,object.params.w);}
   return object;
 }
 
 fn outline_eligible(sample: SceneSample, selected: bool, thickness: f32) -> bool {
-  return selected && (sample.kind == 1u || sample.kind == 2u || sample.kind==5u) &&
+  // Trait calls stay out of short-circuit operands: Tint turns those into branches.
+  let bounded=geometry_bounded(sample.kind);
+  return selected && bounded &&
     sample.base_hit==0u && !sample.query.hit && sample.status<2u && sample.query.gap < thickness;
 }
 
@@ -131,7 +133,8 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
         candidate_witness=material_field(object.params.w)&&carrier.base_hit==0u;
       }
 
-      if (display_gap && object.identity.y != 3u && !carrier.query.hit &&
+      let bounded=geometry_bounded(object.identity.y);
+      if (display_gap && bounded && !carrier.query.hit &&
           carrier.status<2u && (!halo_found||carrier.query.gap<halo_gap)) {
         halo_gap = carrier.query.gap;halo_found=true;
         halo_uv = carrier.query.uv;
