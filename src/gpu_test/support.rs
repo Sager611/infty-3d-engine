@@ -119,6 +119,7 @@ fn material_tiles(
             | "verify_slope_precision"
             | "verify_texh_borrow"
             | "verify_texh_flat"
+            | "verify_texh_footprint"
             | "verify_instance_pose"
     ) {
         return Ok(None);

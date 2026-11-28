@@ -210,7 +210,18 @@ fn verify_texh_land(@builtin(global_invocation_id) id:vec3u) {
   if(id.x>=arrayLength(&rays)){return;}
   let r=rays[id.x];let ray=TexhRay(vec3f(0.0),vec3f(1.0,0.0,0.0),r.o.x,r.o.y,r.o.z);
   let land=texh_land(ray,r.o.w,r.d.x,abs(r.d.w),r.d.w>0.0,r.d.y);
-  results[id.x]=ProbeResult(vec4f(texh_ray_at(ray,r.d.z),land,texh_lowest(ray)),vec4f(0.0),vec4f(0.0),vec4f(0.0));
+  let tau=texh_ray_at(ray,r.d.z);
+  results[id.x]=ProbeResult(vec4f(tau,land,texh_lowest(ray)),vec4f(texh_slope_at(ray,tau),0.0,0.0,0.0),vec4f(0.0),vec4f(0.0));
+}
+// Shading footprint at the relief landing, as texh_surface filters it: o.w material, d.w kind, pixel span .001.
+@compute @workgroup_size(1)
+fn verify_texh_footprint(@builtin(global_invocation_id) id:vec3u) {
+  if(id.x>=arrayLength(&rays)){return;}
+  let r=rays[id.x];let d=normalize(r.d.xyz);
+  let object=SceneObject(vec4u(1u,u32(r.d.w),0u,0u),vec4f(0.0,0.0,0.0,1.0),vec4f(0.0,0.0,0.0,r.o.w),POSE_IDENTITY);
+  let base=scene_object(r.o.xyz,d,object);let sample=material_texh_depth(base,d,object,r.o.xyz,0.001,1.0);
+  results[id.x]=ProbeResult(vec4f(f32(sample.query.hit),sample.query.t,base.query.t,
+    texh_shading_context(sample,base,d,object,r.o.xyz,0.001).footprint),vec4f(0.0),vec4f(0.0),vec4f(0.0));
 }
 @compute @workgroup_size(1)
 fn verify_material_mapping(@builtin(global_invocation_id) id: vec3u) {

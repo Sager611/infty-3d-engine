@@ -1004,6 +1004,139 @@ fn texh_ray_map_and_landing_are_continuous() -> TestResult {
 }
 
 #[test]
+fn texh_ray_map_is_continuous_across_tangency_and_curvature() -> TestResult {
+    // Offsets to heights above and below the anchor, swept in quarter steps through c=0 at curvatures around the flat
+    // fade's .005 threshold, and through that threshold at slopes around zero: finite, and every step either changes by
+    // at most 10⁴ per unit swept or carries at most 70 % of its four-quarter variation (square-root kinks carry half),
+    // so a root flip at c=0 or k=.005 (over 10 % of the offset, in one quarter) fails both. The footprint slope there
+    // stays floored at .01 for every curvature.
+    let mut c_sweeps = Vec::new();
+    let mut k_sweeps = Vec::new();
+    for z in [0.004_f32, 0.001, -0.001, -0.02] {
+        for k in [0.0_f32, 1e-4, 0.004, 0.004_999, 0.005, 0.005_001, 0.02, 1.0] {
+            let step = (2.0 * k * z.abs()).sqrt().max(1e-3) / 640.0;
+            c_sweeps.push((
+                (-960_i16..=960)
+                    .map(|i| [0.0, f32::from(i) * step, k, 0.0, 0.0, 0.0, z, 0.0])
+                    .collect(),
+                step,
+            ));
+        }
+        for c in [-0.01_f32, -1e-6, 0.0, 1e-6, 0.01] {
+            let sweep = (0_u16..=800).map(|i| {
+                [
+                    0.0,
+                    c,
+                    f32::from(i).mul_add(2.5e-6, 0.004),
+                    0.0,
+                    0.0,
+                    0.0,
+                    z,
+                    0.0,
+                ]
+            });
+            k_sweeps.push((sweep.collect(), 2.5e-6));
+        }
+    }
+    for sweeps in [c_sweeps, k_sweeps] {
+        let rays: Vec<[f32; 8]> = sweeps
+            .iter()
+            .flat_map(|(sweep, _): &(Vec<[f32; 8]>, f32)| sweep.clone())
+            .collect();
+        let q = run("verify_texh_land", &rays, rays.len() * 16)?;
+        assert!(
+            q.chunks_exact(16)
+                .all(|row| row[4] >= 0.01 && row[4].is_finite()),
+            "footprint slope unfloored"
+        );
+        let mut offsets = q.chunks_exact(16).map(|row| row[0]);
+        for (sweep, step) in &sweeps {
+            let tau: Vec<f32> = offsets.by_ref().take(sweep.len()).collect();
+            let tol = 1e-6 * tau.iter().fold(1.0_f32, |m, t| m.max(t.abs()));
+            for (j, quarters) in tau.windows(5).step_by(4).enumerate() {
+                let (most, total) = quarters
+                    .windows(2)
+                    .map(|p| (p[1] - p[0]).abs())
+                    .fold((0.0_f32, 0.0_f32), |(m, s), d| (m.max(d), s + d));
+                assert!(
+                    quarters.iter().all(|t| t.is_finite())
+                        && (most <= 1e4f32.mul_add(*step, tol)
+                            || most <= 0.7f32.mul_add(total, tol)),
+                    "offsets {quarters:?} jump from {:?}",
+                    sweep[4 * j]
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn grazing_footprints_stay_bounded_on_flat_carriers() -> TestResult {
+    // Brick plane rays from 1 mm up at slopes down to 1e-5: the shading footprint follows the ray's slope floored
+    // at .01 (at most 1/.01 of the pixel cone), like curved carriers, and changes smoothly with the slope.
+    let slopes = [0.05_f32, 0.02, 0.01, 0.005, 0.002, 1e-3, 1e-4, 1e-5];
+    let rays: Vec<[f32; 8]> = slopes
+        .iter()
+        .map(|&c| {
+            [
+                0.0,
+                0.001,
+                0.0,
+                1.0,
+                0.0,
+                -c,
+                c.mul_add(-c, 1.0).sqrt(),
+                3.0,
+            ]
+        })
+        .collect();
+    let q = run("verify_texh_footprint", &rays, rays.len() * 16)?;
+    let rows: Vec<&[f32]> = q.chunks_exact(16).collect();
+    for (row, c) in rows.iter().zip(slopes) {
+        let cone = 0.001 * row[1].max(row[2]) / c.max(0.01);
+        assert!(
+            row[0] > 0.5 && row[3].is_finite() && row[3] <= 4.0 * cone,
+            "slope {c}: footprint {} vs cone {cone} ({row:?})",
+            row[3]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn relief_stays_finite_at_normal_incidence_and_with_relief_off() -> TestResult {
+    // Radial rays onto the brick sphere: q and bottom coincide, so walls lie beyond a zero-length descent; the direct
+    // landing is finite and meets the march. With relief off, margins vanish and nothing overflows either.
+    let rays: Vec<[f32; 8]> = (0..16_u8)
+        .map(|i| {
+            let (a, b) = (f32::from(i) * 0.39, f32::from(i % 4) * 0.21 - 0.3);
+            let n = [a.cos() * b.cos(), b.sin(), a.sin() * b.cos()];
+            [
+                n[0] * 0.5,
+                n[1] * 0.5,
+                n[2] * 0.5,
+                0.42,
+                -n[0],
+                -n[1],
+                -n[2],
+                0.0,
+            ]
+        })
+        .collect();
+    for (base, direct, marched) in crossings(&rays)? {
+        let (t, ..) = direct.ok_or("radial ray missed")?;
+        assert!(
+            base && marched.is_some_and(|m| (t - m).abs() < 2e-5),
+            "radial landing {t} vs march {marched:?}"
+        );
+    }
+    let off = run("verify_texh_flat", &rays, rays.len() * 16)?;
+    assert!(off.iter().all(|v| v.is_finite()), "relief off: {off:?}");
+    Ok(())
+}
+
+#[test]
 fn flat_carriers_and_texh_off_add_no_silhouettes() -> TestResult {
     // Plane rays leave it from inside its steel relief: they meet it only where they start. Finite-plane rays pass
     // its edge: relief reaching their gap lies off the plane, so they keep missing.

@@ -83,15 +83,15 @@ fn texh_height(foot:SurfacePoint,bottom:SurfacePoint,context:TexhContext,typical
 // Others stay at q. Runs reach a top's falling crest or a groove's rising foot. On a top: land before its crest, else
 // cross to the far wall ramp or the groove floor. Over a groove: its floor, the wall ramp ahead, or the plateau beyond.
 fn texh_depth(s:TexhLevel,shell:TexhLevel,reach:f32)->f32 {
-  let top=shell.height;let span=max(top-shell.deepest,1e-30);let landing=(top-s.height)/span;let half=s.bevel/reach;
-  let ahead=s.ahead/reach;let behind=1.0-s.behind/reach;let plateau=s.height-s.near+s.far;let groove=s.height-s.near+s.groove;
+  let top=shell.height;let span=max(top-shell.deepest,1e-6);let landing=(top-s.height)/span;let half=texh_share(s.bevel,reach);
+  let ahead=texh_share(s.ahead,reach);let behind=1.0-texh_share(s.behind,reach);let plateau=s.height-s.near+s.far;
+  let groove=s.height-s.near+s.groove;
   if(!s.structural){return s.height;}
   // Above the ray at q, the hit lies behind q: on q's height, or past where the surface falls away behind q (a top's
   // crest, or q's own rising ramp) on that ramp.
   if(s.height>=top){
-    let back=select(select(1e30,0.0,s.ahead<=0.0),s.back/reach,s.near_high);
-    let rise=max(max(s.height,plateau)-groove,0.0)/max(2.0*half,1e-30);
-    return select(s.height,top+span*(s.height-top+rise*back)/(span+rise),s.height-top>back*span);
+    let back=select(0.0,texh_share(s.back,reach),s.near_high);let rise=max(max(s.height,plateau)-groove,0.0)/max(2.0*half,1e-6);
+    return select(s.height,top+span*(s.height-top+rise*back)/(span+rise),(s.near_high||s.ahead<=0.0)&&s.height-top>back*span);
   }
   var depth=s.height;
   // A top point whose fall lies just behind it sits on a ramp still rising ahead. Crest runs end at 80 % of the fall;
@@ -121,36 +121,51 @@ struct TexhRay {anchor:vec3f,ld:vec3f,g:f32,c:f32,k:f32};
 fn texh_ray(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:vec3f)->TexhRay {
   let gap=base.base_hit==0u;let size=object.position_size.w;let n=scene_local_vector(object,base.query.n);
   let anchor=select(base.local,scene_local_vector(object,origin_delta+d*base.query.t)/size,gap);let ld=scene_local_vector(object,d);
-  let g=select(0.0,sign(dot(anchor-base.local,n))*base.query.gap/size,gap);
-  return TexhRay(anchor,ld,g,dot(ld,n),geometry_curvature(base,d,object));
+  let g=select(0.0,sign(dot(anchor-base.local,n))*base.query.gap/size,gap);let c=dot(ld,n);
+  // Over a sphere of the carrier's curvature the parabola keeps the ray's lowest point (exact at tangency, half the
+  // curvature at normal incidence, where it shallows only q²/4 below the straight ray).
+  return TexhRay(anchor,ld,g,c,geometry_curvature(base,d,object)*0.5*(1.0+sqrt(max(1.0-c*c,0.0))));
 }
-// Slope magnitude for offsets: |c|, steepened below .05 over carriers curving less than .005 per size, so flat grazing
-// offsets fade (z·c/max(c²,.0025)) instead of exploding; curved carriers keep the exact parabola, continuous in k and c.
-fn texh_slope(ray:TexhRay)->f32 {let c=abs(ray.c);return c+2.0*max(max(0.0025-0.5*ray.k,0.0)-c*c,0.0)/max(max(c,sqrt(ray.k)),1e-30);}
-// Ray offset from the anchor to height z, or to the lowest point when z is out of reach. Curved rays rising at the
-// anchor (gaps past their closest approach, rounding at tangency) take the entry root, which the descending form
-// meets at c=0: no flip near tangency. Flat ones keep their one crossing, ahead when leaving a back face.
+// Flat grazing fade: below |c|=.05 over carriers curving less than .005 per size, offsets fade to z·c/.0025 instead of
+// exploding. x: twice the slope excess, y: the scale dividing it; both 0 or finite, x=0 on curved carriers.
+fn texh_fade(ray:TexhRay)->vec2f {
+  let c=abs(ray.c);return vec2f(2.0*max(max(0.0025-0.5*ray.k,0.0)-c*c,0.0),max(c,sqrt(ray.k)));
+}
+// Offset to the faded map's lowest point (curved carriers: closest approach), capped one size below the anchor.
+fn texh_vertex(ray:TexhRay)->f32 {
+  let f=texh_fade(ray);let c=abs(ray.c);
+  return -ray.c*c*f.y/max(max(ray.k*(f.y*c+f.x),0.5*f.y*c*c*c),1e-30);
+}
+// Ray offset from the anchor to height z, or to the lowest point when z is out of reach. Descending, the entry
+// crossing; rising, the entry root blending into the crossing ahead as the carrier flattens (weight 2kz/q², 1 at c=0,
+// 0 on flat back faces): one formula, continuous across c=0 and every curvature, all denominators positive.
 fn texh_ray_at(ray:TexhRay,z:f32)->f32 {
-  let dz=z-ray.g;let a=texh_slope(ray);let r=ray.c*ray.c+2.0*ray.k*dz;let q=sqrt(max(r,0.0));
-  let near=select(-1.0,1.0,ray.c>0.0)*2.0*dz/max(a+q,1e-30);
-  return select(select(near,(-ray.c-q)/max(ray.k,1e-30),ray.c>0.0&&ray.k>=0.005),-ray.c*abs(ray.c)/max(ray.k*a,1e-30),r<0.0);
+  let dz=z-ray.g;let c=ray.c;let r=c*c+2.0*ray.k*dz;let q=sqrt(max(r,0.0));let f=texh_fade(ray);
+  let e=2.0*dz*f.y/max(f.y*(q+abs(c))+f.x,1e-30);
+  let x=saturate(2.0*ray.k*dz/max(max(q*q,c*c),1e-30))*4.0*dz*f.y/max(max(f.y*q+f.x,c*c),1e-30);
+  return select(select(-e,e-x,c>0.0),texh_vertex(ray),r<0.0);
 }
-// Lowest height the ray reaches: its closest approach over curved carriers; flat carriers keep descending.
-fn texh_lowest(ray:TexhRay)->f32 {return ray.g-0.5*ray.c*ray.c/max(ray.k,1e-30);}
+// Lowest height the ray reaches: its closest approach over curved carriers, at most one size below the anchor.
+fn texh_lowest(ray:TexhRay)->f32 {return ray.g-ray.c*ray.c/max(max(2.0*ray.k,ray.c*ray.c),1e-30);}
 fn texh_z(ray:TexhRay,t:f32)->f32 {return ray.g+t*(ray.c+0.5*ray.k*t);}
+// The ray's slope magnitude at offset t, floored like grazing footprints whatever the curvature.
+fn texh_slope_at(ray:TexhRay,t:f32)->f32 {return max(abs(fma(ray.k,t,ray.c)),0.01);}
 // Landing offset, and whether relief is met. Descending, at the wall depth; out of reach, at the lowest point (where the
 // wall depth lands as it sinks to it) while the wall depth or bottom's plateau lies within the margin under it; then,
 // over one more margin, onward to the rising far wall at offset wall if any (rise): landings never jump.
 fn texh_land(ray:TexhRay,depth:f32,plateau:f32,wall:f32,rise:bool,margin:f32)->vec2f {
-  let sink=(texh_lowest(ray)-max(depth,plateau))/max(margin,1e-30);
-  return vec2f(mix(texh_ray_at(ray,depth),wall,select(0.0,clamp(sink-1.0,0.0,1.0),rise)),f32(sink<1.0||rise));
+  let sink=texh_lowest(ray)-max(depth,plateau);
+  return vec2f(mix(texh_ray_at(ray,depth),wall,select(0.0,saturate((sink-margin)/max(margin,1e-7)),rise)),f32(sink<margin||rise));
 }
 // Share of the descent q→bottom made at distance x along it (inside only): the ray bows below their chord, a and b
 // being q's and bottom's offsets from its lowest point, so straight-descent walls land where the ray meets them.
 fn texh_warp(x:f32,reach:f32,a:f32,b:f32)->f32 {
-  let f=x/reach;let g=clamp(f,0.0,1.0);
-  return select(x,reach*g*(2.0*a+g*(b-a))/min(a+b,-1e-30),f==g);
+  let f=texh_share(x,reach);let g=saturate(f);
+  return select(x,reach*g*(2.0*a+g*(b-a))/min(a+b,-1e-12),f==g);
 }
+// x as a share of reach, at most TEXH_FAR either way: a vertical descent (reach→0) puts every wall beyond bottom.
+const TEXH_FAR=1024.0;
+fn texh_share(x:f32,reach:f32)->f32 {return x/max(max(reach,abs(x)/TEXH_FAR),1e-30);}
 // Foot under the ray at height z: q at the median plane (brick face, not tops), bottom at the deepest plane.
 fn texh_source(ray:TexhRay,base:SceneSample,object:SceneObject,z:f32)->SurfacePoint {
   return geometry_surface(fma(vec3f(texh_ray_at(ray,z)),ray.ld,ray.anchor),base,object);
@@ -186,11 +201,10 @@ fn texh_shading_context(sample:SceneSample,base:SceneSample,d:vec3f,object:Scene
   if(pixel_span>0.0&&sample.query.hit){
     let carrier=geometry_surface(base.local,base,object);let z=texh_height(carrier,carrier,context,true).height;
     let g=texh_gradient(base.local,texh_source(texh_ray(base,d,object,origin_delta),base,object,z),context,0.0);
-    // The map's slope at the landing: the carrier's own on flat carriers; on curved ones flatter toward the ray's
-    // lowest point, floored like grazing footprints.
-    let ray=texh_ray(base,d,object,origin_delta);let slope=ray.c+ray.k*(sample.query.t-base.query.t)/object.position_size.w;
-    let c=select(dot(base.query.n,d),-max(abs(slope),0.01),ray.k>=0.005);
-    context.footprint=texh_filter_footprint(base,sample.query.t,d,scene_world_vector(object,g),pixel_span,c);
+    // The ray's slope at the landing (the carrier's own when flat, flatter toward a curved ray's lowest point), floored
+    // like grazing footprints for every carrier.
+    let slope=texh_slope_at(texh_ray(base,d,object,origin_delta),(sample.query.t-base.query.t)/object.position_size.w);
+    context.footprint=texh_filter_footprint(base,sample.query.t,d,scene_world_vector(object,g),pixel_span,-slope);
   }
   return context;
 }
@@ -206,21 +220,22 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
   context.along=material_unit(ray.ld-carrier.n*dot(ray.ld,carrier.n),vec3f(0.0));
   // A chord above the deepest plane descends only to its lowest point: relief below it is never met.
-  let v=select(0.0,-ray.c*abs(ray.c)/max(ray.k*texh_slope(ray),1e-30),ray.k>0.0);
+  let v=select(0.0,texh_vertex(ray),ray.k>0.0);
   let lowest=texh_lowest(ray);var descent=shell;descent.deepest=max(shell.deepest,lowest);
   let tq=texh_ray_at(ray,shell.height);let tb=texh_ray_at(ray,descent.deepest);
   let q=geometry_surface(fma(vec3f(tq),ray.ld,ray.anchor),base,object);let bottom=geometry_surface(fma(vec3f(tb),ray.ld,ray.anchor),base,object);
-  let s=texh_height(q,bottom,context,false);let reach=max(length(bottom.p-q.p),1e-30);
+  let s=texh_height(q,bottom,context,false);let reach=length(bottom.p-q.p);
   var w=s;
   // From a groove toward a top, the far wall is the nearer of the runs from q and from bottom (capped or oblique runs).
   // Out of reach, walls past the lowest point lie on the rising side, met below; the descent never meets them.
   if(ray.k>0.0){
     if(!s.near_high&&s.far_high){w.ahead=min(s.ahead,reach-s.behind);}
-    w.ahead=select(texh_warp(w.ahead,reach,tq-v,tb-v),1e30,lowest>shell.deepest&&w.ahead>reach);
+    w.ahead=select(texh_warp(w.ahead,reach,tq-v,tb-v),TEXH_FAR*max(reach,w.ahead),lowest>shell.deepest&&w.ahead>reach);
     w.behind=reach-texh_warp(reach-s.behind,reach,tq-v,tb-v);
   }
-  // Unclamped at the lowest point: how far relief out of reach sinks under it blends the landing below.
-  let depth=relief*texh_depth(w,descent,reach);
+  // Unclamped at the lowest point: how far relief out of reach sinks under it blends the landing below. A descent
+  // shorter than its wall ramp is the column under q: steep rays land on q's own height.
+  let depth=relief*mix(s.height,texh_depth(w,descent,reach),saturate(reach/max(s.bevel,1e-4)));
   // Bottom's plateau: its largest-step level, q's others. Out of reach it is met within a pixel cone at the lowest
   // point, at most 1/128 of the relief range: unsampled relief rarely rises more. Past that point the ray climbs again:
   // over a groove there it meets the groove's far wall while still under the typical face, or q's if higher.
