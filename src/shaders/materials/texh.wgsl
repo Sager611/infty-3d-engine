@@ -114,6 +114,20 @@ fn texh_ramp(top:f32,span:f32,centre:f32,half:f32,lo:f32,hi:f32)->f32 {
   let k=(hi-lo)/max(centre+half-start,1e-6);let meet=(top-lo+k*start)/(span+k);
   return select(hi,top-meet*span,meet<=centre+half);
 }
+// The walls level at a foot: contour distances ahead of and behind it along the ray, stretched half ramp, top side.
+struct TexhProbe {ahead:f32,behind:f32,half:f32,high:bool};
+fn texh_probe(index:u32,foot:SurfacePoint,context:TexhContext)->TexhProbe {
+  let level=material_levels[index];let near=texh_sample(level,foot,context,material_lod(context.footprint,level.surface.x),true);
+  let size=context.object.position_size.w;let half=near.w*f32((level.identity.z>>2u)&63u)/8.0*level.surface.x/512.0;
+  return TexhProbe(near.y/size,near.z/size,half/size,near.x>=f32(level.identity.z>>24u)/255.0);
+}
+// First x where the line z0+g·x meets a floor lo, then a straight ramp from start to end up to hi, then hi; y: whether.
+fn texh_meet(z0:f32,g:f32,start:f32,end:f32,lo:f32,hi:f32)->vec2f {
+  let k=(hi-lo)/max(end-start,1e-7);let ramp=(z0-lo+k*start)/max(k-g,1e-7);let down=g<0.0;let fall=min(g,-1e-7);
+  if(z0+g*start<=lo||(k<=g&&!down)){return vec2f((lo-z0)/fall,f32(down));}
+  if(ramp>end){return vec2f((hi-z0)/fall,f32(down));}
+  return vec2f(ramp,1.0);
+}
 // Ray through the relief from anchor, its point at the base t: signed height g over the carrier and slope c along its
 // normal there (hit: crossing, g=0; gap: closest approach, c≈0 on closed carriers), curving k along the ray, so heights
 // follow z=g+cτ+kτ²/2. Hits and gaps share all else.
@@ -215,8 +229,9 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   if(gap&&(base.status!=0u||base.query.gap>=relief*material_spec(u32(object.params.w)).rise)){return base;}
   let ray=texh_ray(base,d,object,origin_delta);
   var context=texh_context(base,d,object,origin_delta,pixel_span);
-  // Direct walls, at most 4 lookups: heights at q (ray at the typical plane); for the largest-step level also its
-  // contour distance ahead of q, and its height and contour distance behind the deepest point. Others stay at q.
+  // Direct walls, at most 5 lookups: heights at q (ray at the typical plane); for the largest-step level also its
+  // contour distance ahead of q, its height and contour distance behind the deepest point, and both where the ray
+  // lands. Others stay at q.
   let carrier=geometry_surface(base.local,base,object);let shell=texh_height(carrier,carrier,context,true);
   context.along=material_unit(ray.ld-carrier.n*dot(ray.ld,carrier.n),vec3f(0.0));
   // A chord above the deepest plane descends only to its lowest point: relief below it is never met.
@@ -241,7 +256,18 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
   // over a groove there it meets the groove's far wall while still under the typical face, or q's if higher.
   let margin=min(pixel_span*(base.query.t/object.position_size.w+v),relief*(shell.highest-shell.deepest)/128.0);
   let wall=tb+s.onward;let face=relief*max(shell.height,select(shell.height,s.height,s.near_high));
-  let land=texh_land(ray,depth,relief*(s.height-s.near+s.far),wall,!s.far_high&&texh_z(ray,wall)<face+margin,margin);
+  var land=texh_land(ray,depth,relief*(s.height-s.near+s.far),wall,!s.far_high&&texh_z(ray,wall)<face+margin,margin);
+  // 5th sampling position: the walls level where the ray lands. Unless q and the landing both lie on tops, the ray climbs
+  // the next wall as the landing's own runs place it (far-off runs from q misplace walls crossed obliquely): a ramp
+  // from the groove floor to bottom's plateau, or past a groove the typical face, met by the ray's tangent there; faded
+  // in over descents one to two wall ramps long, as steep rays keep q's walls.
+  let front=-base.query.t/object.position_size.w;
+  if(s.structural&&land.y>0.5&&land.x>=front){
+    let p=texh_probe(s.index,geometry_surface(fma(vec3f(land.x),ray.ld,ray.anchor),base,object),context);
+    let m=ray.c+ray.k*land.x;let hs=sqrt(max(1.0-m*m,1e-6));let fine=s.height-s.near;let centre=select(p.ahead,-p.behind,p.high);
+    let x=texh_meet(texh_z(ray,land.x),m/hs,centre-p.half,centre+p.half,relief*(fine+s.groove),relief*(fine+select(shell.height,s.far,s.far_high)));
+    if(x.y>0.5&&(!s.near_high||!p.high)){land.x=max(land.x+saturate(reach/max(s.bevel,1e-4)-1.0)*x.x/hs,front);}
+  }
   // Land on the ray itself: gaps start at their ray point, not their witness.
   var result=base;result.query.t+=land.x*object.position_size.w;result.local=fma(vec3f(land.x),ray.ld,ray.anchor);
   result.query.p+=scene_world_vector(object,fma(vec3f(land.x),ray.ld,ray.anchor-base.local))*object.position_size.w;

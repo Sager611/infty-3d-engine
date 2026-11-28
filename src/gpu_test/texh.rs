@@ -811,7 +811,8 @@ fn silhouette_rays_meet_relief_like_the_reference_march() -> TestResult {
 #[test]
 fn close_brick_limb_rays_meet_relief_like_the_reference_march() -> TestResult {
     // The user's limb views, 40 px inside their carrier silhouette to 8 px out, versus the whole-chord march: holes
-    // are grazes no lookup samples; extras lie within the pixel-cone margin.
+    // are grazes no lookup samples; extras lie within the pixel-cone margin; walls re-measured where rays land keep t
+    // within 1 mm (median) and 5 mm (p90).
     for view in [
         [0.0, 0.0, 0.06],
         [0.0, 0.0, 0.02],
@@ -835,7 +836,7 @@ fn close_brick_limb_rays_meet_relief_like_the_reference_march() -> TestResult {
             rays.len()
         );
         assert!(
-            median < 2e-3 && tail < 1e-2 && off_ray < 1e-6,
+            median < 1e-3 && tail < 5e-3 && off_ray < 1e-6,
             "{view:?}: t median {median} m, p90 {tail} m, {off_ray} m off their rays"
         );
     }
