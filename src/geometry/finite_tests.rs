@@ -256,7 +256,7 @@ fn material_does_not_change_the_base_geometry_query() -> Result<(), Box<dyn std:
         o: [0.2, 0.3, 4.0],
         d: [0.0, 0.0, -1.0],
     };
-    for tag in [1, 2, 3, 4] {
+    for tag in [1, 2, 3] {
         let kind = Kind::from_tag(tag).ok_or("missing original geometry")?;
         let object = Object::new(1, kind, [0.0; 3], 1.0, if tag == 2 { 1.5 } else { 0.0 })?;
         let painted = Prepared::new(&[object.with_material(leaf)])?;

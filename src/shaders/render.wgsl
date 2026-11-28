@@ -43,7 +43,7 @@ fn resolved_object(index: u32) -> SceneObject {
 }
 
 fn outline_eligible(sample: SceneSample, selected: bool, thickness: f32) -> bool {
-  return selected && (sample.kind == 1u || sample.kind == 2u || sample.kind == 4u || sample.kind==5u) &&
+  return selected && (sample.kind == 1u || sample.kind == 2u || sample.kind==5u) &&
     sample.base_hit==0u && !sample.query.hit && sample.status<2u && sample.query.gap < thickness;
 }
 

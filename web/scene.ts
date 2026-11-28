@@ -16,7 +16,7 @@ import {
 } from "./rotation.ts";
 
 type Position = Vector;
-type SceneKind = "sphere" | "goursat" | "plane" | "crystal" | "finite";
+type SceneKind = "sphere" | "goursat" | "plane" | "finite";
 
 type ReadonlySceneObject = Readonly<{
 	id: number;
@@ -83,12 +83,6 @@ const DESCRIPTORS: ShapeDescriptorMap = {
 		size: { min: MIN_SIZE, max: MAX_SIZE },
 		parameter: { min: 0, max: 0 },
 	},
-	crystal: {
-		kind: "crystal",
-		position: ["x", "y", "z"],
-		size: { min: MIN_SIZE, max: MAX_SIZE },
-		parameter: { min: 0, max: 0 },
-	},
 	finite: {
 		kind: "finite",
 		position: ["x", "y", "z"],
@@ -101,7 +95,6 @@ const KIND_TAGS: Readonly<Record<SceneKind, number>> = {
 	sphere: 1,
 	goursat: 2,
 	plane: 3,
-	crystal: 4,
 	finite: 5,
 };
 
@@ -114,9 +107,6 @@ const tagKind = (tag: number): SceneKind | undefined => {
 	}
 	if (tag === KIND_TAGS.plane) {
 		return "plane";
-	}
-	if (tag === KIND_TAGS.crystal) {
-		return "crystal";
 	}
 	if (tag === KIND_TAGS.finite) {
 		return "finite";

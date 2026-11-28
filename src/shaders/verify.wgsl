@@ -15,7 +15,7 @@ struct ProbeResult {
 @group(0) @binding(4) var<storage, read_write> results: array<ProbeResult>;
 
 @compute @workgroup_size(1)
-fn verify_crystal_render(@builtin(global_invocation_id) id: vec3u) {
+fn verify_surface_side(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rays)) { return; }
   let input = rays[id.x];
   let kind = u32(input.o.x);
@@ -290,7 +290,7 @@ fn verify_scene(@builtin(global_invocation_id) id: vec3u) {
   );
   results[2u * id.x + 1u] = ProbeResult(
     vec4f(ray_point.z, sample.local),
-    vec4f(sample.error, select(0.0, 1.0, (kind == 2u || kind == 4u || kind == 5u) && !q.hit), f32(sample.status), 0.0),
+    vec4f(sample.error, select(0.0, 1.0, (kind == 2u || kind == 5u) && !q.hit), f32(sample.status), 0.0),
     vec4f(0.0), vec4f(0.0)
   );
 }
@@ -401,21 +401,4 @@ fn verify_spatial_gaps(@builtin(global_invocation_id) id: vec3u) {
   results[id.x] = ProbeResult(vec4f(outlines, gap, 0.0, 0.0), vec4f(0.0), vec4f(0.0), vec4f(0.0));
 }
 
-@compute @workgroup_size(1)
-fn verify_crystal(@builtin(global_invocation_id) id: vec3u) {
-  if (id.x >= arrayLength(&rays)) { return; }
-  let ray = rays[id.x];
-  let q = crystal(ray.o.xyz, ray.d.xyz);
-  results[id.x] = ProbeResult(
-    vec4f(select(0.0, 1.0, q.query.hit), q.query.t, q.query.gap, q.query.uv.x),
-    vec4f(q.query.uv.y, q.query.p), vec4f(q.query.n, q.gap_lower),
-    vec4f(q.error, f32(q.status), 0.0, 0.0));
-}
-@compute @workgroup_size(1)
-fn verify_crystal_point(@builtin(global_invocation_id) id: vec3u) {
-  if (id.x >= arrayLength(&rays)) { return; }
-  let q = crystal_closest(rays[id.x].o.xyz);
-  results[id.x] = ProbeResult(vec4f(q.upper, q.error, 0.0, 0.0),
-    vec4f(q.p, 0.0), vec4f(q.n, 0.0), vec4f(q.uv, 0.0, 0.0));
-}
 

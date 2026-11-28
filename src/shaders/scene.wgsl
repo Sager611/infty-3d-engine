@@ -66,9 +66,8 @@ fn scene_canonical(local_o:vec3f,d:vec3f,obj:SceneObject,exact:bool)->SceneSampl
   var gap_lower=0.0;var error=0.0;var status=3u;var pending=Pending(0.0,false);
   if(kind==1u){
     query=sphere_at(local_o,d,vec3f(0.0),1.0);gap_lower=query.gap;status=0u;
-  }else if(kind==2u||kind==4u){
-    var canonical:GeometryQuery;
-    if(kind==2u){canonical=goursat(local_o,d,obj.params.x);}else{canonical=crystal(local_o,d);}
+  }else if(kind==2u){
+    let canonical=goursat(local_o,d,obj.params.x);
     query=canonical.query;gap_lower=canonical.gap_lower;error=canonical.error;status=canonical.status;
   }else if(kind==5u){
     var canonical:GeometryQuery;

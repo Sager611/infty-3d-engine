@@ -34,7 +34,7 @@ fn carrier_flag_has_no_metal_partial_word_padding() -> TestResult {
 fn material_bumps_keep_the_carrier_side_across_view_tangencies() -> TestResult {
     let mut rays = Vec::new();
     let mut expected = Vec::new();
-    for kind in 1_u8..=5 {
+    for kind in [1_u8, 2, 3, 5] {
         for side in [-1.0, 1.0] {
             for axis in 0..2 {
                 for z in [-0.0001, 0.0001] {
@@ -45,12 +45,12 @@ fn material_bumps_keep_the_carrier_side_across_view_tangencies() -> TestResult {
                     ray[4 + axis] = 1.0;
                     ray[6] = z;
                     rays.push(ray);
-                    expected.push((axis, if kind >= 4 { side } else { 1.0 }));
+                    expected.push((axis, if kind == 5 { side } else { 1.0 }));
                 }
             }
         }
     }
-    let q = run("verify_crystal_render", &rays, rays.len() * 16)?;
+    let q = run("verify_surface_side", &rays, rays.len() * 16)?;
     for (i, (row, (axis, side))) in q.chunks_exact(16).zip(expected).enumerate() {
         assert!(row[axis + 1] * side > 0.9999, "flipped bump {i}: {row:?}");
         assert!(row[3].abs() < 0.0002, "lost detail {i}: {row:?}");
@@ -466,7 +466,7 @@ fn direct_texh_uses_the_carrier_height_without_searching_for_a_root() -> TestRes
 fn texh_shares_shifted_uv_rgb_and_normals_without_geometry_switches() -> TestResult {
     let source = include_str!("../shaders/materials/texh.wgsl");
     assert!(
-        ["plane_", "sphere_", "goursat_", "crystal_", "identity.y"]
+        ["plane_", "sphere_", "goursat_", "identity.y"]
             .iter()
             .all(|name| !source.contains(name))
     );

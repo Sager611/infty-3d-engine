@@ -7,7 +7,6 @@ fn geometry_surface(point:vec3f,base:SceneSample,object:SceneObject)->SurfacePoi
   else if(kind==3u){uv+=p.xz-base.local.xz;}
   else if(kind==1u){p=material_unit(point,n);uv=sphere_uv(p);}
   else if(kind==2u){uv+=goursat_uv(p-base.local,n);}
-  else if(kind==4u){let foot=crystal_closest(point);p=foot.p;uv=foot.uv;}
   let valid=kind!=5u||(all(uv>=vec2f(0.0))&&all(uv<=vec2f(1.0)));
   return SurfacePoint(p,n,uv,valid);
 }

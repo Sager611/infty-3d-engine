@@ -38,7 +38,7 @@ fn surface_slope_step(step:f32,quantum:f32)->f32 {return max(step,16.0*abs(quant
 // Face the carrier, not individual bumps crossing the view tangent.
 fn surface_normal(normal: vec3f, carrier: vec3f, ray: vec3f, kind: u32) -> vec3f {
   let n = normalize(normal);
-  return select(n, -n, (kind == 4u || kind==5u) && dot(carrier, ray) > 0.0);
+  return select(n, -n, kind==5u && dot(carrier, ray) > 0.0);
 }
 
 fn surface_shade(
@@ -67,10 +67,8 @@ fn surface_shade(
   } else if (kind == 2u) {
     base = mix(vec3f(0.37, 0.16, 0.18), vec3f(0.86, 0.28, 0.31),
       surface_cell(local.yz, 2.0));
-  } else if (kind == 4u) {
-    base = vec3f(0.28, 0.68, 0.67);
   }
-  if (mode == 2u && kind != 4u) {
+  if (mode == 2u) {
     let rho = surface_rho(q, local, ray, height, size, sphere);
     if (sphere) {
       base = mix(vec3f(0.31, 0.40, 0.48), vec3f(0.48, 0.55, 0.59),

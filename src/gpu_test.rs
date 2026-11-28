@@ -2,7 +2,6 @@ use std::error::Error;
 
 use crate::math::{Ray, footprint, plane, pureweight, sphere};
 
-mod crystal;
 mod finite;
 mod finite_shadow;
 mod goursat;

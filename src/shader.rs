@@ -11,8 +11,6 @@ const SOURCE: &str = concat!(
     '\n',
     include_str!("shaders/geometry/goursat.wgsl"),
     '\n',
-    include_str!("shaders/geometry/crystal.wgsl"),
-    '\n',
     include_str!("shaders/geometry/finite.wgsl"),
     '\n',
     include_str!("shaders/geometry/surface.wgsl"),

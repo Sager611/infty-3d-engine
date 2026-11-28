@@ -315,11 +315,11 @@ mod tests {
     fn all_kinds_round_trip_and_normalize_signed_zero() -> Result<(), SceneError> {
         let packet = [
             1.0, 1.0, -0.0, 1.0, 2.0, 1.0, 0.0, 0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 0.5, 1.5, 0.0, 3.0,
-            3.0, 6.0, 7.0, 8.0, 2.0, -0.0, 0.0, 4.0, 4.0, 0.0, 0.0, 0.0, 1.0, -0.0, 0.0,
+            3.0, 6.0, 7.0, 8.0, 2.0, -0.0, 0.0, 4.0, 5.0, 0.0, 0.0, 0.0, 1.0, -0.0, 0.0,
         ];
         let objects = parse_objects(&packet)?;
         assert_eq!(objects.len(), 4);
-        assert_eq!(objects[3].kind(), Kind::CrystallineCluster);
+        assert_eq!(objects[3].kind(), Kind::FinitePlane);
         assert_eq!(objects[3].parameter().to_bits(), 0.0f64.to_bits());
         assert_eq!(objects[0].position()[0].to_bits(), 0.0f64.to_bits());
         assert_eq!(objects[2].parameter().to_bits(), 0.0f64.to_bits());

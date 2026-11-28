@@ -128,12 +128,7 @@ impl SceneSample {
             self.local[1],
             self.local[2],
             self.error,
-            if !self.sample.hit
-                && matches!(
-                    self.kind,
-                    Kind::Goursat | Kind::CrystallineCluster | Kind::FinitePlane
-                )
-            {
+            if !self.sample.hit && matches!(self.kind, Kind::Goursat | Kind::FinitePlane) {
                 1.0
             } else {
                 0.0

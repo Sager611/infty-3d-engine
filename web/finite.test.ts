@@ -152,10 +152,11 @@ test("Leaf preset and reusable finite carrier are exposed accessibly", async ():
 test("Old material and geometry tags stay unchanged", (): void => {
 	expect(materialKind(0)).toBe("steel");
 	expect(materialKind(1)).toBe("brick");
-	expect([1, 2, 3, 4].map(tagKind)).toEqual([
+	expect([1, 2, 3, 4, 5].map(tagKind)).toEqual([
 		"sphere",
 		"goursat",
 		"plane",
-		"crystal",
+		undefined,
+		"finite",
 	]);
 });

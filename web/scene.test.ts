@@ -75,7 +75,6 @@ describe("scene model", () => {
 			"sphere",
 			"goursat",
 			"plane",
-			"crystal",
 			"finite",
 		]);
 		expect(DESCRIPTORS.sphere.size).toEqual({ min: 0.01, max: 4 });

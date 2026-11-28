@@ -3,7 +3,7 @@ pub mod finite;
 pub mod point;
 use crate::diagnostic::{Recorder, Tag};
 use crate::math::{
-    Ray, crystal,
+    Ray,
     goursat_impl::GoursatError,
     goursat_traced, plane, sphere_at,
     types::{GeometrySample, finite3},
@@ -15,7 +15,6 @@ pub enum Kind {
     Sphere = 1,
     Goursat = 2,
     Plane = 3,
-    CrystallineCluster = 4,
     FinitePlane = 5,
 }
 
@@ -25,7 +24,6 @@ impl Kind {
             1 => Some(Self::Sphere),
             2 => Some(Self::Goursat),
             3 => Some(Self::Plane),
-            4 => Some(Self::CrystallineCluster),
             5 => Some(Self::FinitePlane),
             _ => None,
         }
@@ -80,7 +78,7 @@ impl Geometry {
         let valid = match kind {
             Kind::Goursat => (1.05..=1.95).contains(&parameter),
             Kind::FinitePlane => matches!(parameter, 0.0 | 1.0 | 2.0),
-            Kind::Sphere | Kind::Plane | Kind::CrystallineCluster => parameter == 0.0,
+            Kind::Sphere | Kind::Plane => parameter == 0.0,
         };
         if !valid || !parameter.is_finite() {
             return Err(Error::InvalidParameter);
@@ -108,7 +106,6 @@ impl Geometry {
             Kind::Sphere => Some(1.0),
             Kind::Goursat => Some((3.0 + (3.0 * self.parameter).sqrt()).sqrt()),
             Kind::Plane => None,
-            Kind::CrystallineCluster => Some(crystal::RADIUS),
             Kind::FinitePlane => Some(1.5),
         }
     }
@@ -124,13 +121,11 @@ impl Geometry {
         let sample = match self.kind {
             Kind::Sphere => sphere_at(ray, [0.0; 3], 1.0),
             Kind::Plane => plane(ray, [0.0; 3], [0.0, 1.0, 0.0]),
-            Kind::Goursat | Kind::CrystallineCluster | Kind::FinitePlane => {
+            Kind::Goursat | Kind::FinitePlane => {
                 let result = if self.kind == Kind::Goursat {
                     goursat_traced(ray, self.parameter, trace).map_err(Error::Kernel)?
-                } else if self.kind == Kind::FinitePlane {
-                    finite::query(ray, self.parameter)?
                 } else {
-                    crystal::query(ray)?
+                    finite::query(ray, self.parameter)?
                 };
                 let result = checked(result)?;
                 record_ray(result, trace, Tag::Ray);
@@ -198,15 +193,21 @@ pub fn checked(result: GeometrySample) -> Result<GeometrySample, Error> {
 }
 
 #[cfg(test)]
-#[path = "geometry/crystal_tests.rs"]
-mod crystal_tests;
-#[cfg(test)]
 #[path = "geometry/finite_tests.rs"]
 mod finite_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn geometry_tags_stay_stable_and_retired_tags_stay_rejected() {
+        assert_eq!(
+            [1, 2, 3, 5].map(Kind::from_tag),
+            [Kind::Sphere, Kind::Goursat, Kind::Plane, Kind::FinitePlane].map(Some)
+        );
+        assert_eq!([0, 4, 6].map(Kind::from_tag), [None; 3]);
+    }
 
     #[test]
     fn every_geometry_returns_a_gap_with_a_surface_witness() -> Result<(), Error> {
@@ -220,7 +221,6 @@ mod tests {
             (Kind::Plane, 0.0),
             (Kind::FinitePlane, 0.0),
             (Kind::Goursat, 1.5),
-            (Kind::CrystallineCluster, 0.0),
         ] {
             let result = Geometry::new(kind, parameter)?.query(ray)?;
             let sample = result.sample;
@@ -239,12 +239,7 @@ mod tests {
 
     #[test]
     fn every_kernel_rejects_invalid_rays() -> Result<(), Error> {
-        for kind in [
-            Kind::Sphere,
-            Kind::Plane,
-            Kind::Goursat,
-            Kind::CrystallineCluster,
-        ] {
+        for kind in [Kind::Sphere, Kind::Plane, Kind::Goursat] {
             let parameter = if kind == Kind::Goursat { 1.5 } else { 0.0 };
             let geometry = Geometry::new(kind, parameter)?;
             for ray in [

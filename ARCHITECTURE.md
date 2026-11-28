@@ -24,7 +24,7 @@ Pure values describe the scene; thin adapters own browser and GPU effects.
 
 ## Data boundaries
 
-Object stride8: `[id,kind,px,py,pz,size,parameter,material]`. Kinds1/2/3/4 are sphere/Goursat/plane/crystalline cluster. Empty scenes are valid; maximum65,536 objects, unique IDs1..u32::MAX, position components[-20,20], size[0.01,4], Goursat beta[1.05,1.95]. Other geometry parameters are zero; material0/1 is brushed steel/red brickwork. Legacy zero-padding scenes select steel. Reject invalid packets; do not silently clamp them.
+Object stride8: `[id,kind,px,py,pz,size,parameter,material]`. Kinds1/2/3/5 are sphere/Goursat/plane/finite plane; retired kind4 is rejected. Empty scenes are valid; maximum65,536 objects, unique IDs1..u32::MAX, position components[-20,20], size[0.01,4], Goursat beta[1.05,1.95]. Other geometry parameters are zero; material0/1 is brushed steel/red brickwork. Legacy zero-padding scenes select steel. Reject invalid packets; do not silently clamp them.
 
 Camera6: `[yaw,pitch,distance,targetX,targetY,targetZ]`. Normalize finite yaw; constrain pitch[-1.45,1.45], distance[0.0001,100], target[-1024,1024]. Camera travel is independent of the scene's[-20,20] editing bounds; the finite camera limit remains explicit. Query screen4 is `[width,height,x,y]`; browser picks floor/clamp CSS coordinates before pixel-center ray construction.
 
@@ -38,21 +38,17 @@ Query24: `[id,kind,hit,t,gapLower,gapUpper,px,py,pz,nx,ny,nz,u,v,rayX,rayY,rayZ,
 
 ## Geometry and display
 
-Extension seam: `geometry.rs` supplies validated canonical definitions, analytic queries and an optional enclosing radius. Add a kind/tag, validated parameters, its CPU kernel and matching WGSL dispatch, then web metadata/material mapping. Transforms, hierarchy, shared-geometry interning and selection stay unchanged. This is a compiled analytic-kernel interface, not runtime shader loading; sphere, quartic, plane and crystalline cluster share it.
+Extension seam: `geometry.rs` supplies validated canonical definitions, analytic queries and an optional enclosing radius. Add a kind/tag, validated parameters, its CPU kernel and matching WGSL dispatch, then web metadata/material mapping. Transforms, hierarchy, shared-geometry interning and selection stay unchanged. This is a compiled analytic-kernel interface, not runtime shader loading; sphere, quartic, plane and finite plane share it.
 
 Primary GPU traversal expands branch bounds for the maximum possible pixel outline cone and the visible gap halo; ray-only rejection is reserved for shadows and CPU hit queries. Thus misses just outside an object's ray bounds remain candidates. Slab tests explicitly handle parallel rays and inflate for rounding. Overlapping geometry or many infinite planes can degrade to exhaustive traversal; no acceleration changes exact first/all ordering or inspection cardinality.
 
 Sphere/two-sided-plane queries are analytic. The Goursat surface is `sum((p*p-1)^2)-beta=0`, enclosed by radius `sqrt(3+sqrt(3*beta))`. Cubic stationary roots isolate quartic intervals; finite refinement is not spatial ray marching.
 
-Crystalline cluster(kind4, parameter0, radius1.75) retains three intersecting surfaces in exact cyclic XYZ frames, without Boolean-solid clipping. Each meridian has twenty bands `s=2^-20..2^-1`, with vertices `(s,0.5s),(1.5s,3s),(2s,s)`, plus a straight apex cap from`(0,0)`to`(2^-20,2^-21)`; endpoints are included. Detail is finite. CPU/GPU share this model and directly address neighboring binary exponents. New cluster kernels use closed segment projections and analytic quadratics, without loops, recursion, traversal or iterative solving; existing quartic refinement and scene traversal are unchanged.
-
-Cluster closest queries evaluate27 segment candidates with outward bounds and surface-witness errors; budgets below27 return unresolved without work/witnesses. Only the exact origin proves a unique closest coordinate; other multiplicities remain unknown. Rays clip cone/cylinder envelopes and retain coincident boundary contacts before testing fixed neighboring patches. Miss lower bounds come from the enclosure; upper bounds use actual surface witnesses, never a claimed exact ray gap. Float32 upper allowances include a1e-18 canonical squared-length-underflow floor; ambiguous queries remain uncertain. Exhaustive floating-point models, exact-dyadic apex checks and analytic edge cases validate sampled behavior, not all-input numerical correctness.
-
 Sphere/plane gaps are analytic within floating-point precision. Quartic misses have an enclosing-sphere lower bound and a bracketed surface-witness upper bound, including position/rounding allowance. Numerical error is separate from interval width: never add it to the upper bound again. Bounds can be loose; uncertain results are labeled, not called exact closest distances.
 
-Selected sphere/quartic/cluster misses qualify for an outline only when their valid upper gap is below the pixel-scale thickness and their witness passes the depth test. No duplicate enlarged surfaces or hit fills. Loose witnesses can under-cover; planes have no finite silhouette. Internal shader status2/3 means uncomputed/invalid and cannot qualify.
+Selected sphere/quartic/finite-plane misses qualify for an outline only when their valid upper gap is below the pixel-scale thickness and their witness passes the depth test. No duplicate enlarged surfaces or hit fills. Loose witnesses can under-cover; planes have no finite silhouette. Internal shader status2/3 means uncomputed/invalid and cannot qualify.
 
-Modes0/1/2/3 are UV/Gap/Detail/Materials; +4 (transient unchecked Texh) draws texh at carrier depth. Canonical UVs and analytic footprints apply object size once. Detail blends three adjacent hashed power-of-two grids with finite precision/LOD limits, not texture images or literally infinite detail. Cluster uses two-sided geometric normals, not the procedural checker.
+Modes0/1/2/3 are UV/Gap/Detail/Materials; +4 (transient unchecked Texh) draws texh at carrier depth. Canonical UVs and analytic footprints apply object size once. Detail blends three adjacent hashed power-of-two grids with finite precision/LOD limits, not texture images or literally infinite detail. Finite planes use two-sided geometric normals, not the procedural checker.
 
 Materials alter reflectance/normal detail and rendered texh depth/silhouettes, never analytic geometry, queries or camera easing. Per-instance selection persists in the saved packet without splitting shared geometry. Brushed steel is metallic; brick/mortar is dielectric. Four512² linear-RGB/relief tiles per finish cover420/42/4.2/0.42mm; finest texels are0.82µm. Credited optical/SEM derivatives and authored fields approximate morphology, not calibrated height/photometry; see`src/material/REFERENCES.md`. Brick0's twelve-face2×6 atlas supplies running bond, mortar borders, stable flips/tint; finer levels show pores/minerals, never miniature bricks. Clay albedo excludes pore masks; artistic cavity occlusion/normal relief supplies contrast without clipping floor variation. Steel relief and anisotropic shading share the V brush axis.
 
@@ -127,3 +123,4 @@ Run `./check`: strict native/WASM compilation and lint, Rust/Naga/real-GPU tests
 | 2026-11-09 | Assistant | Documented final atlas/phase layout, relief filtering, lighting and display encoding | Match validated appearance-only implementation and limits |
 | 2026-11-27 | Assistant | Documented the flat-texh mode bit | Keep the display-mode interface explicit |
 | 2026-11-27 | Assistant | Documented rendered relief silhouettes | Texh gaps now hit where relief reaches the ray |
+| 2026-11-28 | Assistant | Removed the crystalline cluster | User request |

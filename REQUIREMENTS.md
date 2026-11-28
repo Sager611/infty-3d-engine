@@ -3,7 +3,6 @@
 - Thousands of mixed, instanced objects, with a web selector to load a showcase and return to the default scene.
 - Extensible geometry; no ray marching.
 - Materials are data: any material, texture, texh relief or order count runs through shared code; material rules come from the material table, never material-specific branches.
-- Three intersecting ridged cones with genuine multiscale geometry, CPU/GPU queries and web creation. New cluster kernels use fixed direct analytic work: no iteration, recursion or traversal.
 - Materials view with selectable brushed steel and red brickwork/mortar. Each begins with four repeating512×512 albedo/relief levels,10× apart; finer levels reveal grooves, pores and mineral grains, not miniature bricks. Hide tile repeats: no visible period or mirror axis at any distance. Support additional coarser/finer scales; visually check sphere, plane and Goursat up close through microscopic distances. Ground appearance in inspected references; keep height/colour fixed in object space during camera movement; preserve carrier geometry, picking and navigation.
 - Intuitive add/duplicate/delete controls. Duplicate selected instances in place with fresh IDs, matching geometry/pose/material, selected copies and one-step undo. XYZ positions use numeric0.001 increments (10× finer), direct typing and wheel nudging.
 - Selected geometry: centered XYZ translation arrows and between-axis rotation arcs, Unreal-style; Shift doubles either drag. Persist normalized quaternion poses without breaking legacy scenes/URLs; keep CPU/GPU queries, bounds, cutouts, normals, materials and shadows in the same instance frame.
@@ -20,6 +19,7 @@
 
 | When | Who | What | Why |
 | --- | --- | --- | --- |
+| 2026-11-28 | User | Remove the crystalline cluster geometry | Unwanted |
 | 2026-11-27 | User | Tops re-measured where rays land, no extra lookups | Grazing rays met rough brick tops late |
 | 2026-11-27 | User | 5th sampling position: walls re-measured where rays land | Close brick limbs still showed rectangles and doubled contours |
 | 2026-11-27 | User | Continuous, finite relief offsets and footprints | Reviewers found root flips, unfloored grazing footprints and overflow |
