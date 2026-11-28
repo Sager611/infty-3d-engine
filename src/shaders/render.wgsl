@@ -50,11 +50,11 @@ fn outline_eligible(sample: SceneSample, selected: bool, thickness: f32) -> bool
 // One total order for every pick: distance, then object id.
 fn render_before(t:f32,id:u32,than_t:f32,than_id:u32)->bool {return t<than_t||(t==than_t&&id<than_id);}
 struct RenderCarrier {sample:SceneSample,object:SceneObject,delta:vec3f};
-fn render_carrier(index:u32,origin:vec3f,direction:vec3f)->RenderCarrier {
+fn render_carrier(index:u32,origin:vec3f,direction:vec3f,exact:bool)->RenderCarrier {
   let object=resolved_object(index);
   let delta=scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),object);
   let local_o=scene_local_vector(object,delta/object.position_size.w);
-  return RenderCarrier(scene_canonical(local_o,scene_local_vector(object,direction),object,false),object,delta);
+  return RenderCarrier(scene_canonical(local_o,scene_local_vector(object,direction),object,exact),object,delta);
 }
 @compute @workgroup_size(8, 8)
 fn draw(@builtin(global_invocation_id) id: vec3u) {
@@ -95,7 +95,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
   let relief=f32(frame_params.screen.z<4u);
   var nearest_index=0u;
   var behind_t=0.0;var behind_error=0.0;var behind_index=0u;var behind_id=0u;var behind_hit=false;
-  var candidate_t=0.0;var candidate_index=0u;var candidate_id=0u;var candidate_found=false;
+  var candidate_t=0.0;var candidate_index=0u;var candidate_id=0u;var candidate_found=false;var candidate_witness=false;
 
   var i = 0u;
   while (i < count) {
@@ -128,6 +128,7 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
       }
       if((material_view||material_field(object.params.w))&&(!candidate_found||render_before(carrier.query.t,carrier.id,candidate_t,candidate_id))&&scene_relief_candidate(carrier,local_o,local_d,object,relief)){
         candidate_t=carrier.query.t;candidate_index=i;candidate_id=carrier.id;candidate_found=true;
+        candidate_witness=material_field(object.params.w)&&carrier.base_hit==0u;
       }
 
       if (display_gap && object.identity.y != 3u && !carrier.query.hit &&
@@ -154,13 +155,15 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     let own=nearest_hit&&candidate_index==nearest_index;
     let back_t=select(nearest_t,behind_t,own);let back_id=select(nearest.id,behind_id,own);let back_hit=select(nearest_hit,behind_hit,own);
     var source=RenderCarrier(nearest,nearest_object,scene_origin_delta(origin,vec3f(frame_params.origin.w,frame_params.right.w,frame_params.up.w),nearest_object));
-    if(!own){source=render_carrier(candidate_index,origin,direction);}
-    let relief_sample=material_texh_depth(source.sample,direction,source.object,source.delta,pixel_span,relief);
+    // A field near miss takes the exact witness query (coverage and height under its closest point, two lookups).
+    if(!own){source=render_carrier(candidate_index,origin,direction,candidate_witness);}
+    var relief_sample=source.sample;
+    if(!candidate_witness){relief_sample=material_texh_depth(source.sample,direction,source.object,source.delta,pixel_span,relief);}
     if(relief_sample.query.hit&&(!back_hit||!render_before(back_t,back_id,relief_sample.query.t,relief_sample.id))){
       nearest=relief_sample;nearest_carrier=source.sample;nearest_object=source.object;nearest_hit=true;
     }else if(own){
       nearest_hit=behind_hit;
-      if(behind_hit){let flat=render_carrier(behind_index,origin,direction);nearest=flat.sample;nearest_carrier=flat.sample;nearest_object=flat.object;}
+      if(behind_hit){let flat=render_carrier(behind_index,origin,direction,false);nearest=flat.sample;nearest_carrier=flat.sample;nearest_object=flat.object;}
     }
     nearest_t=nearest.query.t;
   }

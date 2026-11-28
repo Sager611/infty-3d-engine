@@ -49,7 +49,10 @@ fn scene_leaf_relevant(local_o:vec3f,local_d:vec3f,object:SceneObject,limit:f32,
 // Relief may land on this object: a carrier hit, or a near miss under its highest relief; a card's relief slab
 // must also cross its coverage outline. Lookup-free, so traversal cost stays independent of overlaps.
 fn scene_relief_candidate(carrier:SceneSample,local_o:vec3f,local_d:vec3f,object:SceneObject,relief:f32)->bool {
-  if(carrier.base_hit==0u&&(carrier.status!=0u||carrier.query.gap>=relief*material_spec(u32(object.params.w)).rise)){return false;}
+  // Fields keep their witness rule: a near miss whose lower gap lies within the field's height reach.
+  let field=material_field(object.params.w);
+  let bound=relief*select(material_spec(u32(object.params.w)).rise,fi_up(hf_reach())*object.position_size.w,field);
+  if(carrier.base_hit==0u&&(carrier.status!=0u||select(carrier.query.gap,carrier.gap_lower,field)>=bound)){return false;}
   if(!material_field(object.params.w)||object.identity.y!=5u){return true;}
   let o=plane_frame(local_o,scene_axis(object));let d=plane_frame(local_d,scene_axis(object));
   if(abs(d.z)<1e-6){return true;}
