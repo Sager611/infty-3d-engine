@@ -114,12 +114,15 @@ fn texh_ramp(top:f32,span:f32,centre:f32,half:f32,lo:f32,hi:f32)->f32 {
   let k=(hi-lo)/max(centre+half-start,1e-6);let meet=(top-lo+k*start)/(span+k);
   return select(hi,top-meet*span,meet<=centre+half);
 }
-// The walls level at a foot: contour distances ahead of and behind it along the ray, stretched half ramp, top side.
-struct TexhProbe {ahead:f32,behind:f32,half:f32,high:bool};
+// The walls level at a foot: contour distances ahead of and behind it along the ray, stretched half ramp, top side,
+// height.
+struct TexhProbe {ahead:f32,behind:f32,half:f32,high:bool,height:f32};
 fn texh_probe(index:u32,foot:SurfacePoint,context:TexhContext)->TexhProbe {
-  let level=material_levels[index];let near=texh_sample(level,foot,context,material_lod(context.footprint,level.surface.x),true);
+  let level=material_levels[index];let lod=material_lod(context.footprint,level.surface.x);
+  let near=texh_sample(level,foot,context,lod,true);let material=u32(context.object.params.w);
+  let datum=select(level.mean.a,1.0,(level.identity.z&1u&(MATERIAL_CARVE>>material))!=0u);
   let size=context.object.position_size.w;let half=near.w*f32((level.identity.z>>2u)&63u)/8.0*level.surface.x/512.0;
-  return TexhProbe(near.y/size,near.z/size,half/size,near.x>=f32(level.identity.z>>24u)/255.0);
+  return TexhProbe(near.y/size,near.z/size,half/size,near.x>=f32(level.identity.z>>24u)/255.0,(near.x-datum)*level.surface.y*material_visible(lod)/size);
 }
 // First x where the line z0+g·x meets a floor lo, then a straight ramp from start to end up to hi, then hi; y: whether.
 fn texh_meet(z0:f32,g:f32,start:f32,end:f32,lo:f32,hi:f32)->vec2f {
@@ -267,6 +270,11 @@ fn material_texh_depth(base:SceneSample,d:vec3f,object:SceneObject,origin_delta:
     let m=ray.c+ray.k*land.x;let hs=sqrt(max(1.0-m*m,1e-6));let fine=s.height-s.near;let centre=select(p.ahead,-p.behind,p.high);
     let x=texh_meet(texh_z(ray,land.x),m/hs,centre-p.half,centre+p.half,relief*(fine+s.groove),relief*(fine+select(shell.height,s.far,s.far_high)));
     if(x.y>0.5&&(!s.near_high||!p.high)){land.x=max(land.x+saturate(reach/max(s.bevel,1e-4)-1.0)*x.x/hs,front);}
+    // On tops, a landing two ramps inside its top under that top's own wall height met it earlier: half way back to
+    // where the ray meets that height (whole steps overshoot on rough tops).
+    else if(s.near_high&&p.high&&min(p.ahead,p.behind)>2.0*p.half){
+      let h=relief*(fine+p.height);let t=texh_ray_at(ray,h);if(h>=lowest&&t<land.x){land.x=max(0.5*(land.x+t),front);}
+    }
   }
   // Land on the ray itself: gaps start at their ray point, not their witness.
   var result=base;result.query.t+=land.x*object.position_size.w;result.local=fma(vec3f(land.x),ray.ld,ray.anchor);
